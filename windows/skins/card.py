@@ -59,7 +59,11 @@ class Section:
         self.value.config(text="--" if pct is None else f"{pct:.0f}%", fg=color)
         self.left.config(text=left, fg=SUB if pct is not None else FAINT)
         self.bar.delete("all")
-        width = self.bar.winfo_width() or self.inner
+        # 배치 전에는 winfo_width() 가 0 이 아니라 **1** 을 돌려준다.
+        # `or` 로 받으면 1 이 참이라 폴백이 죽고, 게이지가 0.4px 로 그려진 뒤
+        # 다음 조회(최대 5분)까지 그대로 남는다. 디자인을 바꿀 때 이 경로를 탄다.
+        measured = self.bar.winfo_width()
+        width = measured if measured > 1 else self.inner
         if pct is not None:
             self.bar.create_rectangle(0, 0, width * pct / 100, 3, fill=color, width=0)
 

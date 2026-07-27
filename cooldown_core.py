@@ -59,7 +59,10 @@ class Limit:
         """'3시간 07분 후' 같은 남은 시간 문자열. 모르면 빈 문자열."""
         if self.resets_at is None:
             return ""
-        secs = (self.resets_at - datetime.now(timezone.utc)).total_seconds()
+        when = self.resets_at
+        if when.tzinfo is None:  # 시간대가 빠진 값이 오면 UTC 로 본다 (빼기가 터진다)
+            when = when.replace(tzinfo=timezone.utc)
+        secs = (when - datetime.now(timezone.utc)).total_seconds()
         if secs <= 0:
             return "곧 초기화"
         mins = int(secs // 60)
@@ -140,12 +143,19 @@ def _scoped(raw: dict) -> list[Limit]:
 
 
 def parse(raw: dict) -> Usage:
-    return Usage(
-        five=Limit("5시간", _pct(raw.get("five_hour")), _dt(raw.get("five_hour"))),
-        week=Limit("주간", _pct(raw.get("seven_day")), _dt(raw.get("seven_day"))),
-        scoped=_scoped(raw),
-        raw=raw,
-    )
+    try:
+        five = Limit("5시간", _pct(raw.get("five_hour")), _dt(raw.get("five_hour")))
+        week = Limit("주간", _pct(raw.get("seven_day")), _dt(raw.get("seven_day")))
+        scoped = _scoped(raw)
+    except (AttributeError, TypeError) as e:  # 응답 구조 자체가 달라졌다
+        raise UsageError("형식 변경") from e
+
+    # 필드 이름만 바뀌어도 예외 없이 전부 None 인 Usage 가 나온다.
+    # 그대로 두면 화면에 '--' 만 뜨고 오류 표시가 없어, 고장난 줄도 모른다.
+    if five.pct is None and week.pct is None:
+        raise UsageError("형식 변경")
+
+    return Usage(five=five, week=week, scoped=scoped, raw=raw)
 
 
 # ---------------------------------------------------------------- 조회
@@ -153,15 +163,15 @@ def parse(raw: dict) -> Usage:
 
 def read_token() -> str:
     if not os.path.exists(CRED_PATH):
-        raise LoginRequired("Claude Code 로그인 정보가 없습니다")
+        raise LoginRequired("로그인 안 됨")
     try:
         with open(CRED_PATH, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError) as e:
-        raise LoginRequired("로그인 정보를 읽을 수 없습니다") from e
+        raise LoginRequired("로그인 정보 손상") from e
     token = (data.get("claudeAiOauth") or {}).get("accessToken")
     if not token:
-        raise LoginRequired("로그인 정보가 비어 있습니다")
+        raise LoginRequired("로그인 안 됨")
     return token
 
 
@@ -179,17 +189,18 @@ def fetch_raw() -> dict:
     except requests.RequestException as e:
         raise ConnectionFailed("연결 실패") from e
 
+    # 화면에 그대로 나가는 문구다. 슬림 바의 오류 자리가 좁으니 짧은 명사형으로.
     if r.status_code in (401, 403):
-        raise LoginRequired("로그인이 만료됐습니다")
+        raise LoginRequired("로그인 만료")
     if r.status_code == 429:
-        raise UsageError("요청이 너무 잦습니다")
+        raise UsageError("요청 과다")
     if r.status_code >= 400:
         raise UsageError(f"서버 오류 {r.status_code}")
 
     try:
         return r.json()
     except ValueError as e:
-        raise UsageError("응답 형식이 바뀐 것 같습니다") from e
+        raise UsageError("형식 변경") from e
 
 
 def fetch() -> Usage:

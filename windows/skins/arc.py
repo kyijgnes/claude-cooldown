@@ -199,6 +199,7 @@ class ArcSkin(Skin):
     key = "arc"
     name = "아크형"
     width = 280
+    _ok_stamp = ""  # 마지막으로 값을 받은 시각
 
     def build(self, parent: tk.Misc) -> None:
         self.f_num = tkfont.Font(root=parent, font=F_NUM)
@@ -249,6 +250,7 @@ class ArcSkin(Skin):
 
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
+        self._ok_stamp = stamp  # 값이 언제 것인지 — 오류 띠에서도 이걸 쓴다
         self.five.set(usage.five.pct, usage.five.left)
         self.week.set(usage.week.pct, usage.week.left)
         self._error(None, stamp)
@@ -259,6 +261,7 @@ class ArcSkin(Skin):
             self.five.set(None, "")
             self.week.set(None, "")
             self._foot(stamp, None)
+            self._ok_stamp = ""
         self._error(text, stamp)
 
     # -------------------------------------------------- 꼬리말 두 얼굴
@@ -285,5 +288,8 @@ class ArcSkin(Skin):
             c.itemconfigure(item, state=off)
         if text:
             c.itemconfigure(self.err_text, text=text)
-            c.itemconfigure(self.err_stamp, text=f"{stamp} 기준" if stamp else "")
+            # 화면에 남은 값이 언제 것인지를 보여야 한다. 실패한 시각을 '기준' 이라고
+            # 쓰면, 옛 숫자를 띄워 놓고 방금 잰 것처럼 말하는 셈이 된다.
+            shown = f"{self._ok_stamp} 기준" if self._ok_stamp else stamp
+            c.itemconfigure(self.err_stamp, text=shown)
             c.itemconfigure(self.dot, state="hidden")

@@ -19,6 +19,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from datetime import datetime
 
@@ -54,6 +55,10 @@ STARTUP_LNK = os.path.join(
 WARN_AT = 80  # 한도가 이 % 를 넘으면 알림
 WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
 RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
+DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
+MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
+TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
+DOCK_LABEL = "작업표시줄에 붙이기 (슬림 바)"
 ALPHA = 0.96  # 평소 창 불투명도
 BUSY_ALPHA = 0.78  # 새로고침 누른 직후
 
@@ -90,22 +95,37 @@ def summon_running_instance() -> None:
 
 
 def clamp_to_screen(x: int, y: int, w: int, h: int) -> tuple[int, int]:
-    """창이 화면 밖으로 완전히 나가지 않게 한다.
+    """창이 화면 밖으로 나가지 않게 한다.
 
     모니터를 뺐거나 해상도를 줄이면 저장해 둔 자리가 화면 밖이 될 수 있다.
-    제목표시줄이 없어 끌어올 수도 없으니, 최소한 잡을 수 있을 만큼은 남긴다.
+    제목표시줄이 없어 끌어올 수도 없으니 창째로 안쪽에 넣는다.
+    기준은 화면 전체가 아니라 **작업 영역**(작업표시줄을 뺀 자리)이다 —
+    전체 기준이면 작업표시줄에 덮여 12px 만 남는다.
     """
     try:
         import ctypes
+        from ctypes import wintypes
 
-        user32 = ctypes.windll.user32
-        vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
-        vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+        rect = wintypes.RECT()
+        # SPI_GETWORKAREA = 0x0030
+        ok = ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
+        if ok:
+            left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+        else:
+            raise OSError
     except Exception:  # noqa: BLE001
-        return x, y
-    grab = 60  # 이만큼은 화면 안에 남긴다
-    x = max(vx - w + grab, min(x, vx + vw - grab))
-    y = max(vy, min(y, vy + vh - grab))
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            left, top = 0, 0
+            right, bottom = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        except Exception:  # noqa: BLE001
+            return x, y
+
+    # 창이 화면보다 크면 위/왼쪽을 맞춘다
+    x = left if w >= right - left else max(left, min(x, right - w))
+    y = top if h >= bottom - top else max(top, min(y, bottom - h))
     return x, y
 
 
@@ -118,6 +138,7 @@ def load_state() -> dict:
         "y": 60,
         "topmost": False,
         "dock": False,  # 작업표시줄에 붙이기
+        "hidden": False,  # 위젯 숨김 (트레이 아이콘만)
         "skin": skins.DEFAULT,
     }
     try:
@@ -354,10 +375,14 @@ class App:
         self.results: queue.Queue = queue.Queue()
         self.commands: queue.Queue = queue.Queue()
         self.warned = {"five": False, "week": False}
-        self.widget_visible = True
+        self.widget_visible = not self.state.get("hidden", False)
         self.height = 0
+        self.alive = True
         self.last_usage: Usage | None = None
         self.last_error: Exception | None = None
+        self.last_error_stamp = ""
+        self.last_manual = 0.0
+        self._dragging = False
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -380,6 +405,7 @@ class App:
 
         self.root.after(200, self._pump)
         self.root.after(1500, self._stay_above)
+        self.root.after(TICK * 1000, self._tick)
 
     # -------------------------------------------------- 본체(스킨) 그리기
     def _build_body(self) -> None:
@@ -421,11 +447,12 @@ class App:
         if self.last_usage is not None:
             self.skin.show(self.last_usage, self._stamp(self.last_usage))
         if self.last_error is not None:
-            relogin = isinstance(self.last_error, LoginRequired)
+            # 오류가 난 시각을 그대로 쓴다. 지금 시각으로 찍으면 디자인만 바꿨는데
+            # 방금 실패한 것처럼 보인다.
             self.skin.show_error(
                 self._error_text(self.last_error),
-                keep_values=not relogin and self.last_usage is not None,
-                stamp=datetime.now().strftime("%H:%M"),
+                keep_values=self.last_usage is not None,
+                stamp=self.last_error_stamp,
             )
 
     # -------------------------------------------------- 메뉴
@@ -448,8 +475,10 @@ class App:
             )
         self.menu.add_cascade(label="디자인", menu=design)
 
+        # 이름에 (슬림 바) 를 넣어, 누르면 그 디자인으로 바뀐다는 걸 미리 알린다.
+        # 잠가 두면 기본 디자인에서 늘 회색이라 이유를 알 길이 없다.
         self.menu.add_checkbutton(
-            label="작업표시줄에 붙이기",
+            label=DOCK_LABEL,
             variable=self.var_dock,
             command=self.toggle_dock,
         )
@@ -496,12 +525,21 @@ class App:
     def _press(self, e):
         self._dx = e.x_root - self.root.winfo_x()
         self._dy = e.y_root - self.root.winfo_y()
+        self._from = (e.x_root, e.y_root)
+        self._dragging = True
 
     def _drag(self, e):
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
 
-    def _release(self, _e):
-        # 끌어서 옮겼으면 더는 작업표시줄에 붙어 있는 게 아니다
+    def _release(self, e):
+        self._dragging = False
+        # 그냥 한 번 누른 것과 끌어서 옮긴 것을 구분한다.
+        # 구분하지 않으면 붙여 둔 위젯을 한 번 클릭했을 뿐인데 붙이기가 풀리고
+        # 작업표시줄 뒤로 내려가, 12px 짜리 조각만 남는다.
+        start = getattr(self, "_from", (e.x_root, e.y_root))
+        if abs(e.x_root - start[0]) < DRAG_SLOP and abs(e.y_root - start[1]) < DRAG_SLOP:
+            return
+
         x, y = clamp_to_screen(
             self.root.winfo_x(), self.root.winfo_y(), self.skin.width, self.height
         )
@@ -520,6 +558,11 @@ class App:
 
     # -------------------------------------------------- 동작
     def refresh_now(self):
+        # 연타해도 최소 간격은 지킨다 (수동 경로로 rate limit 규칙을 우회하지 않게)
+        now = time.monotonic()
+        if now - self.last_manual < MANUAL_FLOOR:
+            return
+        self.last_manual = now
         # 눌렀다는 티를 낸다. 문구를 띄우는 대신 위젯을 잠깐 흐리게 했다가,
         # 값이 들어오면 원래대로 돌아온다 — 스킨이 무엇이든 똑같이 동작한다.
         self.root.attributes("-alpha", BUSY_ALPHA)
@@ -535,8 +578,18 @@ class App:
         save_state(self.state)
 
     def toggle_autostart(self):
-        set_autostart(not autostart_enabled())
-        self.var_autostart.set(autostart_enabled())
+        want = not autostart_enabled()
+        set_autostart(want)
+        got = autostart_enabled()
+        self.var_autostart.set(got)
+        if got != want:
+            # 시작 폴더에 못 쓰는 환경(정책·보안 솔루션)이다. 체크가 도로 풀려서
+            # 눌러도 아무 일이 없는 것처럼 보이므로, 아예 잠가 이유를 드러낸다.
+            self.menu.entryconfig("윈도우 켤 때 자동 실행", state="disabled")
+        try:
+            self.tray.update_menu()  # 트레이 쪽 체크는 스스로 갱신되지 않는다
+        except Exception:  # noqa: BLE001
+            pass
 
     def hide_widget(self):
         """위젯만 감춘다. 시작표시줄 아이콘을 누르면 돌아온다."""
@@ -546,20 +599,32 @@ class App:
 
     def _do_hide(self):
         dismiss_menus()
-        self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
+        self._remember_spot()
+        self.state["hidden"] = True
         save_state(self.state)
         self.widget_visible = False
         self.root.withdraw()
 
+    def _remember_spot(self):
+        """자유 위치를 저장한다. 붙어 있는 동안에는 저장하지 않는다 —
+        작업표시줄 좌표가 원래 자리를 덮으면, 나중에 풀었을 때 12px 만 남는다."""
+        if self.state["dock"] and self.skin.dockable:
+            return
+        self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
+
     def bring_to_front(self):
         """트레이 아이콘을 눌렀을 때 — 숨어 있으면 꺼내고 맨 앞으로 올린다."""
         self.widget_visible = True
+        self.state["hidden"] = False
+        save_state(self.state)
         self.show_window()
         self.root.lift()
         self.root.attributes("-topmost", True)
         self.root.update_idletasks()
-        if not self.state["topmost"]:
-            # 잠깐 맨 위로 올렸다 내리면 '항상 위' 를 켜지 않고도 맨 앞에 선다
+        docked = bool(self.state["dock"]) and self.skin.dockable
+        if not (docked or self.state["topmost"]):
+            # 잠깐 맨 위로 올렸다 내리면 '항상 위' 를 켜지 않고도 맨 앞에 선다.
+            # 붙여 둔 상태에서는 내리면 안 된다 — 작업표시줄 뒤로 사라졌다 돌아온다.
             self.root.after(400, lambda: self.root.attributes("-topmost", False))
 
     def show_window(self):
@@ -585,24 +650,28 @@ class App:
             raise_above_taskbar(self.root)
 
     def toggle_dock(self):
-        if not self.skin.dockable:  # 메뉴가 잠겨 있지만 혹시 몰라
-            self.var_dock.set(False)
-            return
-        self.state["dock"] = not self.state["dock"]
+        turning_on = not self.state["dock"]
+        if turning_on and not self.skin.dockable:
+            # 작업표시줄 높이에 맞춰 그리는 디자인으로 먼저 바꾼다.
+            # 항목 이름에 (슬림 바) 라고 적혀 있으니 놀랄 일은 아니다.
+            target = next((c.key for c in skins.SKINS if c.dockable), None)
+            if target is None:
+                self.var_dock.set(False)
+                return
+            self.state["dock"] = True  # switch_skin 이 끄지 않도록 먼저 세운다
+            self.switch_skin(target)
+        else:
+            self.state["dock"] = turning_on
         self.var_dock.set(bool(self.state["dock"]))
         save_state(self.state)
         self.show_window()
 
     def _sync_dock_menu(self):
-        """작업표시줄 높이에 맞춰 그리는 스킨에서만 '붙이기' 를 쓸 수 있다."""
         self.var_dock.set(bool(self.state["dock"]) and self.skin.dockable)
-        self.menu.entryconfig(
-            "작업표시줄에 붙이기",
-            state="normal" if self.skin.dockable else "disabled",
-        )
 
     def quit(self):
-        self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
+        self.alive = False
+        self._remember_spot()
         save_state(self.state)
         self.poller.stop()
         try:
@@ -613,6 +682,21 @@ class App:
 
     # -------------------------------------------------- 화면 갱신
     def _pump(self):
+        """화면 갱신과 명령 처리. **여기서 예외가 새면 앱이 통째로 얼어붙는다** —
+        다시 예약하는 줄까지 못 가면 갱신이 멈추고, 트레이의 '종료' 마저
+        이 큐를 거치므로 작업 관리자로 죽여야 한다. 그래서 통째로 감싼다."""
+        try:
+            self._pump_once()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if self.alive:
+                try:
+                    self.root.after(300, self._pump)
+                except tk.TclError:  # 종료 중
+                    pass
+
+    def _pump_once(self):
         # 두 번째로 실행된 프로세스가 남긴 표시 — 새 창을 띄우는 대신 이쪽이 나선다
         if os.path.exists(SUMMON_PATH):
             try:
@@ -644,25 +728,43 @@ class App:
             else:
                 self._show_error(item)
 
-        self.root.after(300, self._pump)
-
     @staticmethod
     def _stamp(usage: Usage) -> str:
         return usage.fetched_at.astimezone().strftime("%H:%M")
 
     @staticmethod
     def _error_text(err: Exception) -> str:
-        return "재로그인 필요" if isinstance(err, LoginRequired) else str(err)
+        # cooldown_core 가 이미 짧은 명사형으로 던진다 —
+        # '로그인 안 됨' / '로그인 만료' / '연결 실패' / '요청 과다' / '형식 변경'
+        return str(err) or "알 수 없는 오류"
+
+    def _tick(self):
+        """1분마다 마지막 값으로 다시 그린다. 남은 시간이 조회 시점에 굳어
+        '1분 후' 라고 떠 있는 동안 이미 초기화가 끝나 있는 일을 막는다."""
+        try:
+            if self.last_usage is not None and self.last_error is None:
+                self.skin.show(self.last_usage, self._stamp(self.last_usage))
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if self.alive:
+                self.root.after(TICK * 1000, self._tick)
 
     def _stay_above(self):
         """붙어 있는 동안만 도는 짧은 주기. 작업표시줄에 가리지 않게 지킨다."""
-        if self.state["dock"] and self.skin.dockable and self.widget_visible:
-            raise_above_taskbar(self.root)
-        self.root.after(1500, self._stay_above)
+        try:
+            if self.state["dock"] and self.skin.dockable and self.widget_visible:
+                raise_above_taskbar(self.root)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if self.alive:
+                self.root.after(1500, self._stay_above)
 
     def _reassert_dock(self):
         """작업표시줄 아이콘이 늘거나 줄면 빈 자리가 옮겨간다 — 갱신할 때마다 다시 맞춘다."""
-        if not (self.state["dock"] and self.skin.dockable):
+        # 끌고 있는 중이면 건드리지 않는다 (손 안에서 창이 작업표시줄로 튄다)
+        if self._dragging or not (self.state["dock"] and self.skin.dockable):
             return
         spot = taskbar_slot(self.skin.width, self.height)
         if spot:
@@ -703,20 +805,24 @@ class App:
 
     def _show_error(self, err: Exception):
         self.last_error = err
+        self.last_error_stamp = datetime.now().strftime("%H:%M")
         self._clear_busy()
-        relogin = isinstance(err, LoginRequired)
-        # 로그인이 끊겼으면 값이 아예 없는 것이므로 지운다. 일시적인 연결 실패면
-        # 마지막으로 받은 값과 그 기준 시각을 그대로 둔다 (오류 표시로 이미 구분된다).
-        keep = not relogin and self.last_usage is not None
-        if relogin:
-            self.last_usage = None
+        # 무엇이든 마지막으로 받은 값은 남긴다. 그 값이 언제 것인지는 기준 시각이
+        # 이미 보여 주므로, 지워 버리는 쪽이 오히려 정보를 없앤다.
+        # (토큰은 8시간마다 만료돼서 자고 일어나면 매번 걸린다 — 그때마다 값이
+        #  전부 사라지면 정작 궁금한 '얼마나 썼나' 를 볼 수가 없다)
+        keep = self.last_usage is not None
         text = self._error_text(err)
-        self.skin.show_error(text, keep, datetime.now().strftime("%H:%M"))
+        self.skin.show_error(text, keep, self.last_error_stamp)
         self.tray.icon = draw_icon(None)
-        self.tray.title = f"클로드 쿨다운 — {text}"[:127]
+        detail = f"{type(err).__name__}: {err}" if not str(err) else text
+        self.tray.title = f"클로드 쿨다운 — {detail}"[:127]
 
     def run(self):
-        self.show_window()
+        # 숨겨 둔 채로 껐으면 그대로 트레이 아이콘만 띄운다.
+        # 자동 실행을 켠 사람이 부팅할 때마다 다시 숨기지 않아도 되게.
+        if self.widget_visible:
+            self.show_window()
         self.root.mainloop()
 
 
