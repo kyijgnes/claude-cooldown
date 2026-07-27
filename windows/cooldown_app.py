@@ -226,6 +226,31 @@ def taskbar_slot(width: int, height: int) -> tuple[int, int] | None:
         return None
 
 
+def raise_above_taskbar(root: tk.Tk) -> None:
+    """항상 위 창들 중에서도 맨 앞으로 올린다.
+
+    작업표시줄도 '항상 위' 라서, 그냥 topmost 로 두면 작업표시줄이 위에 와서
+    붙여 놓은 위젯이 가려진다. 작업표시줄은 조작할 때마다 스스로를 올리므로
+    붙어 있는 동안은 주기적으로 다시 올려야 한다.
+    """
+    try:
+        import win32con
+        import win32gui
+
+        hwnd = win32gui.GetParent(root.winfo_id()) or root.winfo_id()
+        win32gui.SetWindowPos(
+            hwnd,
+            win32con.HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def dismiss_menus() -> None:
     """열려 있는 팝업 메뉴를 닫는다.
 
@@ -287,6 +312,7 @@ class App:
         threading.Thread(target=self.tray.run, daemon=True).start()
 
         self.root.after(200, self._pump)
+        self.root.after(1500, self._stay_above)
 
     # -------------------------------------------------- 본체(스킨) 그리기
     def _build_body(self) -> None:
@@ -311,13 +337,17 @@ class App:
         if key == self.skin.key:
             return
         self.state["skin"] = key
-        save_state(self.state)
         self.skin = skins.make(key)
+        if not self.skin.dockable:
+            # 작업표시줄 높이에 안 맞는 모양이라 붙여 둘 수 없다 — 저장된 자리로 돌아간다
+            self.state["dock"] = False
+        save_state(self.state)
         self._build_body()
         self.height = 0  # 스킨마다 크기가 다르므로 다시 잰다
         self._replay()
         self.show_window()
         self.var_skin.set(self.skin.key)
+        self._sync_dock_menu()
 
     def _replay(self) -> None:
         """새로 그린 스킨에 마지막 상태를 다시 먹인다."""
@@ -371,6 +401,8 @@ class App:
         self.menu.add_command(label="위젯 숨기기", command=self.hide_widget)
         self.menu.add_command(label="종료", command=self.quit)
 
+        self._sync_dock_menu()
+
     def _build_tray(self) -> pystray.Icon:
         return pystray.Icon(
             "claude_cooldown",
@@ -413,7 +445,7 @@ class App:
     def _popup(self, e):
         self.var_topmost.set(bool(self.state["topmost"]))
         self.var_autostart.set(autostart_enabled())
-        self.var_dock.set(bool(self.state["dock"]))
+        self._sync_dock_menu()
         self.var_skin.set(self.skin.key)
         self.menu.tk_popup(e.x_root, e.y_root)
 
@@ -463,7 +495,7 @@ class App:
         self.root.update_idletasks()
         self.height = self.height or self.root.winfo_reqheight()
 
-        docked = bool(self.state["dock"])
+        docked = bool(self.state["dock"]) and self.skin.dockable
         spot = taskbar_slot(self.skin.width, self.height) if docked else None
         if spot is None:
             docked = False
@@ -472,12 +504,25 @@ class App:
         self.root.attributes("-topmost", docked or bool(self.state["topmost"]))
         self.root.geometry(f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}")
         round_corners(self.root)
+        if docked:
+            raise_above_taskbar(self.root)
 
     def toggle_dock(self):
+        if not self.skin.dockable:  # 메뉴가 잠겨 있지만 혹시 몰라
+            self.var_dock.set(False)
+            return
         self.state["dock"] = not self.state["dock"]
         self.var_dock.set(bool(self.state["dock"]))
         save_state(self.state)
         self.show_window()
+
+    def _sync_dock_menu(self):
+        """작업표시줄 높이에 맞춰 그리는 스킨에서만 '붙이기' 를 쓸 수 있다."""
+        self.var_dock.set(bool(self.state["dock"]) and self.skin.dockable)
+        self.menu.entryconfig(
+            "작업표시줄에 붙이기",
+            state="normal" if self.skin.dockable else "disabled",
+        )
 
     def quit(self):
         self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
@@ -524,9 +569,15 @@ class App:
     def _error_text(err: Exception) -> str:
         return "재로그인 필요" if isinstance(err, LoginRequired) else str(err)
 
+    def _stay_above(self):
+        """붙어 있는 동안만 도는 짧은 주기. 작업표시줄에 가리지 않게 지킨다."""
+        if self.state["dock"] and self.skin.dockable and self.widget_visible:
+            raise_above_taskbar(self.root)
+        self.root.after(1500, self._stay_above)
+
     def _reassert_dock(self):
         """작업표시줄 아이콘이 늘거나 줄면 빈 자리가 옮겨간다 — 갱신할 때마다 다시 맞춘다."""
-        if not self.state["dock"]:
+        if not (self.state["dock"] and self.skin.dockable):
             return
         spot = taskbar_slot(self.skin.width, self.height)
         if spot:

@@ -1,5 +1,6 @@
 """
-초슬림 바 — 화면 가장자리에 붙여 두는 낮고 긴 띠.
+초슬림 바 — 작업표시줄에 얹거나 화면 가장자리에 붙여 두는 낮고 긴 띠.
+**창 높이를 작업표시줄 높이에 맞춘다** (기본 48px, 설정·배율에 따라 달라지는 값을 실측).
 두 칸(5시간·주간)에 숫자와 눈금 게이지를 넣고, 오른쪽 끝에 모델별·기준 시각을 둔다.
 왼쪽 세로 띠는 두 한도 중 더 급한 쪽 색. 오류일 때는 띠와 바탕이 빨강으로 바뀌고
 모델별 자리에 상태 문구가 대신 들어간다 (자리를 새로 만들지 않으므로 높이는 그대로).
@@ -31,25 +32,23 @@ from .base import (
     TRACK,
     Skin,
     scoped_text,
+    taskbar_height,
     tone,
     worst,
 )
 
 # ---------------------------------------------------------------- 치수
-H = 54  # 창 높이. 네 상태 모두 이 값 그대로다.
+# 세로 배치는 작업표시줄 높이에서 계산한다 (build 참고). 가로만 여기서 고정.
 ACC = 4  # 왼쪽 상태 띠
 PAD_L = ACC + 12
 PAD_R = 14
 GAP = 16  # 칸 사이
-TOP_Y = 19  # 윗줄 중심
-BAR_Y, BAR_H = 36, 6
-BAR_CY = BAR_Y + BAR_H // 2
 SEG_GAP = 2  # 눈금 사이
 LV_GAP = 6  # 항목 이름 ↔ 숫자
 VR_GAP = 10  # 숫자 ↔ 남은시간 최소 간격
 LBL_BASE = 2  # 9pt 글자를 큰 숫자의 기준선에 맞추는 보정
 SM_BASE = 3  # 8pt 글자 보정
-DIV_TOP, DIV_BOT = 12, 44
+ROW_GAP = 6  # 윗줄 ↔ 게이지
 
 # 폭을 정할 때 쓰는 최대 길이 표본
 MAX_VALUE = "100%"
@@ -95,15 +94,16 @@ class Cell:
         self.x, self.w = x, w
 
         self.c.create_text(
-            x, TOP_Y + LBL_BASE, text=label, anchor="w",
+            x, skin.top_y + LBL_BASE, text=label, anchor="w",
             font=skin.f_label, fill=LABEL,
         )
         self.vx = x + skin.f_label.measure(label) + LV_GAP
         self.value = self.c.create_text(
-            self.vx, TOP_Y, text="--", anchor="w", font=self.f_value, fill=FAINT
+            self.vx, skin.top_y, text="--", anchor="w", font=self.f_value, fill=FAINT
         )
         self.left = self.c.create_text(
-            x + w, TOP_Y + SM_BASE, text="", anchor="e", font=self.f_small, fill=SUB
+            x + w, skin.top_y + SM_BASE, text="", anchor="e",
+            font=self.f_small, fill=SUB,
         )
 
         count = max(8, w // 8)
@@ -111,7 +111,8 @@ class Cell:
         seg_w = max(3.0, pitch - SEG_GAP)
         self.segs = [
             self.c.create_rectangle(
-                x + i * pitch, BAR_Y, x + i * pitch + seg_w, BAR_Y + BAR_H,
+                x + i * pitch, skin.bar_y,
+                x + i * pitch + seg_w, skin.bar_y + skin.bar_h,
                 fill=TRACK, width=0,
             )
             for i in range(count)
@@ -140,8 +141,9 @@ class Cell:
 # ---------------------------------------------------------------- 스킨
 class SlimSkin(Skin):
     key = "slim"
-    name = "슬림 바"
+    name = "슬림 바 (작업표시줄용)"
     width = 480
+    dockable = True
 
     def build(self, parent: tk.Misc) -> None:
         self.f_label = tkfont.Font(parent, family=KR, size=9)
@@ -149,8 +151,22 @@ class SlimSkin(Skin):
         self.f_small = tkfont.Font(parent, family=KR, size=8)
         self.f_msg = tkfont.Font(parent, family=KR, size=9, weight="bold")
 
+        # 창 높이를 작업표시줄에 맞추고, 그 안에서 세로 배치를 나눈다.
+        # 작은 작업표시줄(40px)이든 고배율(60px 이상)이든 같은 비율로 앉는다.
+        self.h = taskbar_height()
+        row_h = self.f_value.metrics("linespace")
+        self.bar_h = 6 if self.h >= 44 else 5
+        slack = max(0, self.h - row_h - ROW_GAP - self.bar_h)
+        top = slack * 45 // 100  # 위가 조금 좁아야 안정돼 보인다
+        self.top_y = top + row_h // 2
+        self.bar_y = top + row_h + ROW_GAP
+        self.bar_cy = self.bar_y + self.bar_h // 2
+        self.div_top = top
+        self.div_bot = self.bar_y + self.bar_h
+
         self.c = tk.Canvas(
-            parent, width=self.width, height=H, bg=BG, highlightthickness=0, bd=0
+            parent, width=self.width, height=self.h, bg=BG,
+            highlightthickness=0, bd=0,
         )
         self.c.pack(fill="both", expand=True)
 
@@ -173,7 +189,7 @@ class SlimSkin(Skin):
         self.right_w = min(need_right, max(60, avail - need_cell * 2))
         cell_w = (avail - self.right_w) // 2
 
-        self.accent = self.c.create_rectangle(0, 0, ACC, H, fill=TRACK, width=0)
+        self.accent = self.c.create_rectangle(0, 0, ACC, self.h, fill=TRACK, width=0)
 
         x1 = PAD_L
         x2 = PAD_L + cell_w + GAP
@@ -182,20 +198,21 @@ class SlimSkin(Skin):
         self.week = Cell(self, x2, cell_w, "주간")
         for x in (x1, x2):
             self.c.create_line(
-                x + cell_w + GAP // 2, DIV_TOP, x + cell_w + GAP // 2, DIV_BOT,
+                x + cell_w + GAP // 2, self.div_top,
+                x + cell_w + GAP // 2, self.div_bot,
                 fill=LINE, width=1,
             )
 
         # 오른쪽 윗자리 — 평소엔 모델별, 오류일 땐 상태 문구. 같은 자리를 나눠 쓴다.
         self.model = self.c.create_text(
-            rx, TOP_Y + SM_BASE, text="불러오는 중", anchor="e",
+            rx, self.top_y + SM_BASE, text="불러오는 중", anchor="e",
             font=self.f_small, fill=FAINT,
         )
         self.msg = self.c.create_text(
-            rx, TOP_Y + LBL_BASE, text="", anchor="e", font=self.f_msg, fill=RED
+            rx, self.top_y + LBL_BASE, text="", anchor="e", font=self.f_msg, fill=RED
         )
         self.stamp = self.c.create_text(
-            rx, BAR_CY, text="", anchor="e", font=self.f_small, fill=FAINT
+            rx, self.bar_cy, text="", anchor="e", font=self.f_small, fill=FAINT
         )
 
         self.five.set(None, "")

@@ -32,6 +32,25 @@ KR = "맑은 고딕"
 NUM = "Segoe UI"
 
 
+def taskbar_height(default: int = 48) -> int:
+    """작업표시줄 높이(px). 못 재면 윈도우 11 기본값.
+
+    작은 작업표시줄 설정이나 화면 배율에 따라 40~72px 사이로 달라진다.
+    """
+    try:
+        import win32gui
+
+        bar = win32gui.FindWindow("Shell_TrayWnd", None)
+        if bar:
+            _, top, _, bottom = win32gui.GetWindowRect(bar)
+            height = bottom - top
+            if 24 <= height <= 200:
+                return height
+    except Exception:  # noqa: BLE001
+        pass
+    return default
+
+
 def tone(pct: float | None) -> str:
     """여유 초록 / 보통 노랑 / 임박 빨강."""
     if pct is None:
@@ -68,6 +87,7 @@ class Skin:
     key = ""  # 설정 파일에 저장되는 식별자
     name = ""  # 우클릭 메뉴에 뜨는 이름
     width = 260  # 창 가로 폭(px). 세로는 내용에서 계산된다.
+    dockable = False  # 작업표시줄에 붙일 수 있는가 (그 높이에 맞게 그리는 스킨만 참)
 
     def build(self, parent: tk.Misc) -> None:
         """`parent` 안에 위젯을 구성한다. 스킨 하나당 한 번만 불린다."""
