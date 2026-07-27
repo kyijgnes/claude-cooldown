@@ -6,9 +6,10 @@ pip install -r ../requirements.txt
 실행:  pythonw cooldown_app.py      (검은 콘솔 창 없이)
 확인:  python  ../cooldown_core.py  (응답 원본 JSON)
 
-- 바탕화면 위젯 : 드래그로 이동, 위치는 자동 저장. 우클릭으로 메뉴.
-- 시작표시줄 아이콘 : 5시간 사용률을 숫자로 표시. 80% 넘으면 한 번 알림.
-- 우클릭 > '윈도우 켤 때 자동 실행' 을 켜면 시작 프로그램에 등록된다.
+- 시작표시줄 아이콘을 누르면 위젯이 맨 앞으로 나온다.
+- 위젯은 드래그로 옮기고, 위치는 저장된다. 우클릭으로 메뉴.
+- 우클릭 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
+- 우클릭 > 윈도우 켤 때 자동 실행 을 켜면 시작 프로그램에 등록된다.
 """
 
 from __future__ import annotations
@@ -24,7 +25,10 @@ from datetime import datetime
 import pystray
 from PIL import Image, ImageDraw, ImageFont
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+
 from cooldown_core import (  # noqa: E402
     MIN_INTERVAL,
     LoginRequired,
@@ -32,6 +36,9 @@ from cooldown_core import (  # noqa: E402
     UsageError,
     fetch,
 )
+
+import skins  # noqa: E402
+from skins.base import BG, tone  # noqa: E402
 
 HOME = os.path.expanduser("~")
 STATE_PATH = os.path.join(HOME, ".claude_cooldown_widget.json")
@@ -45,45 +52,12 @@ STARTUP_LNK = os.path.join(
 WARN_AT = 80  # 5시간 한도가 이 % 를 넘으면 알림
 WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
 
-# ---------------------------------------------------------------- 치수·색
-WIDTH = 260
-PAD = 18
-INNER = WIDTH - PAD * 2
-
-BG = "#15171c"
-TITLE = "#e6edf3"
-# 작은 글자(8pt)라 명암비를 4.5:1 이상으로 잡는다.
-# BG 대비 — LABEL 5.8:1 / FAINT 4.8:1. 위계는 밝기보다 글자 크기로 준다.
-LABEL = "#8b949e"
-SUB = "#c2cad4"
-FAINT = "#7d8590"
-TRACK = "#252a32"
-LINE = "#232830"
-GREEN = "#3fb950"
-AMBER = "#e3b341"
-RED = "#ff5c61"
-RED_BG = "#2b1418"
-
-KR = "맑은 고딕"
-NUM = "Segoe UI"
-
-
-def tone(pct: float | None) -> str:
-    """여유 초록 / 보통 노랑 / 임박 빨강."""
-    if pct is None:
-        return FAINT
-    if pct < 50:
-        return GREEN
-    if pct < 80:
-        return AMBER
-    return RED
-
 
 # ---------------------------------------------------------------- 설정 저장
 
 
 def load_state() -> dict:
-    state = {"x": 60, "y": 60, "topmost": False}
+    state = {"x": 60, "y": 60, "topmost": False, "skin": skins.DEFAULT}
     try:
         with open(STATE_PATH, encoding="utf-8") as f:
             state.update(json.load(f))
@@ -117,6 +91,32 @@ def autostart_enabled() -> bool:
     return os.path.exists(STARTUP_LNK)
 
 
+def autostart_target() -> str | None:
+    """등록된 바로가기가 실제로 가리키는 스크립트 경로. 없거나 못 읽으면 None."""
+    if not os.path.exists(STARTUP_LNK):
+        return None
+    try:
+        from win32com.client import Dispatch
+
+        return Dispatch("WScript.Shell").CreateShortCut(STARTUP_LNK).Arguments.strip('"')
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def repair_autostart() -> None:
+    """자동 실행이 켜져 있는데 딴 경로를 가리키면 지금 위치로 고쳐 쓴다.
+
+    폴더를 옮기면 바로가기가 없어진 파일을 가리키게 되고, 재부팅해도 아무 일이
+    일어나지 않는다 — 오류도 안 뜬다. 켜 둔 사람은 고장난 줄도 모른다.
+    """
+    target = autostart_target()
+    if target is None:
+        return
+    here = os.path.normcase(os.path.abspath(__file__))
+    if os.path.normcase(os.path.abspath(target)) != here:
+        set_autostart(True)
+
+
 def set_autostart(on: bool) -> None:
     if not on:
         try:
@@ -147,13 +147,14 @@ def draw_icon(pct: float | None) -> Image.Image:
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((0, 0, 63, 63), radius=15, fill=tone(pct))
     size = 38 if len(text) < 3 else 28
-    try:
-        font = ImageFont.truetype("segoeuib.ttf", size)
-    except OSError:
+    for name in ("segoeuib.ttf", "arialbd.ttf"):
         try:
-            font = ImageFont.truetype("arialbd.ttf", size)
+            font = ImageFont.truetype(name, size)
+            break
         except OSError:
-            font = ImageFont.load_default()
+            continue
+    else:
+        font = ImageFont.load_default()
     box = d.textbbox((0, 0), text, font=font)
     d.text(
         ((64 - box[2] - box[0]) / 2, (64 - box[3] - box[1]) / 2),
@@ -195,43 +196,18 @@ class Poller(threading.Thread):
             self.wake.clear()
 
 
-# ---------------------------------------------------------------- 화면 조각
+def dismiss_menus() -> None:
+    """열려 있는 팝업 메뉴를 닫는다.
 
+    Tk 의 메뉴는 윈도우 기본 메뉴 창(#32768)이라 `unpost()` 로는 안 닫힌다.
+    주인 창을 감추면 메뉴만 화면에 덩그러니 남으므로 직접 끝내 준다.
+    """
+    try:
+        import ctypes
 
-class Section:
-    """한 한도 덩어리 — 라벨 / 큰 숫자 + 남은시간 / 얇은 게이지."""
-
-    def __init__(self, parent: tk.Misc, label: str):
-        self.box = tk.Frame(parent, bg=BG)
-        self.box.pack(fill="x", padx=PAD)
-
-        self.label = tk.Label(
-            self.box, text=label, bg=BG, fg=LABEL, font=(KR, 8), anchor="w"
-        )
-        self.label.pack(fill="x")
-
-        row = tk.Frame(self.box, bg=BG)
-        row.pack(fill="x")
-        self.value = tk.Label(row, text="--", bg=BG, fg=FAINT, font=(NUM, 24, "bold"))
-        self.value.pack(side="left")
-        self.left = tk.Label(row, text="", bg=BG, fg=SUB, font=(KR, 10))
-        self.left.pack(side="right", anchor="s", pady=(0, 9))
-
-        self.bar = tk.Canvas(
-            self.box, height=3, width=INNER, bg=TRACK, highlightthickness=0, bd=0
-        )
-        self.bar.pack(fill="x", pady=(3, 0))
-
-        self.widgets = [self.box, self.label, row, self.value, self.left, self.bar]
-
-    def set(self, pct: float | None, left: str) -> None:
-        color = tone(pct)
-        self.value.config(text="--" if pct is None else f"{pct:.0f}%", fg=color)
-        self.left.config(text=left, fg=SUB if pct is not None else FAINT)
-        self.bar.delete("all")
-        width = self.bar.winfo_width() or INNER
-        if pct is not None:
-            self.bar.create_rectangle(0, 0, width * pct / 100, 3, fill=color, width=0)
+        ctypes.windll.user32.EndMenu()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def round_corners(root: tk.Tk) -> None:
@@ -258,7 +234,8 @@ class App:
         self.warned = False
         self.widget_visible = True
         self.height = 0
-        self.has_data = False  # 한 번이라도 값을 받았는가 (오류 시 값 유지 판단용)
+        self.last_usage: Usage | None = None
+        self.last_error: Exception | None = None
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -267,8 +244,11 @@ class App:
         self.root.withdraw()
         self.root.configure(bg=BG)
 
-        self._build()
-        self._bind_drag()
+        repair_autostart()
+
+        self.body: tk.Frame | None = None
+        self.skin = skins.make(self.state["skin"])
+        self._build_body()
         self._build_menu()
 
         self.poller = Poller(self.results)
@@ -278,83 +258,68 @@ class App:
 
         self.root.after(200, self._pump)
 
-    # -------------------------------------------------- 화면 구성
-    def _build(self) -> None:
-        # 머리말 — 평소엔 제목, 오류일 땐 빨간 띠로 바뀐다 (높이는 그대로)
-        self.head = tk.Frame(self.root, bg=BG)
-        self.head.pack(fill="x", pady=(0, 4))
-        self.accent = tk.Frame(self.head, bg=BG, width=3)
-        self.accent.pack(side="left", fill="y")
-        self.head_pad = tk.Frame(self.head, bg=BG)
-        self.head_pad.pack(fill="x", padx=(PAD - 3, PAD), pady=(15, 9))
-        self.title = tk.Label(
-            self.head_pad, text="클로드 사용량", bg=BG, fg=TITLE, font=(KR, 10, "bold")
-        )
-        self.title.pack(side="left")
-        self.stamp = tk.Label(self.head_pad, text="", bg=BG, fg=FAINT, font=(KR, 8))
-        self.stamp.pack(side="right")
+    # -------------------------------------------------- 본체(스킨) 그리기
+    def _build_body(self) -> None:
+        if self.body is not None:
+            self.body.destroy()
+        self.body = tk.Frame(self.root, bg=BG)
+        self.body.pack(fill="both", expand=True)
+        self.skin.build(self.body)
+        self._bind_drag(self.body)
+        self._bind_drag(self.root)
 
-        self.five = Section(self.root, "5시간 한도")
-        self.gap = tk.Frame(self.root, bg=BG, height=17)
-        self.gap.pack()
-        self.week = Section(self.root, "주간 한도")
+    def _bind_drag(self, widget: tk.Misc) -> None:
+        """위젯과 그 아래 모든 자식에 드래그·우클릭을 건다."""
+        widget.bind("<Button-1>", self._press)
+        widget.bind("<B1-Motion>", self._drag)
+        widget.bind("<ButtonRelease-1>", self._release)
+        widget.bind("<Button-3>", self._popup)
+        for child in widget.winfo_children():
+            self._bind_drag(child)
 
-        self.divider = tk.Frame(self.root, bg=LINE, height=1)
-        self.divider.pack(fill="x", padx=PAD, pady=(18, 0))
+    def switch_skin(self, key: str) -> None:
+        if key == self.skin.key:
+            return
+        self.state["skin"] = key
+        save_state(self.state)
+        self.skin = skins.make(key)
+        self._build_body()
+        self.height = 0  # 스킨마다 크기가 다르므로 다시 잰다
+        self._replay()
+        self.show_window()
+        self.var_skin.set(self.skin.key)
 
-        self.foot = tk.Frame(self.root, bg=BG)
-        self.foot.pack(fill="x", padx=PAD, pady=(9, 15))
-        self.foot_label = tk.Label(self.foot, text="", bg=BG, fg=LABEL, font=(KR, 8))
-        self.foot_label.pack(side="left")
-        self.foot_value = tk.Label(self.foot, text="", bg=BG, fg=SUB, font=(KR, 9))
-        self.foot_value.pack(side="left", padx=(7, 0))
-        self.note = tk.Label(
-            self.foot, text="불러오는 중", bg=BG, fg=FAINT, font=(KR, 8)
-        )
-        self.note.pack(side="right")
+    def _replay(self) -> None:
+        """새로 그린 스킨에 마지막 상태를 다시 먹인다."""
+        if self.last_usage is not None:
+            self.skin.show(self.last_usage, self._stamp(self.last_usage))
+        if self.last_error is not None:
+            relogin = isinstance(self.last_error, LoginRequired)
+            self.skin.show_error(
+                self._error_text(self.last_error),
+                keep_values=not relogin and self.last_usage is not None,
+                stamp=datetime.now().strftime("%H:%M"),
+            )
 
-    def _head_normal(self) -> None:
-        for w in (self.head, self.head_pad, self.title, self.stamp):
-            w.configure(bg=BG)
-        self.accent.configure(bg=BG)
-        self.title.configure(text="클로드 사용량", fg=TITLE)
-        self.stamp.configure(fg=FAINT)
-
-    def _head_error(self, text: str) -> None:
-        for w in (self.head, self.head_pad, self.title, self.stamp):
-            w.configure(bg=RED_BG)
-        self.accent.configure(bg=RED)
-        self.title.configure(text=text, fg=RED)
-        self.stamp.configure(fg="#a06068")
-
-    def _bind_drag(self) -> None:
-        targets = [
-            self.root,
-            self.head,
-            self.head_pad,
-            self.title,
-            self.stamp,
-            self.gap,
-            self.divider,
-            self.foot,
-            self.foot_label,
-            self.foot_value,
-            self.note,
-            *self.five.widgets,
-            *self.week.widgets,
-        ]
-        for w in targets:
-            w.bind("<Button-1>", self._press)
-            w.bind("<B1-Motion>", self._drag)
-            w.bind("<ButtonRelease-1>", self._release)
-            w.bind("<Button-3>", self._popup)
-
+    # -------------------------------------------------- 메뉴
     def _build_menu(self) -> None:
         self.var_topmost = tk.BooleanVar(self.root, bool(self.state["topmost"]))
         self.var_autostart = tk.BooleanVar(self.root, autostart_enabled())
+        self.var_skin = tk.StringVar(self.root, self.skin.key)
 
         self.menu = tk.Menu(self.root, tearoff=0)
         self.menu.add_command(label="지금 새로고침", command=self.refresh_now)
+
+        design = tk.Menu(self.menu, tearoff=0)
+        for cls in skins.SKINS:
+            design.add_radiobutton(
+                label=cls.name,
+                value=cls.key,
+                variable=self.var_skin,
+                command=lambda k=cls.key: self.switch_skin(k),
+            )
+        self.menu.add_cascade(label="디자인", menu=design)
+
         self.menu.add_checkbutton(
             label="항상 위에 표시",
             variable=self.var_topmost,
@@ -366,6 +331,8 @@ class App:
             command=self.toggle_autostart,
         )
         self.menu.add_separator()
+        # 숨겨도 시작표시줄 아이콘은 남는다 — 그 아이콘을 누르면 다시 나온다
+        self.menu.add_command(label="위젯 숨기기", command=self.hide_widget)
         self.menu.add_command(label="종료", command=self.quit)
 
     def _build_tray(self) -> pystray.Icon:
@@ -374,12 +341,13 @@ class App:
             draw_icon(None),
             "클로드 쿨다운 — 불러오는 중",
             menu=pystray.Menu(
-                pystray.MenuItem("지금 새로고침", lambda: self.refresh_now()),
+                # default=True — 아이콘을 클릭(더블클릭 포함)하면 이게 실행된다
                 pystray.MenuItem(
-                    "바탕화면 위젯 보이기",
-                    lambda: self.commands.put("toggle_widget"),
-                    checked=lambda item: self.widget_visible,
+                    "위젯 앞으로",
+                    lambda: self.commands.put("front"),
+                    default=True,
                 ),
+                pystray.MenuItem("지금 새로고침", lambda: self.refresh_now()),
                 pystray.MenuItem(
                     "윈도우 켤 때 자동 실행",
                     lambda: self.commands.put("toggle_autostart"),
@@ -404,11 +372,11 @@ class App:
     def _popup(self, e):
         self.var_topmost.set(bool(self.state["topmost"]))
         self.var_autostart.set(autostart_enabled())
+        self.var_skin.set(self.skin.key)
         self.menu.tk_popup(e.x_root, e.y_root)
 
-    # -------------------------------------------------- 메뉴
+    # -------------------------------------------------- 동작
     def refresh_now(self):
-        self.note.config(text="새로고침 중", fg=FAINT)
         self.poller.refresh_now()
 
     def toggle_topmost(self):
@@ -421,12 +389,29 @@ class App:
         set_autostart(not autostart_enabled())
         self.var_autostart.set(autostart_enabled())
 
-    def toggle_widget(self):
-        self.widget_visible = not self.widget_visible
-        if self.widget_visible:
-            self.show_window()
-        else:
-            self.root.withdraw()
+    def hide_widget(self):
+        """위젯만 감춘다. 시작표시줄 아이콘을 누르면 돌아온다."""
+        # 메뉴를 먼저 닫고 한 박자 뒤에 감춘다 (순서가 바뀌면 메뉴가 화면에 남는다)
+        dismiss_menus()
+        self.root.after(60, self._do_hide)
+
+    def _do_hide(self):
+        dismiss_menus()
+        self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
+        save_state(self.state)
+        self.widget_visible = False
+        self.root.withdraw()
+
+    def bring_to_front(self):
+        """트레이 아이콘을 눌렀을 때 — 숨어 있으면 꺼내고 맨 앞으로 올린다."""
+        self.widget_visible = True
+        self.show_window()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.update_idletasks()
+        if not self.state["topmost"]:
+            # 잠깐 맨 위로 올렸다 내리면 '항상 위' 를 켜지 않고도 맨 앞에 선다
+            self.root.after(400, lambda: self.root.attributes("-topmost", False))
 
     def show_window(self):
         """창을 저장된 자리에 편다. 시작할 때와 다시 켤 때 모두 여기를 쓴다."""
@@ -437,7 +422,7 @@ class App:
         self.root.update_idletasks()
         self.height = self.height or self.root.winfo_reqheight()
         self.root.geometry(
-            f"{WIDTH}x{self.height}+{self.state['x']}+{self.state['y']}"
+            f"{self.skin.width}x{self.height}+{self.state['x']}+{self.state['y']}"
         )
         round_corners(self.root)
 
@@ -460,7 +445,7 @@ class App:
                 break
             {
                 "quit": self.quit,
-                "toggle_widget": self.toggle_widget,
+                "front": self.bring_to_front,
                 "toggle_autostart": self.toggle_autostart,
             }[cmd]()
             if cmd == "quit":
@@ -478,27 +463,18 @@ class App:
 
         self.root.after(300, self._pump)
 
+    @staticmethod
+    def _stamp(usage: Usage) -> str:
+        return usage.fetched_at.astimezone().strftime("%H:%M")
+
+    @staticmethod
+    def _error_text(err: Exception) -> str:
+        return "재로그인 필요" if isinstance(err, LoginRequired) else str(err)
+
     def _show(self, usage: Usage):
-        self._head_normal()
-        self.has_data = True
-        self.five.set(usage.five.pct, usage.five.left)
-        self.week.set(usage.week.pct, usage.week.left)
-
-        stamp = usage.fetched_at.astimezone().strftime("%H:%M")
-        self.stamp.config(text=f"{stamp} 기준")
-
-        # 꼬리말 한 줄에 들어가는 만큼만. 넘치면 창 밖으로 잘려 나간다.
-        scoped = [s for s in usage.scoped if s.pct is not None][:2]
-        if scoped:
-            self.foot_label.config(text="모델별")
-            self.foot_value.config(
-                text="   ".join(f"{s.label} {s.pct:.0f}%" for s in scoped)
-            )
-        else:
-            self.foot_label.config(text="")
-            self.foot_value.config(text="")
-        self.note.config(text="", fg=FAINT)
-
+        self.last_usage = usage
+        self.last_error = None
+        self.skin.show(usage, self._stamp(usage))
         export(usage)
 
         pct = usage.five.pct
@@ -519,21 +495,15 @@ class App:
         return "\n".join(parts)
 
     def _show_error(self, err: Exception):
+        self.last_error = err
         relogin = isinstance(err, LoginRequired)
-        text = "재로그인 필요" if relogin else str(err)
-        self._head_error(text)
-
-        # 로그인이 끊겼으면 값이 아예 없는 것이므로 지운다.
-        # 일시적인 연결 실패면 마지막으로 받은 값과 그 기준 시각을 그대로 둔다
-        # (머리말이 빨간 띠라 지금 값이 아니라는 건 화면에 이미 드러난다).
-        if relogin or not self.has_data:
-            self.stamp.config(text=datetime.now().strftime("%H:%M"))
-            self.five.set(None, "")
-            self.week.set(None, "")
-            self.foot_label.config(text="")
-            self.foot_value.config(text="")
-
-        self.note.config(text="", fg=FAINT)
+        # 로그인이 끊겼으면 값이 아예 없는 것이므로 지운다. 일시적인 연결 실패면
+        # 마지막으로 받은 값과 그 기준 시각을 그대로 둔다 (오류 표시로 이미 구분된다).
+        keep = not relogin and self.last_usage is not None
+        if relogin:
+            self.last_usage = None
+        text = self._error_text(err)
+        self.skin.show_error(text, keep, datetime.now().strftime("%H:%M"))
         self.tray.icon = draw_icon(None)
         self.tray.title = f"클로드 쿨다운 — {text}"[:127]
 
