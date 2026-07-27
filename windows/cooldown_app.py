@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from cooldown_core import (  # noqa: E402
     MIN_INTERVAL,
+    ConnectionFailed,
     LoginRequired,
     Usage,
     UsageError,
@@ -43,14 +44,69 @@ from skins.base import BG, tone  # noqa: E402
 HOME = os.path.expanduser("~")
 STATE_PATH = os.path.join(HOME, ".claude_cooldown_widget.json")
 EXPORT_PATH = os.path.join(HOME, ".claude_cooldown.json")
+SUMMON_PATH = os.path.join(HOME, ".claude_cooldown.summon")
 STARTUP_LNK = os.path.join(
     os.environ.get("APPDATA", HOME),
     r"Microsoft\Windows\Start Menu\Programs\Startup",
     "클로드 쿨다운.lnk",
 )
 
-WARN_AT = 80  # 5시간 한도가 이 % 를 넘으면 알림
+WARN_AT = 80  # 한도가 이 % 를 넘으면 알림
 WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
+RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
+ALPHA = 0.96  # 평소 창 불투명도
+BUSY_ALPHA = 0.78  # 새로고침 누른 직후
+
+_MUTEX = None  # 중복 실행 판정용. 프로세스가 살아 있는 동안 붙들고 있어야 한다.
+
+
+def already_running() -> bool:
+    """이 프로그램이 이미 떠 있는가. 이름 있는 뮤텍스로 판정한다."""
+    global _MUTEX
+    try:
+        import ctypes
+
+        # use_last_error 로 만들어야 ctypes 가 오류 코드를 제대로 넘겨준다
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_bool,
+            ctypes.c_wchar_p,
+        ]
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        _MUTEX = kernel32.CreateMutexW(None, False, "claude_cooldown_single_instance")
+        return ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def summon_running_instance() -> None:
+    """이미 떠 있는 쪽더러 앞으로 나오라고 표시만 남긴다 (그쪽이 지우고 나온다)."""
+    try:
+        with open(SUMMON_PATH, "w", encoding="utf-8") as f:
+            f.write("1")
+    except OSError:
+        pass
+
+
+def clamp_to_screen(x: int, y: int, w: int, h: int) -> tuple[int, int]:
+    """창이 화면 밖으로 완전히 나가지 않게 한다.
+
+    모니터를 뺐거나 해상도를 줄이면 저장해 둔 자리가 화면 밖이 될 수 있다.
+    제목표시줄이 없어 끌어올 수도 없으니, 최소한 잡을 수 있을 만큼은 남긴다.
+    """
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+        vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+    except Exception:  # noqa: BLE001
+        return x, y
+    grab = 60  # 이만큼은 화면 안에 남긴다
+    x = max(vx - w + grab, min(x, vx + vw - grab))
+    y = max(vy, min(y, vy + vh - grab))
+    return x, y
 
 
 # ---------------------------------------------------------------- 설정 저장
@@ -191,14 +247,25 @@ class Poller(threading.Thread):
         self.wake.set()
 
     def run(self) -> None:
+        misses = 0
         while not self.stopped:
             try:
                 self.out.put(fetch())
-            except (UsageError, LoginRequired) as e:
+                misses = 0
+                delay = MIN_INTERVAL
+            except ConnectionFailed as e:
+                # 요청이 서버에 닿지도 않았으니 곧바로 다시 시도해도 rate limit 과 무관하다.
+                # 랜선이 잠깐 빠진 것 때문에 5분을 '연결 실패' 로 앉아 있지 않게.
                 self.out.put(e)
+                misses += 1
+                delay = min(MIN_INTERVAL, RETRY_FIRST * 2 ** (misses - 1))
+            except UsageError as e:  # 429·5xx·로그인 만료 — 빨리 다시 물어도 소용없다
+                self.out.put(e)
+                delay = MIN_INTERVAL
             except Exception as e:  # noqa: BLE001  예상 못 한 형식 변경 등
                 self.out.put(UsageError(str(e)))
-            self.wake.wait(MIN_INTERVAL)
+                delay = MIN_INTERVAL
+            self.wake.wait(delay)
             self.wake.clear()
 
 
@@ -286,7 +353,7 @@ class App:
         self.state = load_state()
         self.results: queue.Queue = queue.Queue()
         self.commands: queue.Queue = queue.Queue()
-        self.warned = False
+        self.warned = {"five": False, "week": False}
         self.widget_visible = True
         self.height = 0
         self.last_usage: Usage | None = None
@@ -435,9 +502,11 @@ class App:
 
     def _release(self, _e):
         # 끌어서 옮겼으면 더는 작업표시줄에 붙어 있는 게 아니다
-        self.state.update(
-            x=self.root.winfo_x(), y=self.root.winfo_y(), dock=False
+        x, y = clamp_to_screen(
+            self.root.winfo_x(), self.root.winfo_y(), self.skin.width, self.height
         )
+        self.root.geometry(f"+{x}+{y}")
+        self.state.update(x=x, y=y, dock=False)
         self.var_dock.set(False)
         self.root.attributes("-topmost", bool(self.state["topmost"]))
         save_state(self.state)
@@ -451,7 +520,13 @@ class App:
 
     # -------------------------------------------------- 동작
     def refresh_now(self):
+        # 눌렀다는 티를 낸다. 문구를 띄우는 대신 위젯을 잠깐 흐리게 했다가,
+        # 값이 들어오면 원래대로 돌아온다 — 스킨이 무엇이든 똑같이 동작한다.
+        self.root.attributes("-alpha", BUSY_ALPHA)
         self.poller.refresh_now()
+
+    def _clear_busy(self):
+        self.root.attributes("-alpha", ALPHA)
 
     def toggle_topmost(self):
         self.state["topmost"] = not self.state["topmost"]
@@ -491,7 +566,7 @@ class App:
         """창을 저장된 자리에 편다. 시작할 때와 다시 켤 때 모두 여기를 쓴다."""
         self.root.deiconify()
         self.root.overrideredirect(True)
-        self.root.attributes("-alpha", 0.96)
+        self.root.attributes("-alpha", ALPHA)
         self.root.update_idletasks()
         self.height = self.height or self.root.winfo_reqheight()
 
@@ -499,7 +574,9 @@ class App:
         spot = taskbar_slot(self.skin.width, self.height) if docked else None
         if spot is None:
             docked = False
-            spot = (self.state["x"], self.state["y"])
+            spot = clamp_to_screen(
+                self.state["x"], self.state["y"], self.skin.width, self.height
+            )
         # 작업표시줄 자체가 항상 위라, 그 위에 얹으려면 이쪽도 항상 위여야 한다
         self.root.attributes("-topmost", docked or bool(self.state["topmost"]))
         self.root.geometry(f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}")
@@ -536,6 +613,14 @@ class App:
 
     # -------------------------------------------------- 화면 갱신
     def _pump(self):
+        # 두 번째로 실행된 프로세스가 남긴 표시 — 새 창을 띄우는 대신 이쪽이 나선다
+        if os.path.exists(SUMMON_PATH):
+            try:
+                os.remove(SUMMON_PATH)
+            except OSError:
+                pass
+            self.bring_to_front()
+
         while True:
             try:
                 cmd = self.commands.get_nowait()
@@ -588,19 +673,26 @@ class App:
     def _show(self, usage: Usage):
         self.last_usage = usage
         self.last_error = None
+        self._clear_busy()
         self.skin.show(usage, self._stamp(usage))
         self._reassert_dock()
         export(usage)
 
-        pct = usage.five.pct
-        self.tray.icon = draw_icon(pct)
+        self.tray.icon = draw_icon(usage.five.pct)
         self.tray.title = self._tray_text(usage)[:127]
-        if pct is not None:
-            if pct >= WARN_AT and not self.warned:
-                self.tray.notify(f"5시간 한도 {pct:.0f}% 사용", "클로드 쿨다운")
-                self.warned = True
-            elif pct < WARN_CLEAR:
-                self.warned = False
+
+        # 5시간·주간을 따로 본다. 주간이 차면 며칠을 묶이므로 이쪽이 오히려 아프다.
+        for key, limit in (("five", usage.five), ("week", usage.week)):
+            if limit.pct is None:
+                continue
+            if limit.pct >= WARN_AT and not self.warned[key]:
+                self.tray.notify(
+                    f"{limit.label} 한도 {limit.pct:.0f}% 사용   {limit.left}",
+                    "클로드 쿨다운",
+                )
+                self.warned[key] = True
+            elif limit.pct < WARN_CLEAR:
+                self.warned[key] = False
 
     def _tray_text(self, usage: Usage) -> str:
         parts = ["클로드 쿨다운"]
@@ -611,6 +703,7 @@ class App:
 
     def _show_error(self, err: Exception):
         self.last_error = err
+        self._clear_busy()
         relogin = isinstance(err, LoginRequired)
         # 로그인이 끊겼으면 값이 아예 없는 것이므로 지운다. 일시적인 연결 실패면
         # 마지막으로 받은 값과 그 기준 시각을 그대로 둔다 (오류 표시로 이미 구분된다).
@@ -628,4 +721,9 @@ class App:
 
 
 if __name__ == "__main__":
+    # 두 번 실행해도 위젯이 둘로 늘지 않는다 — 이미 떠 있으면 그쪽을 앞으로 부른다.
+    # (시작 프로그램 + 바로가기 + .bat 이 겹쳐 눌리기 쉽다)
+    if already_running():
+        summon_running_instance()
+        sys.exit(0)
     App().run()

@@ -35,6 +35,14 @@ class LoginRequired(UsageError):
     """토큰이 없거나 만료됐다. 사용자가 Claude Code 에 다시 로그인해야 한다."""
 
 
+class ConnectionFailed(UsageError):
+    """서버에 닿지도 못했다 (네트워크 끊김 등).
+
+    요청이 서버에 도달하지 않았으므로 곧바로 다시 시도해도 rate limit 과 무관하다.
+    반대로 429·5xx 는 서버가 받은 것이므로 이 예외를 쓰지 않는다.
+    """
+
+
 # ---------------------------------------------------------------- 값 객체
 
 
@@ -169,7 +177,7 @@ def fetch_raw() -> dict:
             timeout=15,
         )
     except requests.RequestException as e:
-        raise UsageError("연결 실패") from e
+        raise ConnectionFailed("연결 실패") from e
 
     if r.status_code in (401, 403):
         raise LoginRequired("로그인이 만료됐습니다")
