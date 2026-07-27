@@ -25,7 +25,8 @@ GREEN = "#3fb950"
 AMBER = "#e3b341"
 RED = "#ff5c61"
 RED_BG = "#2b1418"
-RED_DIM = "#a06068"
+# 빨간 띠 안의 흐린 글자. RED_BG 대비 4.8:1 (오류 문구 자체는 5.7:1 로 더 밝다).
+RED_DIM = "#a67c83"
 
 KR = "맑은 고딕"
 NUM = "Segoe UI"

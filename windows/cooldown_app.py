@@ -57,7 +57,13 @@ WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
 
 
 def load_state() -> dict:
-    state = {"x": 60, "y": 60, "topmost": False, "skin": skins.DEFAULT}
+    state = {
+        "x": 60,
+        "y": 60,
+        "topmost": False,
+        "dock": False,  # 작업표시줄에 붙이기
+        "skin": skins.DEFAULT,
+    }
     try:
         with open(STATE_PATH, encoding="utf-8") as f:
             state.update(json.load(f))
@@ -196,6 +202,30 @@ class Poller(threading.Thread):
             self.wake.clear()
 
 
+def taskbar_slot(width: int, height: int) -> tuple[int, int] | None:
+    """작업표시줄의 빈 자리(알림 영역 왼쪽)에 놓을 좌표. 못 찾으면 None.
+
+    윈도우 11 은 작업표시줄 안에 남의 프로그램을 넣는 길(데스크밴드)을 없앴다.
+    그래서 '넣는' 게 아니라 그 위에 겹쳐 놓는다 — 보기에는 같다.
+    """
+    try:
+        import win32gui
+
+        bar = win32gui.FindWindow("Shell_TrayWnd", None)
+        if not bar:
+            return None
+        left, top, right, bottom = win32gui.GetWindowRect(bar)
+        tray = win32gui.FindWindowEx(bar, 0, "TrayNotifyWnd", None)
+        edge = win32gui.GetWindowRect(tray)[0] if tray else right
+        x = max(left, edge - width - 8)
+        room = bottom - top
+        # 작업표시줄보다 크면 아래를 맞춰 위로 넘치게 둔다
+        y = top + (room - height) // 2 if height <= room else bottom - height - 2
+        return x, y
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def dismiss_menus() -> None:
     """열려 있는 팝업 메뉴를 닫는다.
 
@@ -305,6 +335,7 @@ class App:
     def _build_menu(self) -> None:
         self.var_topmost = tk.BooleanVar(self.root, bool(self.state["topmost"]))
         self.var_autostart = tk.BooleanVar(self.root, autostart_enabled())
+        self.var_dock = tk.BooleanVar(self.root, bool(self.state["dock"]))
         self.var_skin = tk.StringVar(self.root, self.skin.key)
 
         self.menu = tk.Menu(self.root, tearoff=0)
@@ -320,6 +351,11 @@ class App:
             )
         self.menu.add_cascade(label="디자인", menu=design)
 
+        self.menu.add_checkbutton(
+            label="작업표시줄에 붙이기",
+            variable=self.var_dock,
+            command=self.toggle_dock,
+        )
         self.menu.add_checkbutton(
             label="항상 위에 표시",
             variable=self.var_topmost,
@@ -366,12 +402,18 @@ class App:
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
 
     def _release(self, _e):
-        self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
+        # 끌어서 옮겼으면 더는 작업표시줄에 붙어 있는 게 아니다
+        self.state.update(
+            x=self.root.winfo_x(), y=self.root.winfo_y(), dock=False
+        )
+        self.var_dock.set(False)
+        self.root.attributes("-topmost", bool(self.state["topmost"]))
         save_state(self.state)
 
     def _popup(self, e):
         self.var_topmost.set(bool(self.state["topmost"]))
         self.var_autostart.set(autostart_enabled())
+        self.var_dock.set(bool(self.state["dock"]))
         self.var_skin.set(self.skin.key)
         self.menu.tk_popup(e.x_root, e.y_root)
 
@@ -418,13 +460,24 @@ class App:
         self.root.deiconify()
         self.root.overrideredirect(True)
         self.root.attributes("-alpha", 0.96)
-        self.root.attributes("-topmost", bool(self.state["topmost"]))
         self.root.update_idletasks()
         self.height = self.height or self.root.winfo_reqheight()
-        self.root.geometry(
-            f"{self.skin.width}x{self.height}+{self.state['x']}+{self.state['y']}"
-        )
+
+        docked = bool(self.state["dock"])
+        spot = taskbar_slot(self.skin.width, self.height) if docked else None
+        if spot is None:
+            docked = False
+            spot = (self.state["x"], self.state["y"])
+        # 작업표시줄 자체가 항상 위라, 그 위에 얹으려면 이쪽도 항상 위여야 한다
+        self.root.attributes("-topmost", docked or bool(self.state["topmost"]))
+        self.root.geometry(f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}")
         round_corners(self.root)
+
+    def toggle_dock(self):
+        self.state["dock"] = not self.state["dock"]
+        self.var_dock.set(bool(self.state["dock"]))
+        save_state(self.state)
+        self.show_window()
 
     def quit(self):
         self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
@@ -471,10 +524,21 @@ class App:
     def _error_text(err: Exception) -> str:
         return "재로그인 필요" if isinstance(err, LoginRequired) else str(err)
 
+    def _reassert_dock(self):
+        """작업표시줄 아이콘이 늘거나 줄면 빈 자리가 옮겨간다 — 갱신할 때마다 다시 맞춘다."""
+        if not self.state["dock"]:
+            return
+        spot = taskbar_slot(self.skin.width, self.height)
+        if spot:
+            self.root.geometry(
+                f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}"
+            )
+
     def _show(self, usage: Usage):
         self.last_usage = usage
         self.last_error = None
         self.skin.show(usage, self._stamp(usage))
+        self._reassert_dock()
         export(usage)
 
         pct = usage.five.pct

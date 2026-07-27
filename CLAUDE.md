@@ -30,8 +30,12 @@
 | 경로 | 역할 |
 |---|---|
 | `cooldown_core.py` | **조회·파싱 공용 모듈. 파서는 여기 한 곳에만 둔다** |
-| `windows/cooldown_app.py` | **윈도우 앱 본체.** 바탕화면 위젯 + 트레이 아이콘 + 자동 실행 등록 |
+| `windows/cooldown_app.py` | **윈도우 앱 본체.** 창·트레이·조회·메뉴. 그리기는 안 한다 |
+| `windows/skins/base.py` | 스킨이 지켜야 할 약속(Skin) + 공용 색·글꼴 |
+| `windows/skins/{card,arc,table,slim}.py` | 디자인 4종. 우클릭 > 디자인 으로 전환 |
+| `windows/_shot_skin.py` | 스킨을 4가지 상태로 렌더해 PNG 로 남기는 개발 도구 |
 | `windows/클로드 쿨다운 실행.bat` | 콘솔 없이 앱을 띄우는 실행 파일 |
+| `docs/디자인_요청서.md` | 디자이너에게 넘기는 브리프 + `docs/시안/` 참고 이미지 |
 | `agent/cooldown_agent.py` | 폰 위젯용 상주 에이전트. 조회 → 로컬 JSON 저장 → 서버 POST |
 | `server/app/api/cooldown/route.ts` | POST(업서트) / GET(조회) 릴레이 |
 | `server/schema.sql` | `public.claude_cooldown` 테이블, RLS on + 정책 없음 |
@@ -68,9 +72,25 @@
 - 형식이 또 바뀌면 고칠 곳은 `cooldown_core.py` 한 곳뿐.
   확인은 `python cooldown_core.py` (원본 JSON 출력).
 
+## 화면 규칙 (스킨을 만들거나 고칠 때)
+
+- 새 스킨은 `base.Skin` 상속 + `skins/__init__.py` 의 `_MODULES` 에 한 줄 추가.
+- **네 상태(정상/연결실패/재로그인/불러오는중)의 창 높이가 같아야 한다.**
+  앱이 처음 잰 높이로 창을 고정하므로 늘어나면 잘린다. 오류는 자리를 새로
+  만들지 말고 기존 자리의 색·글자를 바꿔서 표현한다.
+- `show_error(text, keep_values, stamp)` 의 `keep_values` 가 참이면
+  숫자·게이지를 건드리지 않는다 (일시적 연결 실패 — 마지막 값을 남긴다).
+- 흐린 글자도 배경 대비 **4.5:1 이상**. 위계는 밝기가 아니라 글자 크기로 준다.
+- 게이지 칸 계산은 `int(pct * n / 100)` (내림). `round` 를 쓰면 99% 와 100% 가
+  구별되지 않는다.
+- 확인: `python -u windows/_shot_skin.py <키> {ok|net|err|max} out.png`
+  (`max` 는 100% · 가장 긴 문자열 · 긴 모델명인 최악 케이스)
+
 ## 다음 작업
 
-1. 배포 패키징: PyInstaller onefile (윈도우 앱)
+1. **작업표시줄용 슬림 바 재디자인** — 지금 54px 이라 48px 작업표시줄 위로
+   8px 넘친다. 44px 이하가 목표. 요청서는 `docs/디자인_요청서.md`
+2. 배포 패키징: PyInstaller onefile (윈도우 앱)
 2. 서버 배포 (Supabase SQL 실행 → Vercel 환경변수 2개 → 배포)
 3. `limits[]` 의 `severity` 를 색상 임계값 대신 쓸지 검토 (지금은 50/80 자체 기준)
 
