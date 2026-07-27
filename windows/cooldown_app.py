@@ -52,9 +52,11 @@ INNER = WIDTH - PAD * 2
 
 BG = "#15171c"
 TITLE = "#e6edf3"
-LABEL = "#6b7280"
+# 작은 글자(8pt)라 명암비를 4.5:1 이상으로 잡는다.
+# BG 대비 — LABEL 5.8:1 / FAINT 4.8:1. 위계는 밝기보다 글자 크기로 준다.
+LABEL = "#8b949e"
 SUB = "#c2cad4"
-FAINT = "#5c636e"
+FAINT = "#7d8590"
 TRACK = "#252a32"
 LINE = "#232830"
 GREEN = "#3fb950"
@@ -256,6 +258,7 @@ class App:
         self.warned = False
         self.widget_visible = True
         self.height = 0
+        self.has_data = False  # 한 번이라도 값을 받았는가 (오류 시 값 유지 판단용)
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -477,17 +480,19 @@ class App:
 
     def _show(self, usage: Usage):
         self._head_normal()
+        self.has_data = True
         self.five.set(usage.five.pct, usage.five.left)
         self.week.set(usage.week.pct, usage.week.left)
 
         stamp = usage.fetched_at.astimezone().strftime("%H:%M")
         self.stamp.config(text=f"{stamp} 기준")
 
-        scoped = [s for s in usage.scoped if s.pct is not None]
+        # 꼬리말 한 줄에 들어가는 만큼만. 넘치면 창 밖으로 잘려 나간다.
+        scoped = [s for s in usage.scoped if s.pct is not None][:2]
         if scoped:
             self.foot_label.config(text="모델별")
             self.foot_value.config(
-                text="  ".join(f"{s.label} {s.pct:.0f}%" for s in scoped)
+                text="   ".join(f"{s.label} {s.pct:.0f}%" for s in scoped)
             )
         else:
             self.foot_label.config(text="")
@@ -514,13 +519,20 @@ class App:
         return "\n".join(parts)
 
     def _show_error(self, err: Exception):
-        text = "재로그인 필요" if isinstance(err, LoginRequired) else str(err)
+        relogin = isinstance(err, LoginRequired)
+        text = "재로그인 필요" if relogin else str(err)
         self._head_error(text)
-        self.stamp.config(text=datetime.now().strftime("%H:%M"))
-        self.five.set(None, "")
-        self.week.set(None, "")
-        self.foot_label.config(text="")
-        self.foot_value.config(text="")
+
+        # 로그인이 끊겼으면 값이 아예 없는 것이므로 지운다.
+        # 일시적인 연결 실패면 마지막으로 받은 값과 그 기준 시각을 그대로 둔다
+        # (머리말이 빨간 띠라 지금 값이 아니라는 건 화면에 이미 드러난다).
+        if relogin or not self.has_data:
+            self.stamp.config(text=datetime.now().strftime("%H:%M"))
+            self.five.set(None, "")
+            self.week.set(None, "")
+            self.foot_label.config(text="")
+            self.foot_value.config(text="")
+
         self.note.config(text="", fg=FAINT)
         self.tray.icon = draw_icon(None)
         self.tray.title = f"클로드 쿨다운 — {text}"[:127]
