@@ -45,23 +45,36 @@ STARTUP_LNK = os.path.join(
 WARN_AT = 80  # 5시간 한도가 이 % 를 넘으면 알림
 WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
 
-WIDTH = 244
-HEIGHT = 116
-BG = "#14161a"
-FG = "#e6edf3"
-DIM = "#8b949e"
-FAINT = "#6e7681"
-TRACK = "#2a2f36"
+# ---------------------------------------------------------------- 치수·색
+WIDTH = 260
+PAD = 18
+INNER = WIDTH - PAD * 2
+
+BG = "#15171c"
+TITLE = "#e6edf3"
+LABEL = "#6b7280"
+SUB = "#c2cad4"
+FAINT = "#5c636e"
+TRACK = "#252a32"
+LINE = "#232830"
+GREEN = "#3fb950"
+AMBER = "#e3b341"
+RED = "#ff5c61"
+RED_BG = "#2b1418"
+
+KR = "맑은 고딕"
+NUM = "Segoe UI"
 
 
-def color_of(pct: float | None) -> str:
+def tone(pct: float | None) -> str:
+    """여유 초록 / 보통 노랑 / 임박 빨강."""
     if pct is None:
-        return "#6b7280"
+        return FAINT
     if pct < 50:
-        return "#2ea043"
+        return GREEN
     if pct < 80:
-        return "#d29922"
-    return "#e5484d"
+        return AMBER
+    return RED
 
 
 # ---------------------------------------------------------------- 설정 저장
@@ -130,18 +143,21 @@ def draw_icon(pct: float | None) -> Image.Image:
     text = "?" if pct is None else str(int(round(pct)))
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle((0, 0, 63, 63), radius=14, fill=color_of(pct))
+    d.rounded_rectangle((0, 0, 63, 63), radius=15, fill=tone(pct))
     size = 38 if len(text) < 3 else 28
     try:
-        font = ImageFont.truetype("arialbd.ttf", size)
+        font = ImageFont.truetype("segoeuib.ttf", size)
     except OSError:
-        font = ImageFont.load_default()
+        try:
+            font = ImageFont.truetype("arialbd.ttf", size)
+        except OSError:
+            font = ImageFont.load_default()
     box = d.textbbox((0, 0), text, font=font)
     d.text(
         ((64 - box[2] - box[0]) / 2, (64 - box[3] - box[1]) / 2),
         text,
         font=font,
-        fill="white",
+        fill="#0d1117",
     )
     return img
 
@@ -177,38 +193,59 @@ class Poller(threading.Thread):
             self.wake.clear()
 
 
-# ---------------------------------------------------------------- 위젯
+# ---------------------------------------------------------------- 화면 조각
 
 
-class Row:
-    """'5시간  7%   3시간 07분 후' 한 줄 + 게이지."""
+class Section:
+    """한 한도 덩어리 — 라벨 / 큰 숫자 + 남은시간 / 얇은 게이지."""
 
     def __init__(self, parent: tk.Misc, label: str):
-        line = tk.Frame(parent, bg=BG)
-        line.pack(fill="x", padx=12, pady=(9, 0))
-        tk.Label(
-            line, text=label, bg=BG, fg=DIM, font=("맑은 고딕", 8, "bold"), anchor="w"
-        ).pack(side="left")
-        self.reset = tk.Label(line, text="", bg=BG, fg=FAINT, font=("맑은 고딕", 8))
-        self.reset.pack(side="right")
-        self.value = tk.Label(
-            line, text="--", bg=BG, fg=FG, font=("맑은 고딕", 12, "bold")
+        self.box = tk.Frame(parent, bg=BG)
+        self.box.pack(fill="x", padx=PAD)
+
+        self.label = tk.Label(
+            self.box, text=label, bg=BG, fg=LABEL, font=(KR, 8), anchor="w"
         )
-        self.value.pack(side="left", padx=(8, 0))
+        self.label.pack(fill="x")
+
+        row = tk.Frame(self.box, bg=BG)
+        row.pack(fill="x")
+        self.value = tk.Label(row, text="--", bg=BG, fg=FAINT, font=(NUM, 24, "bold"))
+        self.value.pack(side="left")
+        self.left = tk.Label(row, text="", bg=BG, fg=SUB, font=(KR, 10))
+        self.left.pack(side="right", anchor="s", pady=(0, 9))
 
         self.bar = tk.Canvas(
-            parent, height=5, bg=TRACK, highlightthickness=0, width=WIDTH - 24
+            self.box, height=3, width=INNER, bg=TRACK, highlightthickness=0, bd=0
         )
-        self.bar.pack(fill="x", padx=12, pady=(4, 0))
-        self.widgets = [line, self.reset, self.value, self.bar]
+        self.bar.pack(fill="x", pady=(3, 0))
+
+        self.widgets = [self.box, self.label, row, self.value, self.left, self.bar]
 
     def set(self, pct: float | None, left: str) -> None:
-        tone = color_of(pct)
-        self.value.config(text="--" if pct is None else f"{pct:.0f}%", fg=tone)
-        self.reset.config(text=left)
+        color = tone(pct)
+        self.value.config(text="--" if pct is None else f"{pct:.0f}%", fg=color)
+        self.left.config(text=left, fg=SUB if pct is not None else FAINT)
         self.bar.delete("all")
-        width = self.bar.winfo_width() or (WIDTH - 24)
-        self.bar.create_rectangle(0, 0, width * (pct or 0) / 100, 5, fill=tone, width=0)
+        width = self.bar.winfo_width() or INNER
+        if pct is not None:
+            self.bar.create_rectangle(0, 0, width * pct / 100, 3, fill=color, width=0)
+
+
+def round_corners(root: tk.Tk) -> None:
+    """윈도우 11 둥근 모서리. 안 되는 환경이면 조용히 넘어간다."""
+    try:
+        import ctypes
+        from ctypes import byref, c_int
+
+        root.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, byref(c_int(2)), 4)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ---------------------------------------------------------------- 앱
 
 
 class App:
@@ -218,6 +255,7 @@ class App:
         self.commands: queue.Queue = queue.Queue()
         self.warned = False
         self.widget_visible = True
+        self.height = 0
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -226,20 +264,89 @@ class App:
         self.root.withdraw()
         self.root.configure(bg=BG)
 
-        self.rows = {
-            "five": Row(self.root, "5시간"),
-            "week": Row(self.root, "주간"),
-        }
-        self.footer = tk.Label(
-            self.root,
-            text="불러오는 중",
-            bg=BG,
-            fg=FAINT,
-            font=("맑은 고딕", 8),
-            anchor="w",
-        )
-        self.footer.pack(fill="x", padx=12, pady=(8, 8))
+        self._build()
+        self._bind_drag()
+        self._build_menu()
 
+        self.poller = Poller(self.results)
+        self.poller.start()
+        self.tray = self._build_tray()
+        threading.Thread(target=self.tray.run, daemon=True).start()
+
+        self.root.after(200, self._pump)
+
+    # -------------------------------------------------- 화면 구성
+    def _build(self) -> None:
+        # 머리말 — 평소엔 제목, 오류일 땐 빨간 띠로 바뀐다 (높이는 그대로)
+        self.head = tk.Frame(self.root, bg=BG)
+        self.head.pack(fill="x", pady=(0, 4))
+        self.accent = tk.Frame(self.head, bg=BG, width=3)
+        self.accent.pack(side="left", fill="y")
+        self.head_pad = tk.Frame(self.head, bg=BG)
+        self.head_pad.pack(fill="x", padx=(PAD - 3, PAD), pady=(15, 9))
+        self.title = tk.Label(
+            self.head_pad, text="클로드 사용량", bg=BG, fg=TITLE, font=(KR, 10, "bold")
+        )
+        self.title.pack(side="left")
+        self.stamp = tk.Label(self.head_pad, text="", bg=BG, fg=FAINT, font=(KR, 8))
+        self.stamp.pack(side="right")
+
+        self.five = Section(self.root, "5시간 한도")
+        self.gap = tk.Frame(self.root, bg=BG, height=17)
+        self.gap.pack()
+        self.week = Section(self.root, "주간 한도")
+
+        self.divider = tk.Frame(self.root, bg=LINE, height=1)
+        self.divider.pack(fill="x", padx=PAD, pady=(18, 0))
+
+        self.foot = tk.Frame(self.root, bg=BG)
+        self.foot.pack(fill="x", padx=PAD, pady=(9, 15))
+        self.foot_label = tk.Label(self.foot, text="", bg=BG, fg=LABEL, font=(KR, 8))
+        self.foot_label.pack(side="left")
+        self.foot_value = tk.Label(self.foot, text="", bg=BG, fg=SUB, font=(KR, 9))
+        self.foot_value.pack(side="left", padx=(7, 0))
+        self.note = tk.Label(
+            self.foot, text="불러오는 중", bg=BG, fg=FAINT, font=(KR, 8)
+        )
+        self.note.pack(side="right")
+
+    def _head_normal(self) -> None:
+        for w in (self.head, self.head_pad, self.title, self.stamp):
+            w.configure(bg=BG)
+        self.accent.configure(bg=BG)
+        self.title.configure(text="클로드 사용량", fg=TITLE)
+        self.stamp.configure(fg=FAINT)
+
+    def _head_error(self, text: str) -> None:
+        for w in (self.head, self.head_pad, self.title, self.stamp):
+            w.configure(bg=RED_BG)
+        self.accent.configure(bg=RED)
+        self.title.configure(text=text, fg=RED)
+        self.stamp.configure(fg="#a06068")
+
+    def _bind_drag(self) -> None:
+        targets = [
+            self.root,
+            self.head,
+            self.head_pad,
+            self.title,
+            self.stamp,
+            self.gap,
+            self.divider,
+            self.foot,
+            self.foot_label,
+            self.foot_value,
+            self.note,
+            *self.five.widgets,
+            *self.week.widgets,
+        ]
+        for w in targets:
+            w.bind("<Button-1>", self._press)
+            w.bind("<B1-Motion>", self._drag)
+            w.bind("<ButtonRelease-1>", self._release)
+            w.bind("<Button-3>", self._popup)
+
+    def _build_menu(self) -> None:
         self.var_topmost = tk.BooleanVar(self.root, bool(self.state["topmost"]))
         self.var_autostart = tk.BooleanVar(self.root, autostart_enabled())
 
@@ -258,19 +365,8 @@ class App:
         self.menu.add_separator()
         self.menu.add_command(label="종료", command=self.quit)
 
-        draggable = [self.root, self.footer] + [
-            w for row in self.rows.values() for w in row.widgets
-        ]
-        for w in draggable:
-            w.bind("<Button-1>", self._press)
-            w.bind("<B1-Motion>", self._drag)
-            w.bind("<ButtonRelease-1>", self._release)
-            w.bind("<Button-3>", self._popup)
-
-        self.poller = Poller(self.results)
-        self.poller.start()
-
-        self.tray = pystray.Icon(
+    def _build_tray(self) -> pystray.Icon:
+        return pystray.Icon(
             "claude_cooldown",
             draw_icon(None),
             "클로드 쿨다운 — 불러오는 중",
@@ -289,9 +385,6 @@ class App:
                 pystray.MenuItem("종료", lambda: self.commands.put("quit")),
             ),
         )
-        threading.Thread(target=self.tray.run, daemon=True).start()
-
-        self.root.after(200, self._pump)
 
     # -------------------------------------------------- 드래그
     def _press(self, e):
@@ -312,7 +405,7 @@ class App:
 
     # -------------------------------------------------- 메뉴
     def refresh_now(self):
-        self.footer.config(text="새로고침 중")
+        self.note.config(text="새로고침 중", fg=FAINT)
         self.poller.refresh_now()
 
     def toggle_topmost(self):
@@ -333,12 +426,17 @@ class App:
             self.root.withdraw()
 
     def show_window(self):
-        """창을 지정한 자리에 지정한 크기로 편다. 시작할 때와 다시 켤 때 모두 여기를 쓴다."""
+        """창을 저장된 자리에 편다. 시작할 때와 다시 켤 때 모두 여기를 쓴다."""
         self.root.deiconify()
         self.root.overrideredirect(True)
-        self.root.attributes("-alpha", 0.92)
+        self.root.attributes("-alpha", 0.96)
         self.root.attributes("-topmost", bool(self.state["topmost"]))
-        self.root.geometry(f"{WIDTH}x{HEIGHT}+{self.state['x']}+{self.state['y']}")
+        self.root.update_idletasks()
+        self.height = self.height or self.root.winfo_reqheight()
+        self.root.geometry(
+            f"{WIDTH}x{self.height}+{self.state['x']}+{self.state['y']}"
+        )
+        round_corners(self.root)
 
     def quit(self):
         self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
@@ -378,14 +476,23 @@ class App:
         self.root.after(300, self._pump)
 
     def _show(self, usage: Usage):
-        self.rows["five"].set(usage.five.pct, usage.five.left)
-        self.rows["week"].set(usage.week.pct, usage.week.left)
+        self._head_normal()
+        self.five.set(usage.five.pct, usage.five.left)
+        self.week.set(usage.week.pct, usage.week.left)
 
         stamp = usage.fetched_at.astimezone().strftime("%H:%M")
-        scoped = "  ".join(
-            f"{s.label} {s.pct:.0f}%" for s in usage.scoped if s.pct is not None
-        )
-        self.footer.config(text=f"{stamp} 기준   {scoped}".rstrip(), fg=FAINT)
+        self.stamp.config(text=f"{stamp} 기준")
+
+        scoped = [s for s in usage.scoped if s.pct is not None]
+        if scoped:
+            self.foot_label.config(text="모델별")
+            self.foot_value.config(
+                text="  ".join(f"{s.label} {s.pct:.0f}%" for s in scoped)
+            )
+        else:
+            self.foot_label.config(text="")
+            self.foot_value.config(text="")
+        self.note.config(text="", fg=FAINT)
 
         export(usage)
 
@@ -407,12 +514,14 @@ class App:
         return "\n".join(parts)
 
     def _show_error(self, err: Exception):
-        relogin = isinstance(err, LoginRequired)
-        text = "재로그인 필요" if relogin else str(err)
-        stamp = datetime.now().strftime("%H:%M")
-        self.footer.config(text=f"{stamp}  {text}", fg="#e5484d")
-        self.rows["five"].set(None, "")
-        self.rows["week"].set(None, "")
+        text = "재로그인 필요" if isinstance(err, LoginRequired) else str(err)
+        self._head_error(text)
+        self.stamp.config(text=datetime.now().strftime("%H:%M"))
+        self.five.set(None, "")
+        self.week.set(None, "")
+        self.foot_label.config(text="")
+        self.foot_value.config(text="")
+        self.note.config(text="", fg=FAINT)
         self.tray.icon = draw_icon(None)
         self.tray.title = f"클로드 쿨다운 — {text}"[:127]
 
