@@ -11,7 +11,7 @@
 실행:  pythonw cooldown_agent.py
 키 확인:  python cooldown_agent.py --info
 
-바탕화면 위젯만 쓸 거면 이 파일은 필요 없습니다 — desktop/cooldown_app.py 만 실행하세요.
+바탕화면 위젯만 쓸 거면 이 파일은 필요 없습니다 — windows/cooldown_app.py 만 실행하세요.
 """
 
 from __future__ import annotations
@@ -25,10 +25,7 @@ from datetime import datetime
 
 import requests
 
-sys.path.insert(
-    0,
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "desktop"),
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cooldown_core import MIN_INTERVAL, LoginRequired, UsageError, fetch  # noqa: E402
 
 # ─── 배포 시 여기만 본인 서버 주소로 바꿔서 나눠주면 됩니다 ───

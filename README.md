@@ -8,9 +8,11 @@ Claude 구독 한도(5시간 / 주간)를 **윈도우 바탕화면 위젯 + 시�
 # A. 윈도우 앱 (이것만으로 완결 — 서버 필요 없음)
 
 ```
-pip install requests pillow pystray pywin32
-pythonw desktop/cooldown_app.py
+pip install -r requirements.txt
+pythonw windows/cooldown_app.py
 ```
+
+`windows\클로드 쿨다운 실행.bat` 을 더블클릭해도 된다.
 
 - **바탕화면 위젯** — 드래그로 이동, 위치 자동 저장. 우클릭으로 메뉴.
 - **시작표시줄 아이콘** — 5시간 사용률이 숫자로 뜬다. 80% 넘으면 한 번 알림.
@@ -23,7 +25,7 @@ pythonw desktop/cooldown_app.py
 응답 원본을 보려면:
 
 ```
-python desktop/cooldown_core.py
+python cooldown_core.py
 ```
 
 ---
@@ -79,5 +81,5 @@ PC가 꺼져 있으면 값이 멈추므로, 응답의 `stale` 이 true 일 때 �
 - 5분 간격을 줄이지 마세요. 너무 잦으면 오히려 rate limit 에 걸립니다.
 - 이 방식은 Anthropic이 공식 문서화하지 않은 엔드포인트를 씁니다.
   바뀌면 **모두 동시에** 안 됩니다. 그때는 에이전트만 고쳐서 다시 배포하면 됩니다.
-- 응답 형식이 바뀌면 고칠 곳은 `desktop/cooldown_core.py` **한 곳뿐**입니다.
-  (위젯·트레이·에이전트가 전부 이 모듈을 import 합니다)
+- 응답 형식이 바뀌면 고칠 곳은 `cooldown_core.py` **한 곳뿐**입니다.
+  (윈도우 앱·에이전트가 전부 이 모듈을 import 합니다)

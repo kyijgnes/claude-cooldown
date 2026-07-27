@@ -8,9 +8,13 @@
 
 ## 구조
 
+**윈도우 앱**(주력)은 서버를 거치지 않고 로컬에서 직접 조회한다.
+**폰 위젯**은 서버 릴레이가 필요하다 — 아직 미배포.
+
 ```
-친구 PC (OAuth 토큰은 로컬에만 존재)
-  └─ agent/cooldown_agent.py   5분마다 사용률 조회
+내 PC (OAuth 토큰은 로컬에만 존재)
+  ├─ windows/cooldown_app.py   바탕화면 위젯 + 트레이. 직접 조회, 서버 불필요
+  └─ agent/cooldown_agent.py   5분마다 조회
         │  POST {key, 퍼센트 4개}
         ▼
   server/  Next.js API route → Supabase (service_role)
@@ -20,20 +24,19 @@
 ```
 
 - `key` = 에이전트 첫 실행 시 생성되는 랜덤 32 hex. 읽기 비밀번호 역할.
-- 데스크탑 위젯(`desktop/`)은 서버를 거치지 않고 로컬에서 직접 조회한다.
 
 ## 파일
 
 | 경로 | 역할 |
 |---|---|
-| `desktop/cooldown_core.py` | **조회·파싱 공용 모듈. 파서는 여기 한 곳에만 둔다** |
-| `desktop/cooldown_app.py` | **윈도우 앱 본체.** 바탕화면 위젯 + 트레이 아이콘 + 자동 실행 등록 |
+| `cooldown_core.py` | **조회·파싱 공용 모듈. 파서는 여기 한 곳에만 둔다** |
+| `windows/cooldown_app.py` | **윈도우 앱 본체.** 바탕화면 위젯 + 트레이 아이콘 + 자동 실행 등록 |
+| `windows/클로드 쿨다운 실행.bat` | 콘솔 없이 앱을 띄우는 실행 파일 |
 | `agent/cooldown_agent.py` | 폰 위젯용 상주 에이전트. 조회 → 로컬 JSON 저장 → 서버 POST |
 | `server/app/api/cooldown/route.ts` | POST(업서트) / GET(조회) 릴레이 |
 | `server/schema.sql` | `public.claude_cooldown` 테이블, RLS on + 정책 없음 |
+| `requirements.txt` | requests / pillow / pystray / pywin32 |
 | `README.md` | 설치·배포 절차, KWGT 수식 |
-| ~~`desktop/cooldown_overlay.py`~~ | 구버전. `cooldown_app.py` 로 대체됨 (삭제 예정) |
-| ~~`desktop/cooldown_tray.py`~~ | 구버전. `cooldown_app.py` 로 대체됨 (삭제 예정) |
 
 ## 확정된 사실
 
@@ -62,17 +65,14 @@
 - `utilization` 은 **0~100 스케일**이다. 100 을 곱하지 말 것.
 - 모델별 주간 한도는 `seven_day_opus` 같은 최상위 필드가 아니라 **`limits[]` 의
   `kind == "weekly_scoped"`** 에 들어온다. 최상위 필드는 이제 항상 null.
-- 형식이 또 바뀌면 고칠 곳은 `desktop/cooldown_core.py` 한 곳뿐.
-  확인은 `python desktop/cooldown_core.py` (원본 JSON 출력).
+- 형식이 또 바뀌면 고칠 곳은 `cooldown_core.py` 한 곳뿐.
+  확인은 `python cooldown_core.py` (원본 JSON 출력).
 
 ## 다음 작업
 
-1. 구버전 `desktop/cooldown_overlay.py`, `desktop/cooldown_tray.py` 삭제
+1. 배포 패키징: PyInstaller onefile (윈도우 앱)
 2. 서버 배포 (Supabase SQL 실행 → Vercel 환경변수 2개 → 배포)
-3. 배포 패키징: PyInstaller onefile + `PUSH_URL` 을 빌드 시 주입
-4. `limits[]` 의 `severity` 를 색상 임계값 대신 쓸지 검토 (지금은 50/80 자체 기준)
-5. 폴더 2중 중첩(`13. 클로드 사용량/claude-cooldown/claude-cooldown/`) 정리,
-   바깥 CLAUDE.md 중복 제거
+3. `limits[]` 의 `severity` 를 색상 임계값 대신 쓸지 검토 (지금은 50/80 자체 기준)
 
 ## 하지 말 것
 
