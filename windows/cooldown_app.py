@@ -58,6 +58,7 @@ RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
+STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
 DOCK_LABEL = "작업표시줄에 붙이기 (슬림 바)"
 ALPHA = 0.96  # 평소 창 불투명도
 BUSY_ALPHA = 0.78  # 새로고침 누른 직후
@@ -339,6 +340,27 @@ def raise_above_taskbar(root: tk.Tk) -> None:
         pass
 
 
+def popup_menu_open() -> bool:
+    """지금 화면에 열려 있는 팝업 메뉴가 있는가.
+
+    붙여 둔 위젯을 계속 맨 앞으로 올리다 보면 **우클릭 메뉴까지 덮어 버린다.**
+    메뉴가 떠 있는 동안에는 올리지 않는다. (#32768 은 윈도우 기본 메뉴 창)
+    """
+    try:
+        import win32gui
+
+        # FindWindow 는 다 쓰고 숨겨 둔 메뉴 창까지 찾아낸다 — 보이는 것만 센다
+        handle = 0
+        while True:
+            handle = win32gui.FindWindowEx(0, handle, "#32768", None)
+            if not handle:
+                return False
+            if win32gui.IsWindowVisible(handle):
+                return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def dismiss_menus() -> None:
     """열려 있는 팝업 메뉴를 닫는다.
 
@@ -383,6 +405,7 @@ class App:
         self.last_error_stamp = ""
         self.last_manual = 0.0
         self._dragging = False
+        self._menu_open = False
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -404,7 +427,7 @@ class App:
         threading.Thread(target=self.tray.run, daemon=True).start()
 
         self.root.after(200, self._pump)
-        self.root.after(1500, self._stay_above)
+        self.root.after(STAY_TICK, self._stay_above)
         self.root.after(TICK * 1000, self._tick)
 
     # -------------------------------------------------- 본체(스킨) 그리기
@@ -554,7 +577,12 @@ class App:
         self.var_autostart.set(autostart_enabled())
         self._sync_dock_menu()
         self.var_skin.set(self.skin.key)
-        self.menu.tk_popup(e.x_root, e.y_root)
+        # 메뉴가 떠 있는 동안에는 위젯을 위로 올리지 않는다 (올리면 메뉴를 덮는다)
+        self._menu_open = True
+        try:
+            self.menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            self._menu_open = False
 
     # -------------------------------------------------- 동작
     def refresh_now(self):
@@ -751,15 +779,21 @@ class App:
                 self.root.after(TICK * 1000, self._tick)
 
     def _stay_above(self):
-        """붙어 있는 동안만 도는 짧은 주기. 작업표시줄에 가리지 않게 지킨다."""
+        """붙어 있는 동안 작업표시줄에 가리지 않게 지킨다.
+
+        작업표시줄은 눌릴 때마다 스스로를 맨 앞으로 올린다. 그때 가려지는 시간이
+        곧 주기이므로 짧게 잡는다 — SetWindowPos 한 번이라 비용은 사실상 없다.
+        다만 메뉴가 떠 있는 동안 올리면 그 메뉴를 덮어 버리므로 그때는 쉰다.
+        """
         try:
-            if self.state["dock"] and self.skin.dockable and self.widget_visible:
+            docked = self.state["dock"] and self.skin.dockable and self.widget_visible
+            if docked and not self._menu_open and not popup_menu_open():
                 raise_above_taskbar(self.root)
         except Exception:  # noqa: BLE001
             pass
         finally:
             if self.alive:
-                self.root.after(1500, self._stay_above)
+                self.root.after(STAY_TICK, self._stay_above)
 
     def _reassert_dock(self):
         """작업표시줄 아이콘이 늘거나 줄면 빈 자리가 옮겨간다 — 갱신할 때마다 다시 맞춘다."""
