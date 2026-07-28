@@ -39,8 +39,9 @@ from cooldown_core import (  # noqa: E402
     fetch,
 )
 
+import cooldown_ping  # noqa: E402
 import skins  # noqa: E402
-from skins.base import P, set_palette, tone  # noqa: E402
+from skins.base import KR, NUM, P, set_palette, tone  # noqa: E402
 
 HOME = os.path.expanduser("~")
 STATE_PATH = os.path.join(HOME, ".claude_cooldown_widget.json")
@@ -56,8 +57,11 @@ WARN_AT = 80  # 한도가 이 % 를 넘으면 알림
 WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
 RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
+UNDOCK_SLOP = 120  # 붙여 둔 상태에선 이만큼 넘게 끌어야 떼어 낸다 (그 안이면 클릭으로 보고 제자리로)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
+PING_TICK = 20  # 자동 핑을 쏠 때가 됐는지 보는 주기 (초). 앵커 여유(GRACE_MIN)보다 촘촘히.
+PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
 THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
@@ -421,6 +425,12 @@ class App:
         self._dragging = False
         self._menu_open = False
 
+        # 자동 핑(모닝 스타터) 상태 — _build_menu 가 참조하므로 그 전에 잡아 둔다
+        self.ping_cfg = cooldown_ping.load_cfg()
+        self.ping_out: queue.Queue = queue.Queue()
+        self._ping_busy = False
+        self._last_ping_dt = cooldown_ping._parse_iso(self.ping_cfg.get("last_ping"))
+
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
         # '최소화로 시작' 표시 상태를 넘기는 경우가 있어, withdraw → deiconify 를
@@ -445,6 +455,7 @@ class App:
         self.root.after(STAY_TICK, self._stay_above)
         self.root.after(TICK * 1000, self._tick)
         self.root.after(THEME_TICK * 1000, self._theme_watch)
+        self.root.after(3000, self._ping_tick)  # 첫 조회가 들어올 시간을 준 뒤 시작
 
     # -------------------------------------------------- 본체(스킨) 그리기
     def _build_body(self) -> None:
@@ -531,11 +542,19 @@ class App:
         self.var_dock = tk.BooleanVar(self.root, bool(self.state["dock"]))
         self.var_skin = tk.StringVar(self.root, self.skin.key)
         self.var_theme = tk.StringVar(self.root, self.state["theme"])
+        self.var_ping = tk.BooleanVar(self.root, bool(self.ping_cfg.get("enabled")))
 
+        # 메인 메뉴는 두 진입점으로 나눈다 — 하나의 앱이지만 기능은 직관적으로 분리.
+        #   · 쿨다운 (사용량 표시): 위젯 모양·동작 (새로고침·디자인·밝기·붙이기·항상위)
+        #   · 모닝 스타터 (자동 핑): 5시간 창을 앵커 시각에 맞춰 여는 기능
+        # 공통(앱 전체)인 자동 실행·종료만 메인에 둔다.
         self.menu = tk.Menu(self.root, tearoff=0)
-        self.menu.add_command(label="지금 새로고침", command=self.refresh_now)
 
-        design = tk.Menu(self.menu, tearoff=0)
+        # ---- 쿨다운 (사용량 표시) ----
+        # '지금 새로고침' 항목은 뺀다 — 위젯을 클릭하면 새로고침되고 스피너가 돈다.
+        cool = tk.Menu(self.menu, tearoff=0)
+
+        design = tk.Menu(cool, tearoff=0)
         for cls in skins.SKINS:
             design.add_radiobutton(
                 label=cls.name,
@@ -543,9 +562,9 @@ class App:
                 variable=self.var_skin,
                 command=lambda k=cls.key: self.switch_skin(k),
             )
-        self.menu.add_cascade(label="디자인", menu=design)
+        cool.add_cascade(label="디자인", menu=design)
 
-        theme = tk.Menu(self.menu, tearoff=0)
+        theme = tk.Menu(cool, tearoff=0)
         for key, label in THEMES:
             theme.add_radiobutton(
                 label=label,
@@ -553,20 +572,34 @@ class App:
                 variable=self.var_theme,
                 command=lambda k=key: self.switch_theme(k),
             )
-        self.menu.add_cascade(label="밝기", menu=theme)
+        cool.add_cascade(label="밝기", menu=theme)
 
         # 이름에 (슬림 바) 를 넣어, 누르면 그 디자인으로 바뀐다는 걸 미리 알린다.
         # 잠가 두면 기본 디자인에서 늘 회색이라 이유를 알 길이 없다.
-        self.menu.add_checkbutton(
-            label=DOCK_LABEL,
-            variable=self.var_dock,
-            command=self.toggle_dock,
+        cool.add_checkbutton(label=DOCK_LABEL, variable=self.var_dock, command=self.toggle_dock)
+        cool.add_checkbutton(
+            label="항상 위에 표시", variable=self.var_topmost, command=self.toggle_topmost
         )
-        self.menu.add_checkbutton(
-            label="항상 위에 표시",
-            variable=self.var_topmost,
-            command=self.toggle_topmost,
+        self.menu_cool = cool
+        self.menu.add_cascade(label="쿨다운 (사용량 표시)", menu=cool)
+
+        # ---- 모닝 스타터 ----
+        # '핑' 같은 개발자 용어를 쓰지 않는다. 항목 이름이 곧 하는 일이 되게 한다.
+        # 값(다음 시각·마지막 결과)은 메뉴에 나열하지 않는다 — 설정·기록 창에서 본다.
+        ping = tk.Menu(self.menu, tearoff=0)
+        ping.add_checkbutton(
+            label="정한 시각마다 5시간 자동 시작",
+            variable=self.var_ping,
+            command=self.toggle_ping,
         )
+        ping.add_separator()
+        ping.add_command(label="지금 한 번 실행", command=self.send_ping_now)
+        ping.add_command(label="시각 설정…", command=self.open_ping_times)
+        ping.add_command(label="실행 기록…", command=self.open_ping_log)
+        self.menu.add_cascade(label="모닝 스타터 (5시간 자동 시작)", menu=ping)
+
+        # ---- 앱 공통 ----
+        self.menu.add_separator()
         self.menu.add_checkbutton(
             label="윈도우 켤 때 자동 실행",
             variable=self.var_autostart,
@@ -612,13 +645,21 @@ class App:
     def _release(self, e):
         self._dragging = False
         # 그냥 한 번 누른 것과 끌어서 옮긴 것을 구분한다.
-        # 구분하지 않으면 붙여 둔 위젯을 한 번 클릭했을 뿐인데 붙이기가 풀리고
-        # 작업표시줄 뒤로 내려가, 12px 짜리 조각만 남는다.
         start = getattr(self, "_from", (e.x_root, e.y_root))
-        if abs(e.x_root - start[0]) < DRAG_SLOP and abs(e.y_root - start[1]) < DRAG_SLOP:
-            self.refresh_now()  # 옮긴 게 아니라 그냥 누른 것 — 바로 새로고침
+        moved = max(abs(e.x_root - start[0]), abs(e.y_root - start[1]))
+        docked = bool(self.state["dock"]) and self.skin.dockable
+
+        # 붙여 둔 상태에서는 웬만큼 움직여도 '클릭'으로 본다.
+        # 그냥 눌러 새로고침하려다 마우스가 몇 px 밀렸을 뿐인데 작업표시줄에서
+        # 떨어져 위로 떠 버리는 걸 막는다 — UNDOCK_SLOP 안이면 제자리로 다시 붙인다.
+        threshold = UNDOCK_SLOP if docked else DRAG_SLOP
+        if moved < threshold:
+            if docked:
+                self._reassert_dock()  # 밀린 만큼 작업표시줄 자리로 다시 붙인다
+            self.refresh_now()
             return
 
+        # 확실히 끌어 옮겼다 — 자유 위치로 떼어 낸다. (다시 붙이려면 우클릭 메뉴에서)
         x, y = clamp_to_screen(
             self.root.winfo_x(), self.root.winfo_y(), self.skin.width, self.height
         )
@@ -634,6 +675,7 @@ class App:
         self._sync_dock_menu()
         self.var_skin.set(self.skin.key)
         self.var_theme.set(self.state["theme"])
+        self.var_ping.set(bool(self.ping_cfg.get("enabled")))
         # 메뉴가 떠 있는 동안에는 위젯을 위로 올리지 않는다 (올리면 메뉴를 덮는다)
         self._menu_open = True
         try:
@@ -646,16 +688,55 @@ class App:
         # 연타해도 최소 간격은 지킨다 (수동 경로로 rate limit 규칙을 우회하지 않게)
         now = time.monotonic()
         if now - self.last_manual < MANUAL_FLOOR:
-            # 너무 자주 눌렀다. 눌린 티만 잠깐 내고 조회는 하지 않는다 —
+            # 너무 자주 눌렀다. 눌린 티(스피너)만 내고 조회는 하지 않는다 —
             # 아무 반응이 없으면 고장난 줄 안다.
-            self.root.attributes("-alpha", BUSY_ALPHA)
-            self.root.after(120, self._clear_busy)
+            self._spin_once()
             return
         self.last_manual = now
-        # 눌렀다는 티를 낸다. 문구를 띄우는 대신 위젯을 잠깐 흐리게 했다가,
-        # 값이 들어오면 원래대로 돌아온다 — 스킨이 무엇이든 똑같이 동작한다.
-        self.root.attributes("-alpha", BUSY_ALPHA)
+        # 눌렀다는 티: 깜빡임(창 흐리기) 대신 오른쪽 위에 작은 스피너를 한 바퀴 돌린다.
+        self._spin_once()
         self.poller.refresh_now()
+
+    def _spin_once(self):
+        """새로고침을 눌렀다는 표시 — 오른쪽 위 모서리에서 스피너를 한 바퀴 돌린다.
+        스킨과 무관하게 root 위에 얹는 작은 캔버스 하나로 그린다. 색은 그릴 때 정한다."""
+        try:
+            sp = getattr(self, "_spinner", None)
+            if sp is None:
+                sp = tk.Canvas(self.root, width=16, height=16, highlightthickness=0, bd=0)
+                self._spinner = sp
+            sp.configure(bg=P.bg)
+            sp.place(relx=1.0, rely=0.0, x=-7, y=7, anchor="ne")
+            if getattr(self, "_spinning", False):
+                return  # 이미 도는 중이면 겹쳐 시작하지 않는다
+            self._spinning = True
+            frames = 12  # 12칸 × 42ms ≈ 0.5초에 한 바퀴
+
+            def step(n):
+                if not self.alive:
+                    return
+                try:
+                    sp.delete("all")
+                    sp.create_oval(2, 2, 14, 14, outline=P.track, width=2)  # 배경 링
+                    sp.create_arc(
+                        2, 2, 14, 14, start=(90 - n * 30) % 360, extent=110,
+                        style="arc", outline=P.title, width=2,  # 도는 조각(밝게)
+                    )
+                except tk.TclError:
+                    self._spinning = False
+                    return
+                if n < frames:
+                    self.root.after(42, lambda: step(n + 1))
+                else:
+                    self._spinning = False
+                    try:
+                        sp.place_forget()
+                    except tk.TclError:
+                        pass
+
+            step(0)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _clear_busy(self):
         self.root.attributes("-alpha", ALPHA)
@@ -800,6 +881,13 @@ class App:
             else:
                 self._show_error(item)
 
+        while True:
+            try:
+                ok, detail, manual, when = self.ping_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_ping_result(ok, detail, manual, when)
+
     @staticmethod
     def _stamp(usage: Usage) -> str:
         return usage.fetched_at.astimezone().strftime("%H:%M")
@@ -879,6 +967,10 @@ class App:
         for limit in (usage.five, usage.week):
             if limit.pct is not None:
                 parts.append(f"{limit.label} {limit.pct:.0f}%  {limit.left}")
+        if self.ping_cfg.get("enabled"):
+            times = cooldown_ping.parse_times(self.ping_cfg["times"])
+            nxt = cooldown_ping.predict_next(datetime.now(), times, self._five_resets_local())
+            parts.append(f"다음 시작 {nxt:%H:%M}")
         return "\n".join(parts)
 
     def _show_error(self, err: Exception):
@@ -895,6 +987,408 @@ class App:
         self.tray.icon = draw_icon(None)
         detail = f"{type(err).__name__}: {err}" if not str(err) else text
         self.tray.title = f"클로드 쿨다운 — {detail}"[:127]
+
+    # -------------------------------------------------- 자동 핑 (모닝 스타터)
+    def _five_resets_local(self) -> datetime | None:
+        """지금 5시간 창이 풀리는 시각(로컬, naive). 창이 없으면 None.
+        응답의 resets_at 은 UTC(aware)라 로컬 naive 로 바꿔 스케줄 계산과 맞춘다."""
+        u = self.last_usage
+        if u is None or u.five.resets_at is None:
+            return None
+        try:
+            return u.five.resets_at.astimezone().replace(tzinfo=None)
+        except (ValueError, OSError):
+            return None
+
+    def _ping_tick(self):
+        """앵커 시각이 됐고 창이 비어 있으면 핑을 쏜다. _pump 와 달리 20초마다.
+        여기서 예외가 새도 다음 예약까지는 가야 하므로 통째로 감싼다."""
+        try:
+            cfg = self.ping_cfg
+            if (
+                cfg.get("enabled")
+                and not self._ping_busy
+                and self.last_usage is not None  # 창 상태를 모르면 함부로 쏘지 않는다
+            ):
+                now = datetime.now()
+                times = cooldown_ping.parse_times(cfg["times"])
+                if cooldown_ping.should_ping_now(
+                    now, times, self._five_resets_local(), self._last_ping_dt
+                ):
+                    self._start_ping(anchor_now=now)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if self.alive:
+                self.root.after(PING_TICK * 1000, self._ping_tick)
+
+    def _start_ping(self, anchor_now: datetime | None = None, manual: bool = False):
+        """핑 전송을 백그라운드 스레드에서 시작한다. Tk 스레드를 막지 않게."""
+        if self._ping_busy:
+            return
+        self._ping_busy = True
+        # 자동 핑은 같은 앵커에 두 번 쏘지 않도록 낙관적으로 지금을 마지막으로 세운다.
+        # (실패하면 이 앵커는 건너뛴다 — 다음 앵커가 다시 정렬한다)
+        if not manual and anchor_now is not None:
+            self._last_ping_dt = anchor_now
+
+        def worker():
+            ok, detail = cooldown_ping.send_ping(self.ping_cfg)
+            self.ping_out.put((ok, detail, manual, datetime.now()))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_ping_result(self, ok: bool, detail: str, manual: bool, when: datetime):
+        self._ping_busy = False
+        self.ping_cfg["last_result"] = (
+            f"{when:%H:%M} " + ("성공 · " if ok else "실패 · ") + detail
+        )
+        if ok and not manual:
+            self.ping_cfg["last_ping"] = when.isoformat()
+            self._last_ping_dt = when
+        cooldown_ping.save_cfg(self.ping_cfg)
+        if ok:
+            self.poller.refresh_now()  # 창이 열렸으니 위젯 숫자를 곧바로 갱신
+        else:
+            try:
+                reason = cooldown_ping.friendly_error(detail)
+                self.tray.notify(f"자동 시작 실패 · {reason}", "클로드 쿨다운")
+            except Exception:  # noqa: BLE001
+                pass
+
+    def toggle_ping(self):
+        self.ping_cfg["enabled"] = not self.ping_cfg.get("enabled")
+        cooldown_ping.save_cfg(self.ping_cfg)
+        self.var_ping.set(bool(self.ping_cfg["enabled"]))
+
+    def send_ping_now(self):
+        """지금 한 번 쏜다 (테스트/즉시 창 열기). 앵커 정렬과 무관."""
+        self._start_ping(manual=True)
+
+    # -------------------------------------------------- 위젯과 같은 결의 팝업
+    # 팝업도 본체 위젯과 똑같이: 테두리 없는 둥근 창 + 왼쪽 액센트 바 + 볼드 제목,
+    # 드래그로 이동, ✕·Esc 로 닫기. OS 창틀을 쓰지 않아 카드 스킨과 한 몸처럼 보인다.
+    def _open_panel(self, title: str):
+        """(top, body) 를 돌려준다. body 에 내용을 채운 뒤 _finalize_panel(top, w) 호출."""
+        top = tk.Toplevel(self.root)
+        top.withdraw()
+        top.overrideredirect(True)
+        top.configure(bg=P.bg)
+        top.attributes("-topmost", True)
+
+        head = tk.Frame(top, bg=P.bg)
+        head.pack(fill="x")
+        accent = tk.Frame(head, bg=P.green, width=3)  # 카드 머리말의 액센트 바와 같은 결
+        accent.pack(side="left", fill="y")
+        pad = tk.Frame(head, bg=P.bg)
+        pad.pack(side="left", fill="x", expand=True, padx=(PANEL_PAD - 3, PANEL_PAD), pady=(14, 10))
+        title_lbl = tk.Label(pad, text=title, bg=P.bg, fg=P.title, font=(KR, 10, "bold"))
+        title_lbl.pack(side="left")
+        close = tk.Label(pad, text="✕", bg=P.bg, fg=P.faint, font=(KR, 11), cursor="hand2")
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda _e: top.destroy())
+        close.bind("<Enter>", lambda _e: close.config(fg=P.title))
+        close.bind("<Leave>", lambda _e: close.config(fg=P.faint))
+
+        body = tk.Frame(top, bg=P.bg)
+        body.pack(fill="both", expand=True)
+
+        # 제목표시줄이 없으니 머리말을 잡고 끌어 옮긴다
+        self._bind_panel_drag(top, head, pad, title_lbl, accent)
+        top.bind("<Escape>", lambda _e: top.destroy())
+        top.focus_set()
+        return top, body
+
+    def _bind_panel_drag(self, top: tk.Toplevel, *widgets: tk.Misc) -> None:
+        st = {"x": 0, "y": 0}
+
+        def press(e):
+            st["x"] = e.x_root - top.winfo_x()
+            st["y"] = e.y_root - top.winfo_y()
+
+        def drag(e):
+            top.geometry(f"+{e.x_root - st['x']}+{e.y_root - st['y']}")
+
+        for w in widgets:
+            w.bind("<Button-1>", press)
+            w.bind("<B1-Motion>", drag)
+
+    def _finalize_panel(self, top: tk.Toplevel, width: int, grab: bool = False) -> None:
+        """내용을 다 채운 뒤 크기를 재고 위젯 옆에 띄운다."""
+        top.update_idletasks()
+        height = top.winfo_reqheight()
+        x, y = clamp_to_screen(
+            self.root.winfo_x() + 28, self.root.winfo_y() + 28, width, height
+        )
+        top.geometry(f"{width}x{height}+{x}+{y}")
+        top.deiconify()
+        round_corners(top)  # 본체와 같은 둥근 모서리
+        if grab:
+            try:
+                top.grab_set()
+            except tk.TclError:
+                pass
+
+    def _refit_panel(self, top: tk.Toplevel, width: int) -> None:
+        """내용이 바뀌어(경고문 표시·행 추가/삭제) 높이가 달라지면 창을 다시 잰다.
+        보더리스 고정 크기 창이라 이걸 안 하면 늘어난 내용이 창 밖으로 잘린다.
+        아직 안 띄운(withdraw) 상태면 _finalize_panel 이 위치를 잡을 때까지 건드리지 않는다."""
+        try:
+            if not top.winfo_ismapped():
+                return
+            top.update_idletasks()
+            height = top.winfo_reqheight()
+            x, y = clamp_to_screen(top.winfo_x(), top.winfo_y(), width, height)
+            top.geometry(f"{width}x{height}+{x}+{y}")
+        except tk.TclError:
+            pass
+
+    def _themed_button(self, parent, text, command, primary=False) -> tk.Button:
+        """팔레트 색을 입힌 납작한 버튼. primary 는 초록 강조."""
+        if primary:
+            bg, fg, active = P.green, P.bg, P.green
+        else:
+            bg, fg, active = P.track, P.title, P.line
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            width=7,
+            bg=bg,
+            fg=fg,
+            activebackground=active,
+            activeforeground=fg,
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            padx=10,
+            pady=5,
+            font=(KR, 9, "bold") if primary else (KR, 9),
+        )
+
+    @staticmethod
+    def _friendly_time(when: datetime) -> str:
+        """'오늘 00:04' / '어제 23:33' / '07/26 14:00' — 사람이 읽는 시각."""
+        today = datetime.now().date()
+        day = when.date()
+        hm = when.strftime("%H:%M")
+        if day == today:
+            return f"오늘 {hm}"
+        if (today - day).days == 1:
+            return f"어제 {hm}"
+        return when.strftime("%m/%d ") + hm
+
+    def open_ping_log(self):
+        """실행 기록 — 로그 원문 대신 성공/실패 점과 사람이 읽는 시각으로 보여 준다."""
+        try:
+            entries = cooldown_ping.read_log_entries(40)
+            top, body = self._open_panel("실행 기록")
+            wrap = tk.Frame(body, bg=P.bg)
+            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(4, PANEL_PAD))
+
+            if not entries:
+                tk.Label(
+                    wrap,
+                    text="아직 실행된 적이 없어요.",
+                    bg=P.bg,
+                    fg=P.faint,
+                    font=(KR, 9),
+                ).pack(anchor="w", pady=16)
+            else:
+                shown = list(reversed(entries))[:14]
+                for when, ok, detail in shown:
+                    r = tk.Frame(wrap, bg=P.bg)
+                    r.pack(fill="x", pady=3)
+                    tk.Label(
+                        r,
+                        text="●",
+                        bg=P.bg,
+                        fg=(P.green if ok else P.red),
+                        font=(KR, 8),
+                    ).pack(side="left", padx=(0, 9))
+                    tk.Label(
+                        r,
+                        text=self._friendly_time(when),
+                        bg=P.bg,
+                        fg=P.title,
+                        font=(KR, 9),
+                        width=11,
+                        anchor="w",
+                    ).pack(side="left")
+                    tk.Label(
+                        r,
+                        text="실행됨" if ok else cooldown_ping.friendly_error(detail),
+                        bg=P.bg,
+                        fg=(P.sub if ok else P.red),
+                        font=(KR, 9),
+                        anchor="w",
+                    ).pack(side="left")
+                if len(entries) > 14:
+                    tk.Label(
+                        wrap,
+                        text="· 최근 14개만 표시",
+                        bg=P.bg,
+                        fg=P.faint,
+                        font=(KR, 8),
+                    ).pack(anchor="w", pady=(8, 0))
+            self._finalize_panel(top, 300)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def open_ping_times(self):
+        """시각 설정 — 알람처럼 시:분 스테퍼(▲▼·스크롤)로 조절, 추가/삭제(✕).
+        시각들은 5시간 1분 이상 벌어져 있어야 저장된다."""
+        W = 300
+        try:
+            top, body = self._open_panel("모닝 스타터 · 시각")
+            tk.Label(
+                body,
+                text="이 시각마다 5시간 자동 시작",
+                bg=P.bg,
+                fg=P.label,
+                font=(KR, 8),
+                anchor="w",
+            ).pack(fill="x", padx=PANEL_PAD, pady=(0, 2))
+            tk.Label(
+                body,
+                text="간격은 최소 5시간 1분 · 하루 최대 4개",
+                bg=P.bg,
+                fg=P.faint,
+                font=(KR, 8),
+                anchor="w",
+            ).pack(fill="x", padx=PANEL_PAD, pady=(0, 6))
+
+            # 편집 중인 값 (원본). [[시, 분], ...] — 저장할 때만 정렬한다(편집 중 행이 안 튀게).
+            parsed = cooldown_ping.parse_times(self.ping_cfg["times"])
+            data = [[t.hour, t.minute] for t in parsed] or [[5, 0]]
+
+            editor = tk.Frame(body, bg=P.bg)
+            editor.pack(fill="x", padx=PANEL_PAD)
+            # 경고문은 자리를 잡아 두려고 구분선 앞에 붙일 수 있게 미리 만든다.
+            warn = tk.Label(
+                body, text="", bg=P.bg, fg=P.red, font=(KR, 8), anchor="w",
+                wraplength=W - PANEL_PAD * 2, justify="left",
+            )
+            sep = tk.Frame(body, bg=P.line, height=1)
+
+            def add():
+                if len(data) < cooldown_ping.MAX_TIMES:
+                    data.append([12, 0])
+                    render()
+
+            def render():
+                for w in editor.winfo_children():
+                    w.destroy()
+                for i in range(len(data)):
+                    self._build_time_row(editor, data, i, render)
+                # ＋ 버튼은 최대 개수 미만일 때만 보인다 (규칙을 버튼 유무로 알린다)
+                if len(data) < cooldown_ping.MAX_TIMES:
+                    add_btn = tk.Label(
+                        editor, text="＋ 시각 추가", bg=P.bg, fg=P.green,
+                        font=(KR, 9), cursor="hand2",
+                    )
+                    add_btn.pack(anchor="w", pady=(6, 0))
+                    add_btn.bind("<Button-1>", lambda _e: add())
+                self._refit_panel(top, W)  # 행이 늘거나 줄면 창 높이를 다시 잡는다
+
+            def warn_show(text):
+                warn.config(text=text)
+                warn.pack(fill="x", padx=PANEL_PAD, pady=(4, 0), before=sep)
+                self._refit_panel(top, W)  # 경고문이 잘리지 않게 창을 늘린다
+
+            def save(_evt=None):
+                items = sorted({f"{h:02d}:{m:02d}" for h, m in data})
+                if not cooldown_ping.parse_times(items):
+                    warn_show("시각을 하나 이상 남겨 주세요.")
+                    return
+                msg = cooldown_ping.gap_error(items)
+                if msg:
+                    warn_show(msg)
+                    return
+                self.ping_cfg["times"] = items
+                cooldown_ping.save_cfg(self.ping_cfg)
+                top.destroy()
+
+            render()
+
+            sep.pack(fill="x", padx=PANEL_PAD, pady=(12, 0))
+            foot = tk.Frame(body, bg=P.bg)
+            foot.pack(fill="x", padx=PANEL_PAD, pady=(10, 14))
+            self._themed_button(foot, "저장", save, primary=True).pack(side="right")
+            self._themed_button(foot, "취소", top.destroy).pack(side="right", padx=(0, 8))
+            top.bind("<Return>", save)  # 엔터로도 저장 (버튼이 유일 경로가 아니게)
+            self._finalize_panel(top, W, grab=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _build_time_row(self, parent, data, i, render) -> None:
+        """시각 한 줄 — 시:분을 스핀박스로. 숫자를 직접 타이핑, 화살표 클릭,
+        화살표를 길게 누르면 빠르게, 숫자 위에서 스크롤 — 네 방법 다 된다."""
+        row = tk.Frame(parent, bg=P.track)
+        row.pack(fill="x", pady=3, ipady=4)
+
+        def field(idx, hi):
+            var = tk.StringVar(value=f"{data[i][idx]:02d}")
+
+            def commit(*_a):
+                # 타이핑/화살표/스크롤 무엇으로 바뀌든 data 에 반영. 범위 밖은 감는다.
+                try:
+                    v = int(var.get())
+                except (ValueError, TypeError):
+                    v = data[i][idx]  # 비었거나 숫자가 아니면 이전 값 유지
+                data[i][idx] = v % (hi + 1)
+
+            var.trace_add("write", commit)
+            sb = tk.Spinbox(
+                row,
+                from_=0,
+                to=hi,
+                wrap=True,           # 23→00, 59→00 순환
+                increment=1,
+                textvariable=var,
+                width=2,
+                format="%02.0f",     # 화살표로 바꾸면 두 자리로
+                justify="center",
+                font=(NUM, 16, "bold"),
+                bg=P.track,
+                fg=P.title,
+                buttonbackground=P.track,
+                readonlybackground=P.track,
+                disabledbackground=P.track,
+                insertbackground=P.title,  # 커서 색
+                relief="flat",
+                bd=0,
+                highlightthickness=0,
+                repeatdelay=400,     # 길게 누르면
+                repeatinterval=60,   # 이 간격으로 빠르게 반복
+            )
+
+            def reformat(_e=None):
+                var.set(f"{data[i][idx]:02d}")  # 포커스 벗어나면 두 자리로 정돈
+
+            sb.bind("<FocusOut>", reformat)
+            sb.bind("<Return>", reformat)
+            # 숫자 위에서 스크롤해도 오르내린다
+            sb.bind(
+                "<MouseWheel>",
+                lambda e: sb.invoke("buttonup" if e.delta > 0 else "buttondown"),
+            )
+            return sb
+
+        field(0, 23).pack(side="left", padx=(12, 0))
+        tk.Label(row, text=":", bg=P.track, fg=P.faint, font=(NUM, 15, "bold")).pack(
+            side="left", padx=3
+        )
+        field(1, 59).pack(side="left")
+
+        # 삭제 (한 줄만 남으면 숨긴다 — 최소 한 개는 있어야 한다)
+        if len(data) > 1:
+            x = tk.Label(row, text="✕", bg=P.track, fg=P.faint, font=(KR, 10), cursor="hand2")
+            x.pack(side="right", padx=12)
+            x.bind("<Button-1>", lambda _e: (data.pop(i), render()))
+            x.bind("<Enter>", lambda _e: x.config(fg=P.red))
+            x.bind("<Leave>", lambda _e: x.config(fg=P.faint))
 
     def run(self):
         self.show_window()

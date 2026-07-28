@@ -31,6 +31,8 @@ HIDDEN = [
     "skins.arc",
     "skins.table",
     "skins.slim",
+    "cooldown_core",  # 루트 모듈 (--paths 로 찾지만 명시해 확실히)
+    "cooldown_ping",  # 자동 핑(모닝 스타터) 로직
     "pystray._win32",
     "win32com.client",
 ]
