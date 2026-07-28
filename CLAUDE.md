@@ -137,11 +137,21 @@
 - **작업표시줄도 '항상 위' 라서 그냥 topmost 로 두면 가려진다.** 조작할 때마다
   스스로를 올리므로 `raise_above_taskbar()` 를 1.5초마다 다시 부른다.
 
+## exe 로 묶을 때 (build_exe.py)
+
+- `skins/__init__.py` 가 `importlib` 로 스킨을 불러오므로 PyInstaller 가 스스로
+  못 찾는다. **`--hidden-import skins.card` 처럼 스킨마다 넣어야 한다.**
+  빼먹으면 exe 에 디자인이 하나도 안 들어간다.
+- `cooldown_core.py` 가 저장소 루트에 있어 `--paths` 로 루트와 `windows` 를 둘 다 준다.
+- 자동 실행 바로가기는 `launch_command()` 가 판단한다 — 묶인 상태(`sys.frozen`)면
+  exe 자신을, 아니면 pythonw + 스크립트를 등록한다. 옮겨도 시작할 때 스스로 고친다.
+- 서명이 없어 처음 실행할 때 SmartScreen 이 막는다. 정상이며 `추가 정보 > 실행`.
+
 ## 다음 작업
 
 1. **작업표시줄용 슬림 바 다듬기** — 크기는 맞았고 보기 좋게가 남았다.
    요청서는 `docs/디자인_요청서.md`
-2. 배포 패키징: PyInstaller onefile (윈도우 앱)
+2. 폰 위젯 서버 배포 (Supabase + Vercel)
 2. 서버 배포 (Supabase SQL 실행 → Vercel 환경변수 2개 → 배포)
 3. `limits[]` 의 `severity` 를 색상 임계값 대신 쓸지 검토 (지금은 50/80 자체 기준)
 

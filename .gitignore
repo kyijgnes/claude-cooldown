@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 .env*
 node_modules/
+
+# PyInstaller 산출물 — 40MB 짜리라 저장소에 넣지 않는다.
+# 만드는 법은 build_exe.py, 나눠주는 법은 README 의 '친구에게 나눠주기' 참고.
+build/
+dist/
+*.spec
+windows/앱아이콘.ico

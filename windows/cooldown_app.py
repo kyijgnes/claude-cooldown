@@ -141,7 +141,6 @@ def load_state() -> dict:
         "y": 60,
         "topmost": False,
         "dock": False,  # 작업표시줄에 붙이기
-        "hidden": False,  # 위젯 숨김 (트레이 아이콘만)
         "theme": "auto",  # auto(윈도우 설정 따름) / light / dark
         "skin": skins.DEFAULT,
     }
@@ -178,29 +177,43 @@ def autostart_enabled() -> bool:
     return os.path.exists(STARTUP_LNK)
 
 
-def autostart_target() -> str | None:
-    """등록된 바로가기가 실제로 가리키는 스크립트 경로. 없거나 못 읽으면 None."""
+def launch_command() -> tuple[str, str, str]:
+    """(실행 파일, 인자, 작업 폴더) — 지금 이 프로그램을 다시 띄우는 방법.
+
+    exe 로 묶으면 파이썬도 스크립트도 없다. 그때는 exe 자신이 곧 실행 파일이다.
+    """
+    if getattr(sys, "frozen", False):  # PyInstaller 로 묶인 상태
+        exe = os.path.abspath(sys.executable)
+        return exe, "", os.path.dirname(exe)
+    pyw = sys.executable.replace("python.exe", "pythonw.exe")
+    script = os.path.abspath(__file__)
+    return pyw, f'"{script}"', os.path.dirname(script)
+
+
+def autostart_points_here() -> bool | None:
+    """등록된 바로가기가 지금 이 프로그램을 가리키는가. 없거나 못 읽으면 None."""
     if not os.path.exists(STARTUP_LNK):
         return None
     try:
         from win32com.client import Dispatch
 
-        return Dispatch("WScript.Shell").CreateShortCut(STARTUP_LNK).Arguments.strip('"')
+        link = Dispatch("WScript.Shell").CreateShortCut(STARTUP_LNK)
+        target, args, _ = launch_command()
+        same_exe = os.path.normcase(link.TargetPath) == os.path.normcase(target)
+        return same_exe and link.Arguments.strip() == args.strip()
     except Exception:  # noqa: BLE001
         return None
 
 
 def repair_autostart() -> None:
-    """자동 실행이 켜져 있는데 딴 경로를 가리키면 지금 위치로 고쳐 쓴다.
+    """자동 실행이 켜져 있는데 딴 것을 가리키면 지금 것으로 고쳐 쓴다.
 
-    폴더를 옮기면 바로가기가 없어진 파일을 가리키게 되고, 재부팅해도 아무 일이
-    일어나지 않는다 — 오류도 안 뜬다. 켜 둔 사람은 고장난 줄도 모른다.
+    폴더를 옮기거나 exe 로 바꾸면 바로가기가 없어진 파일을 가리키게 되고,
+    재부팅해도 아무 일이 일어나지 않는다 — 오류도 안 뜬다. 켜 둔 사람은
+    고장난 줄도 모른다.
     """
-    target = autostart_target()
-    if target is None:
-        return
-    here = os.path.normcase(os.path.abspath(__file__))
-    if os.path.normcase(os.path.abspath(target)) != here:
+    ok = autostart_points_here()
+    if ok is False:
         set_autostart(True)
 
 
@@ -214,12 +227,11 @@ def set_autostart(on: bool) -> None:
     try:
         from win32com.client import Dispatch
 
-        pyw = sys.executable.replace("python.exe", "pythonw.exe")
-        script = os.path.abspath(__file__)
+        target, args, workdir = launch_command()
         link = Dispatch("WScript.Shell").CreateShortCut(STARTUP_LNK)
-        link.TargetPath = pyw
-        link.Arguments = f'"{script}"'
-        link.WorkingDirectory = os.path.dirname(script)
+        link.TargetPath = target
+        link.Arguments = args
+        link.WorkingDirectory = workdir
         link.Save()
     except Exception:  # noqa: BLE001  pywin32 없거나 권한 문제
         pass
@@ -400,7 +412,6 @@ class App:
         self.results: queue.Queue = queue.Queue()
         self.commands: queue.Queue = queue.Queue()
         self.warned = {"five": False, "week": False}
-        self.widget_visible = not self.state.get("hidden", False)
         self.height = 0
         self.alive = True
         self.last_usage: Usage | None = None
@@ -485,8 +496,7 @@ class App:
         self.root.configure(bg=P.bg)
         self._build_body()
         self._replay()
-        if self.widget_visible:
-            self.show_window()
+        self.show_window()
         if self.last_usage is not None:
             self.tray.icon = draw_icon(self.last_usage.five.pct)
 
@@ -563,8 +573,6 @@ class App:
             command=self.toggle_autostart,
         )
         self.menu.add_separator()
-        # 숨겨도 시작표시줄 아이콘은 남는다 — 그 아이콘을 누르면 다시 나온다
-        self.menu.add_command(label="위젯 숨기기", command=self.hide_widget)
         self.menu.add_command(label="종료", command=self.quit)
 
         self._sync_dock_menu()
@@ -608,6 +616,7 @@ class App:
         # 작업표시줄 뒤로 내려가, 12px 짜리 조각만 남는다.
         start = getattr(self, "_from", (e.x_root, e.y_root))
         if abs(e.x_root - start[0]) < DRAG_SLOP and abs(e.y_root - start[1]) < DRAG_SLOP:
+            self.refresh_now()  # 옮긴 게 아니라 그냥 누른 것 — 바로 새로고침
             return
 
         x, y = clamp_to_screen(
@@ -637,6 +646,10 @@ class App:
         # 연타해도 최소 간격은 지킨다 (수동 경로로 rate limit 규칙을 우회하지 않게)
         now = time.monotonic()
         if now - self.last_manual < MANUAL_FLOOR:
+            # 너무 자주 눌렀다. 눌린 티만 잠깐 내고 조회는 하지 않는다 —
+            # 아무 반응이 없으면 고장난 줄 안다.
+            self.root.attributes("-alpha", BUSY_ALPHA)
+            self.root.after(120, self._clear_busy)
             return
         self.last_manual = now
         # 눌렀다는 티를 낸다. 문구를 띄우는 대신 위젯을 잠깐 흐리게 했다가,
@@ -667,20 +680,6 @@ class App:
         except Exception:  # noqa: BLE001
             pass
 
-    def hide_widget(self):
-        """위젯만 감춘다. 시작표시줄 아이콘을 누르면 돌아온다."""
-        # 메뉴를 먼저 닫고 한 박자 뒤에 감춘다 (순서가 바뀌면 메뉴가 화면에 남는다)
-        dismiss_menus()
-        self.root.after(60, self._do_hide)
-
-    def _do_hide(self):
-        dismiss_menus()
-        self._remember_spot()
-        self.state["hidden"] = True
-        save_state(self.state)
-        self.widget_visible = False
-        self.root.withdraw()
-
     def _remember_spot(self):
         """자유 위치를 저장한다. 붙어 있는 동안에는 저장하지 않는다 —
         작업표시줄 좌표가 원래 자리를 덮으면, 나중에 풀었을 때 12px 만 남는다."""
@@ -690,9 +689,6 @@ class App:
 
     def bring_to_front(self):
         """트레이 아이콘을 눌렀을 때 — 숨어 있으면 꺼내고 맨 앞으로 올린다."""
-        self.widget_visible = True
-        self.state["hidden"] = False
-        save_state(self.state)
         self.show_window()
         self.root.lift()
         self.root.attributes("-topmost", True)
@@ -834,7 +830,7 @@ class App:
         다만 메뉴가 떠 있는 동안 올리면 그 메뉴를 덮어 버리므로 그때는 쉰다.
         """
         try:
-            docked = self.state["dock"] and self.skin.dockable and self.widget_visible
+            docked = self.state["dock"] and self.skin.dockable
             if docked and not self._menu_open and not popup_menu_open():
                 raise_above_taskbar(self.root)
         except Exception:  # noqa: BLE001
@@ -901,10 +897,7 @@ class App:
         self.tray.title = f"클로드 쿨다운 — {detail}"[:127]
 
     def run(self):
-        # 숨겨 둔 채로 껐으면 그대로 트레이 아이콘만 띄운다.
-        # 자동 실행을 켠 사람이 부팅할 때마다 다시 숨기지 않아도 되게.
-        if self.widget_visible:
-            self.show_window()
+        self.show_window()
         self.root.mainloop()
 
 
