@@ -19,23 +19,7 @@ from tkinter import font as tkfont
 
 from cooldown_core import Usage
 
-from .base import (
-    BG,
-    FAINT,
-    KR,
-    LABEL,
-    LINE,
-    NUM,
-    RED,
-    RED_BG,
-    SUB,
-    TRACK,
-    Skin,
-    scoped_text,
-    taskbar_height,
-    tone,
-    worst,
-)
+from .base import KR, NUM, P, Skin, scoped_text, taskbar_height, tone, worst
 
 # ---------------------------------------------------------------- 치수
 # 세로 배치는 작업표시줄 높이에서 계산한다 (build 참고). 가로만 여기서 고정.
@@ -95,15 +79,15 @@ class Cell:
 
         self.c.create_text(
             x, skin.top_y + LBL_BASE, text=label, anchor="w",
-            font=skin.f_label, fill=LABEL,
+            font=skin.f_label, fill=P.label,
         )
         self.vx = x + skin.f_label.measure(label) + LV_GAP
         self.value = self.c.create_text(
-            self.vx, skin.top_y, text="--", anchor="w", font=self.f_value, fill=FAINT
+            self.vx, skin.top_y, text="--", anchor="w", font=self.f_value, fill=P.faint
         )
         self.left = self.c.create_text(
             x + w, skin.top_y + SM_BASE, text="", anchor="e",
-            font=self.f_small, fill=SUB,
+            font=self.f_small, fill=P.sub,
         )
 
         count = max(8, w // 8)
@@ -113,7 +97,7 @@ class Cell:
             self.c.create_rectangle(
                 x + i * pitch, skin.bar_y,
                 x + i * pitch + seg_w, skin.bar_y + skin.bar_h,
-                fill=TRACK, width=0,
+                fill=P.track, width=0,
             )
             for i in range(count)
         ]
@@ -127,7 +111,7 @@ class Cell:
         self.c.itemconfigure(
             self.left,
             text=_clip(left, self.f_small, room),
-            fill=SUB if pct is not None else FAINT,
+            fill=P.sub if pct is not None else P.faint,
         )
 
         # 내림이라 꽉 찬 게이지는 100% 뿐이다. 값이 있으면 아무리 작아도 한 칸은 켠다.
@@ -135,7 +119,7 @@ class Cell:
         n = len(self.segs)
         filled = 0 if not pct else max(1, min(n, int(pct * n / 100)))
         for i, seg in enumerate(self.segs):
-            self.c.itemconfigure(seg, fill=color if i < filled else TRACK)
+            self.c.itemconfigure(seg, fill=color if i < filled else P.track)
 
 
 # ---------------------------------------------------------------- 스킨
@@ -165,7 +149,7 @@ class SlimSkin(Skin):
         self.div_bot = self.bar_y + self.bar_h
 
         self.c = tk.Canvas(
-            parent, width=self.width, height=self.h, bg=BG,
+            parent, width=self.width, height=self.h, bg=P.bg,
             highlightthickness=0, bd=0,
         )
         self.c.pack(fill="both", expand=True)
@@ -189,7 +173,7 @@ class SlimSkin(Skin):
         self.right_w = min(need_right, max(60, avail - need_cell * 2))
         cell_w = (avail - self.right_w) // 2
 
-        self.accent = self.c.create_rectangle(0, 0, ACC, self.h, fill=TRACK, width=0)
+        self.accent = self.c.create_rectangle(0, 0, ACC, self.h, fill=P.track, width=0)
 
         x1 = PAD_L
         x2 = PAD_L + cell_w + GAP
@@ -200,19 +184,19 @@ class SlimSkin(Skin):
             self.c.create_line(
                 x + cell_w + GAP // 2, self.div_top,
                 x + cell_w + GAP // 2, self.div_bot,
-                fill=LINE, width=1,
+                fill=P.line, width=1,
             )
 
         # 오른쪽 윗자리 — 평소엔 모델별, 오류일 땐 상태 문구. 같은 자리를 나눠 쓴다.
         self.model = self.c.create_text(
             rx, self.top_y + SM_BASE, text="불러오는 중", anchor="e",
-            font=self.f_small, fill=FAINT,
+            font=self.f_small, fill=P.faint,
         )
         self.msg = self.c.create_text(
-            rx, self.top_y + LBL_BASE, text="", anchor="e", font=self.f_msg, fill=RED
+            rx, self.top_y + LBL_BASE, text="", anchor="e", font=self.f_msg, fill=P.red
         )
         self.stamp = self.c.create_text(
-            rx, self.bar_cy, text="", anchor="e", font=self.f_small, fill=FAINT
+            rx, self.bar_cy, text="", anchor="e", font=self.f_small, fill=P.faint
         )
 
         self.five.set(None, "")
@@ -225,20 +209,20 @@ class SlimSkin(Skin):
 
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
-        self._paint(BG, tone(worst(usage)))
+        self._paint(P.bg, tone(worst(usage)))
         self.five.set(usage.five.pct, usage.five.left)
         self.week.set(usage.week.pct, usage.week.left)
 
         text = scoped_text(usage, 1)
         self.c.itemconfigure(
-            self.model, text=_fit(text, self.f_small, self.right_w), fill=LABEL
+            self.model, text=_fit(text, self.f_small, self.right_w), fill=P.label
         )
         self.c.itemconfigure(self.msg, text="")
         self.c.itemconfigure(self.stamp, text=f"{stamp} 기준")
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
-        # 기준 시각은 오류일수록 중요하다 — 붉게 죽이지 않고 FAINT 그대로 둔다.
-        self._paint(RED_BG, RED)
+        # 기준 시각은 오류일수록 중요하다 — 붉게 죽이지 않고 P.faint 그대로 둔다.
+        self._paint(P.red_bg, P.red)
         self.c.itemconfigure(self.model, text="")
         self.c.itemconfigure(self.msg, text=_clip(text, self.f_msg, self.right_w))
         if not keep_values:

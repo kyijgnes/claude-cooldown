@@ -40,7 +40,7 @@ from cooldown_core import (  # noqa: E402
 )
 
 import skins  # noqa: E402
-from skins.base import BG, tone  # noqa: E402
+from skins.base import P, set_palette, tone  # noqa: E402
 
 HOME = os.path.expanduser("~")
 STATE_PATH = os.path.join(HOME, ".claude_cooldown_widget.json")
@@ -58,6 +58,8 @@ RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
+THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
+THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
 DOCK_LABEL = "작업표시줄에 붙이기 (슬림 바)"
 ALPHA = 0.96  # 평소 창 불투명도
@@ -140,6 +142,7 @@ def load_state() -> dict:
         "topmost": False,
         "dock": False,  # 작업표시줄에 붙이기
         "hidden": False,  # 위젯 숨김 (트레이 아이콘만)
+        "theme": "auto",  # auto(윈도우 설정 따름) / light / dark
         "skin": skins.DEFAULT,
     }
     try:
@@ -244,7 +247,7 @@ def draw_icon(pct: float | None) -> Image.Image:
         ((64 - box[2] - box[0]) / 2, (64 - box[3] - box[1]) / 2),
         text,
         font=font,
-        fill="#0d1117",
+        fill=P.icon_text,
     )
     return img
 
@@ -412,7 +415,8 @@ class App:
         # '최소화로 시작' 표시 상태를 넘기는 경우가 있어, withdraw → deiconify 를
         # 거쳐 저장된 위치·크기로 확실히 펴지게 한다.
         self.root.withdraw()
-        self.root.configure(bg=BG)
+        self.applied_theme = set_palette(self.state["theme"])
+        self.root.configure(bg=P.bg)
 
         repair_autostart()
 
@@ -429,12 +433,13 @@ class App:
         self.root.after(200, self._pump)
         self.root.after(STAY_TICK, self._stay_above)
         self.root.after(TICK * 1000, self._tick)
+        self.root.after(THEME_TICK * 1000, self._theme_watch)
 
     # -------------------------------------------------- 본체(스킨) 그리기
     def _build_body(self) -> None:
         if self.body is not None:
             self.body.destroy()
-        self.body = tk.Frame(self.root, bg=BG)
+        self.body = tk.Frame(self.root, bg=P.bg)
         self.body.pack(fill="both", expand=True)
         self.skin.build(self.body)
         self._bind_drag(self.body)
@@ -465,6 +470,37 @@ class App:
         self.var_skin.set(self.skin.key)
         self._sync_dock_menu()
 
+    def switch_theme(self, kind: str) -> None:
+        self.state["theme"] = kind
+        save_state(self.state)
+        self.var_theme.set(kind)
+        self._apply_theme(force=True)
+
+    def _apply_theme(self, force: bool = False) -> None:
+        """색을 바꿔 끼우고 다시 그린다. 색은 만들 때 위젯에 박히므로 새로 그려야 한다."""
+        picked = set_palette(self.state["theme"])
+        if picked == self.applied_theme and not force:
+            return
+        self.applied_theme = picked
+        self.root.configure(bg=P.bg)
+        self._build_body()
+        self._replay()
+        if self.widget_visible:
+            self.show_window()
+        if self.last_usage is not None:
+            self.tray.icon = draw_icon(self.last_usage.five.pct)
+
+    def _theme_watch(self) -> None:
+        """윈도우의 밝기 설정을 따라간다 ('윈도우 설정 따름' 일 때만)."""
+        try:
+            if self.state["theme"] == "auto":
+                self._apply_theme()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if self.alive:
+                self.root.after(THEME_TICK * 1000, self._theme_watch)
+
     def _replay(self) -> None:
         """새로 그린 스킨에 마지막 상태를 다시 먹인다."""
         if self.last_usage is not None:
@@ -484,6 +520,7 @@ class App:
         self.var_autostart = tk.BooleanVar(self.root, autostart_enabled())
         self.var_dock = tk.BooleanVar(self.root, bool(self.state["dock"]))
         self.var_skin = tk.StringVar(self.root, self.skin.key)
+        self.var_theme = tk.StringVar(self.root, self.state["theme"])
 
         self.menu = tk.Menu(self.root, tearoff=0)
         self.menu.add_command(label="지금 새로고침", command=self.refresh_now)
@@ -497,6 +534,16 @@ class App:
                 command=lambda k=cls.key: self.switch_skin(k),
             )
         self.menu.add_cascade(label="디자인", menu=design)
+
+        theme = tk.Menu(self.menu, tearoff=0)
+        for key, label in THEMES:
+            theme.add_radiobutton(
+                label=label,
+                value=key,
+                variable=self.var_theme,
+                command=lambda k=key: self.switch_theme(k),
+            )
+        self.menu.add_cascade(label="밝기", menu=theme)
 
         # 이름에 (슬림 바) 를 넣어, 누르면 그 디자인으로 바뀐다는 걸 미리 알린다.
         # 잠가 두면 기본 디자인에서 늘 회색이라 이유를 알 길이 없다.
@@ -577,6 +624,7 @@ class App:
         self.var_autostart.set(autostart_enabled())
         self._sync_dock_menu()
         self.var_skin.set(self.skin.key)
+        self.var_theme.set(self.state["theme"])
         # 메뉴가 떠 있는 동안에는 위젯을 위로 올리지 않는다 (올리면 메뉴를 덮는다)
         self._menu_open = True
         try:

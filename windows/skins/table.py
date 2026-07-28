@@ -11,24 +11,7 @@ from tkinter import font as tkfont
 
 from cooldown_core import Usage
 
-from .base import (
-    BG,
-    FAINT,
-    KR,
-    LABEL,
-    LINE,
-    NUM,
-    RED,
-    RED_BG,
-    RED_DIM,
-    SUB,
-    TITLE,
-    TRACK,
-    Skin,
-    scoped_text,
-    tone,
-    worst,
-)
+from .base import KR, NUM, P, Skin, scoped_text, tone, worst
 
 PAD = 14
 # 한도 / 사용률 / 게이지 / 초기화까지
@@ -44,20 +27,20 @@ class Row:
     """표 한 줄 — 이름 / 사용률 / 눈금 게이지 / 초기화까지."""
 
     def __init__(self, body: tk.Misc, r: int, name: str = ""):
-        self.name = tk.Label(body, text=name, bg=BG, fg=SUB, font=(KR, 9), anchor="w")
+        self.name = tk.Label(body, text=name, bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w")
         self.name.grid(row=r, column=0, sticky="w", pady=ROW_PAD)
 
         self.pct = tk.Label(
-            body, text="--", bg=BG, fg=FAINT, font=(NUM, 12, "bold"), anchor="e"
+            body, text="--", bg=P.bg, fg=P.faint, font=(NUM, 12, "bold"), anchor="e"
         )
         self.pct.grid(row=r, column=1, sticky="e", pady=ROW_PAD)
 
         self.bar = tk.Canvas(
-            body, width=GAUGE_W, height=GAUGE_H, bg=BG, highlightthickness=0, bd=0
+            body, width=GAUGE_W, height=GAUGE_H, bg=P.bg, highlightthickness=0, bd=0
         )
         self.bar.grid(row=r, column=2, sticky="w", padx=(10, 0), pady=ROW_PAD)
 
-        self.left = tk.Label(body, text="", bg=BG, fg=FAINT, font=(KR, 8), anchor="e")
+        self.left = tk.Label(body, text="", bg=P.bg, fg=P.faint, font=(KR, 8), anchor="e")
         self.left.grid(row=r, column=3, sticky="e", pady=ROW_PAD)
 
     def rename(self, text: str) -> None:
@@ -80,7 +63,7 @@ class Row:
             x0 = i * step
             self.bar.create_rectangle(
                 x0, 0, x0 + step - GAP, GAUGE_H,
-                fill=color if i < filled else TRACK, width=0,
+                fill=color if i < filled else P.track, width=0,
             )
 
     def clear(self) -> None:
@@ -100,40 +83,40 @@ class TableSkin(Skin):
         self._kr9 = tkfont.Font(font=(KR, 9))
 
         # 머리말 — 평소엔 상태점 + 제목, 오류일 땐 같은 자리가 빨간 띠가 된다.
-        self.head = tk.Frame(parent, bg=BG)
+        self.head = tk.Frame(parent, bg=P.bg)
         self.head.pack(fill="x")
-        self.accent = tk.Frame(self.head, bg=BG, width=3)
+        self.accent = tk.Frame(self.head, bg=P.bg, width=3)
         self.accent.pack(side="left", fill="y")
-        self.head_pad = tk.Frame(self.head, bg=BG)
+        self.head_pad = tk.Frame(self.head, bg=P.bg)
         self.head_pad.pack(fill="x", padx=(PAD - 3, PAD), pady=(13, 10))
         self.dot = tk.Canvas(
-            self.head_pad, width=9, height=9, bg=BG, highlightthickness=0, bd=0
+            self.head_pad, width=9, height=9, bg=P.bg, highlightthickness=0, bd=0
         )
         self.dot.pack(side="left", pady=(3, 0))
         self.title = tk.Label(
-            self.head_pad, text="클로드 사용량", bg=BG, fg=TITLE, font=(KR, 10, "bold")
+            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold")
         )
         self.title.pack(side="left", padx=(6, 0))
-        self.stamp = tk.Label(self.head_pad, text="", bg=BG, fg=FAINT, font=(KR, 8))
+        self.stamp = tk.Label(self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 8))
         self.stamp.pack(side="right")
 
-        body = tk.Frame(parent, bg=BG)
+        body = tk.Frame(parent, bg=P.bg)
         body.pack(fill="x", padx=PAD, pady=(0, 14))
         for i, w in enumerate(COL):
             body.grid_columnconfigure(i, minsize=w)
 
         # 열 이름 — 게이지 열은 보면 아는 것이라 이름을 두지 않는다.
         hf = (KR, 8)
-        tk.Label(body, text="한도", bg=BG, fg=LABEL, font=hf).grid(
+        tk.Label(body, text="한도", bg=P.bg, fg=P.label, font=hf).grid(
             row=0, column=0, sticky="w"
         )
-        tk.Label(body, text="사용률", bg=BG, fg=LABEL, font=hf).grid(
+        tk.Label(body, text="사용률", bg=P.bg, fg=P.label, font=hf).grid(
             row=0, column=1, sticky="e"
         )
-        tk.Label(body, text="초기화까지", bg=BG, fg=LABEL, font=hf).grid(
+        tk.Label(body, text="초기화까지", bg=P.bg, fg=P.label, font=hf).grid(
             row=0, column=3, sticky="e"
         )
-        tk.Frame(body, bg=LINE, height=1).grid(
+        tk.Frame(body, bg=P.line, height=1).grid(
             row=1, column=0, columnspan=4, sticky="ew", pady=(3, 4)
         )
 
@@ -141,7 +124,7 @@ class TableSkin(Skin):
         self.week = Row(body, 3, "주간")
 
         # 모델별 한도 줄과의 구분선. 그 줄이 비면 자리(1px)는 두고 색만 지운다.
-        self.model_rule = tk.Frame(body, bg=LINE, height=1)
+        self.model_rule = tk.Frame(body, bg=P.line, height=1)
         self.model_rule.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(4, 4))
 
         # 모델별 한도 — 값이 없어도 이 줄은 사라지지 않는다 (창 높이 고정).
@@ -160,19 +143,19 @@ class TableSkin(Skin):
 
     def _head_normal(self, pct: float | None) -> None:
         for w in (self.head, self.head_pad, self.title, self.stamp):
-            w.configure(bg=BG)
-        self.accent.configure(bg=BG)
-        self.title.configure(text="클로드 사용량", fg=TITLE)
-        self.stamp.configure(fg=FAINT)
-        self._dot(tone(pct), BG)
+            w.configure(bg=P.bg)
+        self.accent.configure(bg=P.bg)
+        self.title.configure(text="클로드 사용량", fg=P.title)
+        self.stamp.configure(fg=P.faint)
+        self._dot(tone(pct), P.bg)
 
     def _head_error(self, text: str) -> None:
         for w in (self.head, self.head_pad, self.title, self.stamp):
-            w.configure(bg=RED_BG)
-        self.accent.configure(bg=RED)
-        self.title.configure(text=text, fg=RED)
-        self.stamp.configure(fg=RED_DIM)
-        self._dot(RED, RED_BG)
+            w.configure(bg=P.red_bg)
+        self.accent.configure(bg=P.red)
+        self.title.configure(text=text, fg=P.red)
+        self.stamp.configure(fg=P.red_dim)
+        self._dot(P.red, P.red_bg)
 
     # -------------------------------------------------- 이름 칸에 맞춰 자르기
     def _fit(self, text: str) -> str:
@@ -198,10 +181,10 @@ class TableSkin(Skin):
             )
             self.model.rename(self._fit(top.label))
             self.model.set(top.pct, top.left)
-            self.model_rule.configure(bg=LINE)
+            self.model_rule.configure(bg=P.line)
         else:
             self.model.clear()
-            self.model_rule.configure(bg=BG)
+            self.model_rule.configure(bg=P.bg)
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
         self._head_error(text)
@@ -210,4 +193,4 @@ class TableSkin(Skin):
             self.five.set(None, "")
             self.week.set(None, "")
             self.model.clear()
-            self.model_rule.configure(bg=BG)
+            self.model_rule.configure(bg=P.bg)

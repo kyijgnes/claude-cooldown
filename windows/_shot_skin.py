@@ -5,6 +5,9 @@
     python _shot_skin.py card net out.png     연결 실패 (값 유지)
     python _shot_skin.py card err out.png     재로그인 필요 (값 없음)
     python _shot_skin.py card max out.png     100% · 가장 긴 문자열 (겹침 확인)
+
+뒤에 light / dark 를 붙이면 그 테마로 그린다 (없으면 윈도우 설정을 따른다).
+    python _shot_skin.py card ok out.png light
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from cooldown_core import Limit, Usage  # noqa: E402
 
 import skins  # noqa: E402
-from skins.base import BG  # noqa: E402
+from skins.base import P, set_palette  # noqa: E402
 
 BACKDROP = "#0b0d10"
 STAMP = "03:07"
@@ -64,6 +67,7 @@ def _trim(im, key):
 
 def main() -> None:
     key, mode, out = sys.argv[1], sys.argv[2], sys.argv[3]
+    set_palette(sys.argv[4] if len(sys.argv) > 4 else "auto")
 
     skin = skins.make(key)
     if skin.key != key:
@@ -72,8 +76,8 @@ def main() -> None:
 
     root = tk.Tk()
     root.withdraw()
-    root.configure(bg=BG)
-    body = tk.Frame(root, bg=BG)
+    root.configure(bg=P.bg)
+    body = tk.Frame(root, bg=P.bg)
     body.pack(fill="both", expand=True)
     skin.build(body)
 

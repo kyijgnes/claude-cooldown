@@ -11,25 +11,81 @@ import tkinter as tk
 
 from cooldown_core import Usage
 
-# ---------------------------------------------------------------- 색·글꼴
-BG = "#15171c"
-TITLE = "#e6edf3"
-# 작은 글자(8pt)라 명암비를 4.5:1 이상으로 잡는다.
-# BG 대비 — LABEL 5.8:1 / FAINT 4.8:1. 위계는 밝기보다 글자 크기로 준다.
-LABEL = "#8b949e"
-SUB = "#c2cad4"
-FAINT = "#7d8590"
-TRACK = "#252a32"
-LINE = "#232830"
-GREEN = "#3fb950"
-AMBER = "#e3b341"
-RED = "#ff5c61"
-RED_BG = "#2b1418"
-# 빨간 띠 안의 흐린 글자. RED_BG 대비 4.8:1 (오류 문구 자체는 5.7:1 로 더 밝다).
-RED_DIM = "#a67c83"
+# ---------------------------------------------------------------- 색
+class Palette:
+    """색 한 벌.
+
+    스킨은 `from .base import P` 로 **이 객체를** 받아 두고 `P.bg` 처럼 쓴다.
+    테마를 바꿀 때 객체를 갈아 끼우지 않고 **값만 덮어쓰므로**, 이미 받아 둔
+    쪽도 함께 바뀐다. (값을 직접 import 하면 그 시점 색이 굳어 버린다)
+    """
+
+    def __init__(self, **colors: str):
+        self.__dict__.update(colors)
+
+    def copy_from(self, other: Palette) -> None:
+        self.__dict__.update(other.__dict__)
+
+
+# 작은 글자(8pt)가 많아 흐린 색도 배경 대비 4.5:1 이상으로 잡는다.
+# 위계는 밝기가 아니라 글자 크기로 준다.
+DARK = Palette(
+    bg="#15171c",
+    title="#e6edf3",
+    label="#8b949e",  # 5.8:1
+    sub="#c2cad4",
+    faint="#7d8590",  # 4.8:1
+    track="#252a32",
+    line="#232830",
+    green="#3fb950",
+    amber="#e3b341",
+    red="#ff5c61",
+    red_bg="#2b1418",
+    red_dim="#a67c83",  # red_bg 대비 4.8:1
+    icon_text="#0d1117",  # 트레이 아이콘 숫자 (밝은 바탕 위)
+)
+
+LIGHT = Palette(
+    bg="#f3f5f7",
+    title="#12161b",
+    label="#57606a",  # 5.0:1
+    sub="#2f3742",
+    faint="#616a75",  # 4.6:1
+    track="#dce1e7",
+    line="#e3e8ed",
+    green="#1a7f37",
+    amber="#8a6100",
+    red="#cf222e",
+    red_bg="#ffebe9",
+    red_dim="#8a5a5f",  # red_bg 대비 4.9:1
+    icon_text="#ffffff",  # 어두운 바탕 위
+)
+
+P = Palette(**DARK.__dict__)  # 지금 쓰는 한 벌
 
 KR = "맑은 고딕"
 NUM = "Segoe UI"
+
+
+def system_prefers_light() -> bool:
+    """윈도우의 '앱 모드' 설정이 밝게인가. 못 읽으면 어둡게로 본다."""
+    try:
+        import winreg
+
+        path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+            return bool(winreg.QueryValueEx(key, "AppsUseLightTheme")[0])
+    except OSError:
+        return False
+
+
+def set_palette(kind: str) -> str:
+    """'auto' / 'light' / 'dark' 를 받아 실제로 고른 쪽을 돌려준다."""
+    picked = kind if kind in ("light", "dark") else (
+        "light" if system_prefers_light() else "dark"
+    )
+    P.copy_from(LIGHT if picked == "light" else DARK)
+    return picked
 
 
 def taskbar_height(default: int = 48) -> int:
@@ -52,14 +108,14 @@ def taskbar_height(default: int = 48) -> int:
 
 
 def tone(pct: float | None) -> str:
-    """여유 초록 / 보통 노랑 / 임박 빨강."""
+    """여유 초록 / 보통 노랑 / 임박 빨강. 테마에 맞는 색이 나온다."""
     if pct is None:
-        return FAINT
+        return P.faint
     if pct < 50:
-        return GREEN
+        return P.green
     if pct < 80:
-        return AMBER
-    return RED
+        return P.amber
+    return P.red
 
 
 def worst(usage: Usage) -> float | None:

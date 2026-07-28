@@ -72,6 +72,18 @@
 - 형식이 또 바뀌면 고칠 곳은 `cooldown_core.py` 한 곳뿐.
   확인은 `python cooldown_core.py` (원본 JSON 출력).
 
+## 색 (밝게 / 어둡게)
+
+- 색은 `skins/base.py` 에 **두 벌**(`DARK`, `LIGHT`) 있고, 지금 쓰는 한 벌이 `P` 다.
+- 스킨은 **반드시 `from .base import P` 로 객체째 받아 `P.bg` 처럼 쓴다.**
+  `from .base import BG` 처럼 값을 직접 가져오면 그 시점 색이 굳어 테마가 안 바뀐다.
+  테마 전환은 `P` 의 값만 덮어쓰므로, 객체로 받아 둔 쪽은 자동으로 따라온다.
+- 색은 만들 때 위젯에 박히므로, 전환하려면 **다시 그려야 한다**
+  (`App._apply_theme` 가 `_build_body` → `_replay` 를 부른다).
+- `theme` 설정은 `auto` / `light` / `dark`. `auto` 면 윈도우의 `AppsUseLightTheme`
+  를 4초마다 확인해 따라간다.
+- 새 색을 넣을 때는 **두 벌 다** 채우고 배경 대비 4.5:1 을 지킬 것.
+
 ## 화면 규칙 (스킨을 만들거나 고칠 때)
 
 - 새 스킨은 `base.Skin` 상속 + `skins/__init__.py` 의 `_MODULES` 에 한 줄 추가.

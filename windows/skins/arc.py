@@ -14,22 +14,7 @@ import tkinter.font as tkfont
 
 from cooldown_core import Usage
 
-from .base import (
-    BG,
-    FAINT,
-    KR,
-    LABEL,
-    LINE,
-    NUM,
-    RED,
-    RED_BG,
-    RED_DIM,
-    SUB,
-    TRACK,
-    Skin,
-    scoped_text,
-    tone,
-)
+from .base import KR, NUM, P, Skin, scoped_text, tone
 
 try:
     from PIL import Image, ImageDraw, ImageTk
@@ -83,7 +68,7 @@ def _ring(pct: float | None):
     """링 한 개를 이미지로 그린다. PIL 의 arc 는 bbox 안쪽으로 두께를 그린다."""
     size = 2 * R_OUT + 2
     s = size * SS
-    img = Image.new("RGB", (s, s), BG)
+    img = Image.new("RGB", (s, s), P.bg)
     d = ImageDraw.Draw(img)
     c = s / 2
     w = W_ARC * SS
@@ -91,9 +76,9 @@ def _ring(pct: float | None):
     ro = R_OUT * SS
     box = (c - ro, c - ro, c + ro, c + ro)
 
-    d.arc(box, START, START + SWEEP, fill=TRACK, width=int(w))
-    _cap(d, c, r, START, w, TRACK)
-    _cap(d, c, r, START + SWEEP, w, TRACK)
+    d.arc(box, START, START + SWEEP, fill=P.track, width=int(w))
+    _cap(d, c, r, START, w, P.track)
+    _cap(d, c, r, START + SWEEP, w, P.track)
 
     if pct is not None:
         color = tone(pct)
@@ -107,7 +92,7 @@ def _ring(pct: float | None):
 
 
 def _band(w: int, h: int, radius: int, fill: str, outline: str):
-    img = Image.new("RGB", (w * SS, h * SS), BG)
+    img = Image.new("RGB", (w * SS, h * SS), P.bg)
     d = ImageDraw.Draw(img)
     d.rounded_rectangle(
         (0, 0, w * SS - 1, h * SS - 1),
@@ -139,29 +124,29 @@ class Gauge:
             self.ring = None
             self.track = canvas.create_arc(
                 *box, start=225, extent=-SWEEP, style="arc",
-                outline=TRACK, width=W_ARC,
+                outline=P.track, width=W_ARC,
             )
             self.arc = canvas.create_arc(
                 *box, start=225, extent=-0.01, style="arc",
-                outline=TRACK, width=W_ARC, state="hidden",
+                outline=P.track, width=W_ARC, state="hidden",
             )
 
         self.num = canvas.create_text(
-            cx, Y_BASE, text="", anchor="nw", fill=FAINT, font=F_NUM
+            cx, Y_BASE, text="", anchor="nw", fill=P.faint, font=F_NUM
         )
         self.sig = canvas.create_text(
-            cx, Y_BASE, text="", anchor="nw", fill=FAINT, font=F_SIG
+            cx, Y_BASE, text="", anchor="nw", fill=P.faint, font=F_SIG
         )
-        canvas.create_text(cx, Y_LABEL, text=label, fill=LABEL, font=F_LABEL)
-        self.left = canvas.create_text(cx, Y_RESET, text="", fill=SUB, font=F_SMALL)
-        self._percent(None, FAINT)
+        canvas.create_text(cx, Y_LABEL, text=label, fill=P.label, font=F_LABEL)
+        self.left = canvas.create_text(cx, Y_RESET, text="", fill=P.sub, font=F_SMALL)
+        self._percent(None, P.faint)
 
     def set(self, pct: float | None, left: str) -> None:
         color = tone(pct)
         self._ring(pct, color)
         self._percent(pct, color)
         self.c.itemconfigure(
-            self.left, text=left, fill=SUB if pct is not None else FAINT
+            self.left, text=left, fill=P.sub if pct is not None else P.faint
         )
 
     def _ring(self, pct: float | None, color: str) -> None:
@@ -206,7 +191,7 @@ class ArcSkin(Skin):
         self.f_sig = tkfont.Font(root=parent, font=F_SIG)
 
         self.c = c = tk.Canvas(
-            parent, width=self.width, height=H, bg=BG, highlightthickness=0, bd=0
+            parent, width=self.width, height=H, bg=P.bg, highlightthickness=0, bd=0
         )
         c.pack(fill="both", expand=True)
 
@@ -216,35 +201,35 @@ class ArcSkin(Skin):
         self.week = Gauge(c, mid + GAP_X, "주간", fonts)
 
         x0, x1 = MARGIN, self.width - MARGIN
-        self.line = c.create_line(x0, Y_LINE, x1, Y_LINE, fill=LINE)
+        self.line = c.create_line(x0, Y_LINE, x1, Y_LINE, fill=P.line)
         self.stamp = c.create_text(
-            x0, Y_FOOT, text="", anchor="w", fill=LABEL, font=F_SMALL
+            x0, Y_FOOT, text="", anchor="w", fill=P.label, font=F_SMALL
         )
         self.scoped = c.create_text(
-            x1, Y_FOOT, text="", anchor="e", fill=SUB, font=F_SMALL
+            x1, Y_FOOT, text="", anchor="e", fill=P.sub, font=F_SMALL
         )
         self.dot = c.create_oval(0, 0, 0, 0, width=0, state="hidden")
 
         # 오류 띠 — 구분선·꼬리말과 같은 자리. 켜고 끄기만 하므로 높이가 안 변한다.
         if HAVE_PIL:
-            self.band_image = _band(x1 - x0, BAR_H, 6, RED_BG, RED)
+            self.band_image = _band(x1 - x0, BAR_H, 6, P.red_bg, P.red)
             self.band = c.create_image(
                 x0, BAR_TOP, anchor="nw", image=self.band_image, state="hidden"
             )
         else:
             self.band = c.create_rectangle(
                 x0, BAR_TOP, x1, BAR_TOP + BAR_H,
-                fill=RED_BG, outline=RED, state="hidden",
+                fill=P.red_bg, outline=P.red, state="hidden",
             )
         cy = BAR_TOP + BAR_H // 2
         self.err_dot = c.create_oval(
-            x0 + 10, cy - 3, x0 + 16, cy + 3, fill=RED, width=0, state="hidden"
+            x0 + 10, cy - 3, x0 + 16, cy + 3, fill=P.red, width=0, state="hidden"
         )
         self.err_text = c.create_text(
-            x0 + 23, cy, text="", anchor="w", fill=RED, font=F_ERR, state="hidden"
+            x0 + 23, cy, text="", anchor="w", fill=P.red, font=F_ERR, state="hidden"
         )
         self.err_stamp = c.create_text(
-            x1 - 10, cy, text="", anchor="e", fill=RED_DIM,
+            x1 - 10, cy, text="", anchor="e", fill=P.red_dim,
             font=F_SMALL, state="hidden",
         )
 

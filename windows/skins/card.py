@@ -9,23 +9,7 @@ import tkinter as tk
 
 from cooldown_core import Usage
 
-from .base import (
-    BG,
-    FAINT,
-    KR,
-    LABEL,
-    LINE,
-    NUM,
-    RED,
-    RED_BG,
-    RED_DIM,
-    SUB,
-    TITLE,
-    TRACK,
-    Skin,
-    scoped_text,
-    tone,
-)
+from .base import KR, NUM, P, Skin, scoped_text, tone
 
 PAD = 18
 
@@ -35,29 +19,29 @@ class Section:
 
     def __init__(self, parent: tk.Misc, label: str, inner: int):
         self.inner = inner
-        box = tk.Frame(parent, bg=BG)
+        box = tk.Frame(parent, bg=P.bg)
         box.pack(fill="x", padx=PAD)
 
-        tk.Label(box, text=label, bg=BG, fg=LABEL, font=(KR, 8), anchor="w").pack(
+        tk.Label(box, text=label, bg=P.bg, fg=P.label, font=(KR, 8), anchor="w").pack(
             fill="x"
         )
 
-        row = tk.Frame(box, bg=BG)
+        row = tk.Frame(box, bg=P.bg)
         row.pack(fill="x")
-        self.value = tk.Label(row, text="--", bg=BG, fg=FAINT, font=(NUM, 24, "bold"))
+        self.value = tk.Label(row, text="--", bg=P.bg, fg=P.faint, font=(NUM, 24, "bold"))
         self.value.pack(side="left")
-        self.left = tk.Label(row, text="", bg=BG, fg=SUB, font=(KR, 10))
+        self.left = tk.Label(row, text="", bg=P.bg, fg=P.sub, font=(KR, 10))
         self.left.pack(side="right", anchor="s", pady=(0, 9))
 
         self.bar = tk.Canvas(
-            box, height=3, width=inner, bg=TRACK, highlightthickness=0, bd=0
+            box, height=3, width=inner, bg=P.track, highlightthickness=0, bd=0
         )
         self.bar.pack(fill="x", pady=(3, 0))
 
     def set(self, pct: float | None, left: str) -> None:
         color = tone(pct)
         self.value.config(text="--" if pct is None else f"{pct:.0f}%", fg=color)
-        self.left.config(text=left, fg=SUB if pct is not None else FAINT)
+        self.left.config(text=left, fg=P.sub if pct is not None else P.faint)
         self.bar.delete("all")
         # 배치 전에는 winfo_width() 가 0 이 아니라 **1** 을 돌려준다.
         # `or` 로 받으면 1 이 참이라 폴백이 죽고, 게이지가 0.4px 로 그려진 뒤
@@ -77,48 +61,48 @@ class CardSkin(Skin):
         inner = self.width - PAD * 2
 
         # 머리말 — 평소엔 제목, 오류일 땐 빨간 띠. 높이는 그대로 유지된다.
-        self.head = tk.Frame(parent, bg=BG)
+        self.head = tk.Frame(parent, bg=P.bg)
         self.head.pack(fill="x", pady=(0, 4))
-        self.accent = tk.Frame(self.head, bg=BG, width=3)
+        self.accent = tk.Frame(self.head, bg=P.bg, width=3)
         self.accent.pack(side="left", fill="y")
-        self.head_pad = tk.Frame(self.head, bg=BG)
+        self.head_pad = tk.Frame(self.head, bg=P.bg)
         self.head_pad.pack(fill="x", padx=(PAD - 3, PAD), pady=(15, 9))
         self.title = tk.Label(
-            self.head_pad, text="클로드 사용량", bg=BG, fg=TITLE, font=(KR, 10, "bold")
+            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold")
         )
         self.title.pack(side="left")
-        self.stamp = tk.Label(self.head_pad, text="", bg=BG, fg=FAINT, font=(KR, 8))
+        self.stamp = tk.Label(self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 8))
         self.stamp.pack(side="right")
 
         self.five = Section(parent, "5시간 한도", inner)
-        tk.Frame(parent, bg=BG, height=17).pack()
+        tk.Frame(parent, bg=P.bg, height=17).pack()
         self.week = Section(parent, "주간 한도", inner)
 
-        tk.Frame(parent, bg=LINE, height=1).pack(fill="x", padx=PAD, pady=(18, 0))
+        tk.Frame(parent, bg=P.line, height=1).pack(fill="x", padx=PAD, pady=(18, 0))
 
-        foot = tk.Frame(parent, bg=BG)
+        foot = tk.Frame(parent, bg=P.bg)
         foot.pack(fill="x", padx=PAD, pady=(9, 15))
-        self.foot_label = tk.Label(foot, text="", bg=BG, fg=LABEL, font=(KR, 8))
+        self.foot_label = tk.Label(foot, text="", bg=P.bg, fg=P.label, font=(KR, 8))
         self.foot_label.pack(side="left")
-        self.foot_value = tk.Label(foot, text="", bg=BG, fg=SUB, font=(KR, 9))
+        self.foot_value = tk.Label(foot, text="", bg=P.bg, fg=P.sub, font=(KR, 9))
         self.foot_value.pack(side="left", padx=(7, 0))
-        self.note = tk.Label(foot, text="불러오는 중", bg=BG, fg=FAINT, font=(KR, 8))
+        self.note = tk.Label(foot, text="불러오는 중", bg=P.bg, fg=P.faint, font=(KR, 8))
         self.note.pack(side="right")
 
     # -------------------------------------------------- 머리말 두 얼굴
     def _head_normal(self) -> None:
         for w in (self.head, self.head_pad, self.title, self.stamp):
-            w.configure(bg=BG)
-        self.accent.configure(bg=BG)
-        self.title.configure(text="클로드 사용량", fg=TITLE)
-        self.stamp.configure(fg=FAINT)
+            w.configure(bg=P.bg)
+        self.accent.configure(bg=P.bg)
+        self.title.configure(text="클로드 사용량", fg=P.title)
+        self.stamp.configure(fg=P.faint)
 
     def _head_error(self, text: str) -> None:
         for w in (self.head, self.head_pad, self.title, self.stamp):
-            w.configure(bg=RED_BG)
-        self.accent.configure(bg=RED)
-        self.title.configure(text=text, fg=RED)
-        self.stamp.configure(fg=RED_DIM)
+            w.configure(bg=P.red_bg)
+        self.accent.configure(bg=P.red)
+        self.title.configure(text=text, fg=P.red)
+        self.stamp.configure(fg=P.red_dim)
 
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
