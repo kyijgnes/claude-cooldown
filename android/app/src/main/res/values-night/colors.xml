@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 어둡게 (windows/skins/base.py 의 DARK 팔레트) -->
+<resources>
+    <color name="bg">#15171c</color>
+    <color name="title">#e6edf3</color>
+    <color name="label">#8b949e</color>
+    <color name="sub">#c2cad4</color>
+    <color name="faint">#7d8590</color>
+    <color name="track">#252a32</color>
+    <color name="line">#232830</color>
+    <color name="green">#3fb950</color>
+    <color name="amber">#e3b341</color>
+    <color name="red">#ff5c61</color>
+
+    <color name="coral">#d97757</color>
+</resources>

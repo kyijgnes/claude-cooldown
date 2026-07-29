@@ -1,7 +1,8 @@
 # CLAUDE.md
 
-**클로드 쿨다운** — Claude 구독 한도(5시간 / 주간)를 바탕화면 위젯과
-안드로이드 KWGT 위젯으로 보여주는 개인 도구. 친구들에게도 배포할 예정.
+**클로드 쿨다운** — Claude 구독 한도(5시간 / 주간)를 **바탕화면 위젯**과
+**갤럭시 폰 앱**(상태바·홈 위젯·잠금화면·AOD·라이브 배경화면)으로 보여주는 개인 도구.
+친구들에게도 배포할 예정.
 
 - repo: `claude-cooldown` / 엔드포인트: `/api/cooldown`
 - 파이썬 모듈·파일은 `cooldown_` 접두사, 로컬 설정 파일은 `~/.claude_cooldown*.json`
@@ -9,21 +10,23 @@
 ## 구조
 
 **윈도우 앱**(주력)은 서버를 거치지 않고 로컬에서 직접 조회한다.
-**폰 위젯**은 서버 릴레이가 필요하다 — 아직 미배포.
+**폰 앱**은 서버 릴레이로 받는다 — 서버는 아직 미배포.
 
 ```
-내 PC (OAuth 토큰은 로컬에만 존재)
-  ├─ windows/cooldown_app.py   바탕화면 위젯 + 트레이. 직접 조회, 서버 불필요
-  └─ agent/cooldown_agent.py   5분마다 조회
-        │  POST {key, 퍼센트 4개}
+내 PC (OAuth 토큰은 여기서만 — 절대 안 나간다)
+  └─ windows/cooldown_app.py   바탕화면 위젯 + 트레이. 직접 조회
+        │  조회 성공할 때마다 POST {key, 퍼센트·초기화시각}   (cooldown_push.py)
         ▼
   server/  Next.js API route → Supabase (service_role)
         ▲
-        │  GET ?key=...
-  폰 KWGT  $wg(url, json, .five_hour_pct)$
+        │  GET ?key=...   15분마다
+  android/  갤럭시 앱 — 상태바 알림 · 홈 위젯 · 라이브 배경화면
 ```
 
-- `key` = 에이전트 첫 실행 시 생성되는 랜덤 32 hex. 읽기 비밀번호 역할.
+- `key` = 랜덤 32 hex. 읽기 비밀번호 역할. PC 위젯 우클릭 > **폰에서 보기 > 폰 연결…**
+  에서 QR(`claudecooldown://pair?url=..&key=..`)로 폰에 넘긴다.
+- **PC 가 꺼져 있어도 폰 화면은 안 틀린다** — 퍼센트는 클로드를 쓸 때만 변하고,
+  초기화는 폰이 `resets_at` 을 보고 스스로 0% 로 맞춘다(`Limit.settled`).
 
 ## 파일
 
@@ -37,11 +40,14 @@
 | `windows/_shot_skin.py` | 스킨을 4가지 상태로 렌더해 PNG 로 남기는 개발 도구 |
 | `windows/클로드 쿨다운 실행.bat` | 콘솔 없이 앱을 띄우는 실행 파일 |
 | `docs/디자인_요청서.md` | 디자이너에게 넘기는 브리프 + `docs/시안/` 참고 이미지 |
-| `agent/cooldown_agent.py` | 폰 위젯용 상주 에이전트. 조회 → 로컬 JSON 저장 → 서버 POST |
+| `cooldown_push.py` | **폰으로 보내기.** 키 생성·주소 정돈·POST·QR 만들기 |
+| `agent/cooldown_agent.py` | 헤드리스 전용 상주 에이전트(위젯 안 쓰는 PC용). 보통은 필요 없다 |
 | `server/app/api/cooldown/route.ts` | POST(업서트) / GET(조회) 릴레이 |
 | `server/schema.sql` | `public.claude_cooldown` 테이블, RLS on + 정책 없음 |
-| `requirements.txt` | requests / pillow / pystray / pywin32 |
-| `README.md` | 설치·배포 절차, KWGT 수식 |
+| `android/` | **갤럭시 앱** — 아래 '폰 앱' 절 |
+| `.github/workflows/android.yml` | 태그 밀면 APK 만들어 릴리스에 붙임 |
+| `requirements.txt` | requests / pillow / pystray / pywin32 / qrcode |
+| `README.md` | 설치·배포 절차 |
 
 ## 확정된 사실
 
@@ -107,7 +113,8 @@
   핑 실행 폴더 `~/.claude_cooldown_ping_cwd`(빈 폴더 — 큰 CLAUDE.md 를 딸려 읽어
   입력 토큰이 늘지 않게 일부러 여기서 실행).
 - 우클릭 메뉴는 **두 진입점**으로 나뉜다(한 앱, 기능은 분리):
-  **쿨다운 (사용량 표시)** = 위젯 모양·동작(새로고침·디자인·밝기·붙이기·항상위, `menu_cool`),
+  **쿨다운 (사용량 표시)** = 위젯 모양·동작(새로고침·디자인·밝기·항상위, `menu_cool`).
+  **'작업표시줄에 붙이기' 토글은 없다** — 디자인에서 슬림 바를 고르면 자동으로 붙는다(아래 참고).
   **모닝 스타터 (5시간 자동 시작)** = 체크박스 `정한 시각마다 5시간 자동 시작`(`toggle_ping`) ·
   `지금 한 번 실행`(`send_ping_now`) · `시각 설정…`(`open_ping_times`) · `실행 기록…`(`open_ping_log`).
   자동 실행·종료만 메인에. **메뉴엔 동적 값(다음 시각·마지막 결과)을 나열하지 않는다** — 설정·기록 창에서 본다.
@@ -147,6 +154,25 @@
 - 확인: `python -u windows/_shot_skin.py <키> {ok|net|err|max} out.png`
   (`max` 는 100% · 가장 긴 문자열 · 긴 모델명인 최악 케이스)
 
+## 앱이 꺼졌을 때 (블랙박스)
+
+`pythonw`·exe(`--windowed`)는 콘솔이 없어 **오류가 어디에도 안 남는다** — 앱이 소리 없이
+사라져도 원인을 알 길이 없었다. 그래서 `~/.claude_cooldown_app.log` 에 켜고·끄고·죽는
+순간을 남긴다. **꺼졌다는 얘기가 나오면 여기부터 본다.**
+
+- `시작` / `종료 — 메뉴`(사용자가 끔) / `종료 — 창이 닫힘` / `종료 — 인터프리터 정리`.
+  **`종료 —` 줄 없이 다음 `시작` 이 나오면 밖에서 죽은 것**(강제 종료·보안 솔루션 등).
+- `치명적 오류`(메인) · `스레드 오류`(폴러·핑) · `화면 오류`(Tk 콜백) 는 traceback 째로 남는다.
+  특히 **Tk 콜백 오류는 원래 stderr 로 새어 나가 증발**했다 — `report_callback_exception` 을 갈아 끼웠다.
+- `faulthandler` 를 같은 파일에 걸어 둬서, 파이썬이 통째로 죽으면(`Fatal Python error`)
+  마지막 스택까지 남는다. 로그 파일 핸들은 열어 둔 채로 두고 **줄이기는 시작할 때 한 번만** 한다.
+- **`quit()` 은 `os._exit(0)` 로 끝낸다.** 데몬 스레드(트레이·폴러·핑)가 살아 있는 채로
+  인터프리터를 정리하면 파이썬이 `abort()` 로 죽는다 — 실제로 2026-07-29 00:04·00:05 에
+  WER 에 `c0000409` / `FATAL_APP_EXIT` 로 두 번 찍혔다. 저장은 `os._exit` 앞에서 이미 끝낸다.
+- 윈도우 쪽 증거를 볼 곳: 이벤트 뷰어 `Application Error`, 덤프 `%LOCALAPPDATA%\CrashDumps`,
+  보고서 `%PROGRAMDATA%\Microsoft\Windows\WER\ReportArchive`. **여기에도 없고 로그에도
+  `종료 —` 가 없으면** 네이티브 크래시가 아니라 밖에서 죽인 것이다.
+
 ## 동작 규칙 (건드릴 때 주의)
 
 - **새로고침 표시는 스피너** — 위젯을 클릭하면 새로고침되고, 오른쪽 위에 작은 캔버스
@@ -167,7 +193,8 @@
   안 그러면 붙여 둔 위젯을 한 번 클릭했을 뿐인데 작업표시줄 뒤로 내려간다.
   **붙여 둔 동안에는 임계값이 `UNDOCK_SLOP`(120px)** — 클릭하다 몇 px 밀린 정도는 클릭으로 보고
   `_reassert_dock` 으로 제자리에 다시 붙인다. 그래야 새로고침하려고 누를 때마다 작업표시줄에서
-  떨어져 위로 뜨지 않는다(떼려면 크게 끌거나 우클릭 메뉴 토글). `DRAG_SLOP` 4px 만으론 부족했다.
+  떨어져 위로 뜨지 않는다(떼려면 크게 끌면 된다. **다시 붙이려면 디자인에서 슬림 바를 다시 고른다**
+  — 붙이기 토글을 없앴으므로 `switch_skin` 이 같은 키 재선택 시 되붙인다). `DRAG_SLOP` 4px 만으론 부족했다.
 - **붙어 있는 동안에는 x/y 를 저장하지 않는다**(`_remember_spot`). 작업표시줄
   좌표가 자유 위치를 덮으면 나중에 풀었을 때 화면 끝에 걸린다.
 - **`_pump` 은 try/finally 로 감싸 무슨 일이 있어도 다시 예약한다.** 여기서
@@ -183,14 +210,84 @@
 
 ## 작업표시줄에 붙이기
 
+- **기본값이 '슬림 바 + 붙임'이다** (`load_state` 의 `skin="slim"`·`dock=True`, `skins.DEFAULT="slim"`).
+  처음 켜면 바로 작업표시줄에 붙는다. 별도 '붙이기' 메뉴 토글은 없앴다.
 - 윈도우 11 은 작업표시줄 **안에** 넣는 길(데스크밴드)을 없앴다. 위에 겹쳐 놓는다.
 - `dockable = True` 인 스킨에서만 쓸 수 있다 (지금은 `slim` 뿐).
   작업표시줄 높이에 맞춰 그리지 않는 스킨이 붙으면 삐져나오기 때문.
-  다른 스킨으로 바꾸면 자동으로 풀리고 메뉴 항목이 잠긴다.
+- **붙임은 '디자인 = 슬림 바'와 한 몸이다.** `switch_skin` 이 `dock = 새 스킨.dockable` 로 정한다:
+  슬림 바를 고르면 붙고, 다른 디자인을 고르면 풀린다. 끌어서 떼어 내면 `dock=False`(그 자리 유지),
+  다시 붙이려면 **슬림 바를 다시 선택**한다(같은 키 재선택 시 `switch_skin` 이 되붙인다).
+- 슬림 바: 왼쪽 끝 **상태 띠(`accent`, 한도 색 초록/노랑/빨강)** + **통통 튀는 클로드 별빛 마스코트 '클로디'**
+  (Claudi — 슬림 스킨에 사는 코랄색 캐릭터).
+  - **마스코트 위치는 주간 칸과 오른쪽(모델/기준) 사이 빈 틈**이다. 가로 배치는
+    `[띠] 5시간 |GAP| 주간 |MGAP(마스코트)| 오른쪽칸`. **오른쪽 칸 폭(`right_w`)을 먼저 확보**하므로
+    `Claude Opus 99%` 처럼 긴 모델명이 와도(→`_fit` 이 `…` 로 줄임) 마스코트와 안 겹친다.
+    `mascot_cx` 는 build 에서 그 틈 가운데로 계산한다(고정 상수 아님).
+  - 띠가 상태를 맡으므로 **마스코트는 상태와 무관하게 클로드 코랄색(`MASCOT_COLOR`)으로 고정**한다.
+  - 기본 크기는 `MASCOT_R`(=10). 애니메이션 루프는 `_start_mascot`→`_animate`(`FRAME_MS`=45ms)→
+    `_step_physics`→`_idle_step`→`_draw_mascot`(매 프레임 `delete("mascot")` 후 다시 그림). 색은 안 바꾼다.
+  - **심심할 때 잔동작(`_idle_step`/`_begin_gesture`)**: 쉬는 동안 이따금 하나씩 —
+    깜빡(`_blink`)·눈 굴리기(`_look`, 눈만 옆으로)·고개 갸웃(`_tilt`)·기지개(`_stretch`, 세로로 쭉:
+    살을 가로/세로 따로 늘림 `sxk`/`syk`)·부르르(`_wiggle`)·반짝이 뿜기(`_sparks`, 떠오르며 사그라듦)·
+    가끔 폴짝(`hop`). `숨쉬기(breathe)`+잔잔한 통통은 항상. 반응으로 출렁이거나(`moving`) 다른 잔동작
+    중이면 새 잔동작은 안 낸다.
+  - **누르면 반응한다 — 용수철 모델**: `App._press` 가 창 기준 좌표로 `self.skin.react(x, y)` 를 부르면
+    위로 튀는 **속도**(`_vy`)를 더한다. `_step_physics` 가 매 프레임 제자리로 당겨(`SPRING_K`/`SPRING_DAMP`)
+    **연타하면 힘이 쌓여 부드럽게 출렁**인다(뚝 끊기던 옛 카운트다운 방식을 버림).
+  - **직접 콕 vs 아무 데 구분**: `react` 가 `_hit(x,y)`(마스코트 반경 `HIT_R`)로 판단 —
+    **직접 찌르면** 크게 펄쩍(`POKE_MULT`) + `_surprise` 동안 눈이 O O(놀람) + `_clicks` 누적,
+    **딴 데면** 잔잔히 통통만 하고 **기절에는 안 쌓인다**(`_clicks` 미변경) + 움직이는 동안 ∧∧ 눈웃음.
+  - **과부하 기절 — 직접 콕만**: 직접 콕 누적(`_clicks`, 매 프레임 `CLICK_DECAY` 로 식음)이 `FAINT_AT`(높게
+    잡음)를 넘으면 `_faint` 상태로 `FAINT_FRAMES`(~2.7초) 동안 `_draw_faint` — **`FAINT_SCALE` 로 크게
+    부풀린 X_X 눈**(작아서 안 보이던 걸 키움) + 노란 별이 머리 위를 돈다. 그동안 `react()` 무시, 깨어나면 리셋.
+  - `react(x=None, y=None)` 는 `base.Skin` 에 no-op 로 있어 다른 스킨(카드·아크·표)에선 조용히 무시된다.
+  - **build 가 다시 불려도(테마 전환) 옛 루프가 겹치지 않게 세대 토큰 `_anim_gen` 으로 은퇴시킨다.**
+    스킨 전환으로 캔버스가 사라지면 `_draw_mascot` 의 `tk.TclError` 를 잡아 루프가 스스로 끝난다.
+  - 눈은 `self.c.cget("bg")`(현재 바탕색)로 파내 오류 시 붉은 바탕에서도 얼굴이 보인다.
 - 스킨 높이는 `base.taskbar_height()` 실측값에 맞춘다 — 고정 픽셀로 쓰지 말 것
   (작은 작업표시줄 40px, 고배율 60px+ 로 달라진다).
 - **작업표시줄도 '항상 위' 라서 그냥 topmost 로 두면 가려진다.** 조작할 때마다
   스스로를 올리므로 `raise_above_taskbar()` 를 1.5초마다 다시 부른다.
+
+## 폰 앱 (android/)
+
+갤럭시(One UI) 기준. Kotlin, appcompat·Compose 안 씀(뷰 + XML), minSdk 26 / target 36.
+의존성은 딱 둘 — WorkManager(15분 갱신)와 Play 코드 스캐너(QR).
+
+- **그리기는 `GaugeRenderer` 한 곳**이다. 홈 위젯·앱 화면·상태바 아이콘이 전부 이걸 쓰고,
+  배경화면은 `wallpaper/WallpaperArt` 가 같은 조각(`drawBar`)을 빌려 쓴다. 모양은 여기만 고친다.
+- 색은 `res/values/colors.xml`(밝게) + `values-night/`(어둡게) — 데스크탑 `skins/base.py`
+  팔레트를 옮긴 것. 임계값 50/80 도 같다. **새 색은 두 벌 다 채울 것.**
+- **화면에 쓰는 시간은 절대 시각**(`Limit.whenText` → "17:32 초기화")이다. 위젯은 15~30분에
+  한 번만 갱신되므로 "2시간 07분 후" 라고 적으면 곧 틀린 값이 된다. 상대 시간(`leftText`)은
+  매 프레임 다시 그리는 **배경화면에서만** 쓴다.
+- **알림의 남은 시간은 크로노미터에 맡긴다**(`setUsesChronometer`+`setChronometerCountDown`).
+  시스템이 1초마다 줄여 주므로 우리가 주기적으로 깨어날 필요가 없다.
+- **AOD·상태바 칩은 안드로이드 16 라이브 업데이트**로 간다 — `Notification.ProgressStyle` +
+  `setShortCriticalText` 를 단 상시 알림이면 시스템이 알아서 승격한다(One UI 8 Now Bar 도 이 길).
+  **API 36 에는 `requestPromotedOngoing()` 이 없다** — 그 뒤 버전에만 있어 리플렉션으로 부른다.
+  36 미만에서는 자동으로 옛 진행바 + 숫자 아이콘으로 내려간다.
+- 상태바 아이콘은 `GaugeRenderer.statusIcon` 이 **흰 글자 + 투명 배경**으로 그린다.
+  시스템이 알파를 마스크로 써서 한 색으로 물들이므로 색을 넣어도 소용없다.
+- 포그라운드 서비스는 **쓰지 않는다.** 상시 알림은 그것 없이도 남고, 퍼센트는 클로드를
+  쓸 때만 변해서 15분 주기로 충분하다. 정확한 알람 권한도 안 쓴다(`setAndAllowWhileIdle`).
+- 배경화면은 **보일 때만** 그린다(`onVisibilityChanged`). 게이지는 **아래 1/3**에만 —
+  잠금화면 시계·알림이 위쪽을 쓴다.
+
+### 빌드
+
+- **`android/build.ps1`** 로 돌린다 (`build` / `install` / `test` / `release`).
+- ★ **한글 경로에서 유닛 테스트가 깨진다.** 저장소가 `13. 클로드 사용량` 아래라, Gradle 이
+  테스트용 자식 JVM 에 클래스패스를 넘길 때 한글이 깨져 `ClassNotFoundException` 이 난다
+  (APK 빌드는 됨). 그래서 `build.ps1` 이 `%LOCALAPPDATA%\cooldown-android` 에 **정션**을
+  만들어 거기서 빌드한다. 손으로 `gradlew` 를 부르지 말 것.
+  같은 이유로 `gradle.properties` 에 `android.overridePathCheck=true` 가 필요하다.
+- **`gradlew testDebugUnitTest` 는 폰 없이 화면 그림을 뽑는 도구다** —
+  `app/build/미리보기/*.png` 에 위젯·배경화면·상태바 아이콘이 최악값까지 렌더된다.
+  화면을 고쳤으면 이걸로 먼저 확인할 것 (데스크탑의 `_shot_skin.py` 와 같은 역할).
+- 폰에 넣기: `.\build.ps1 install` (USB 디버깅 켠 갤럭시 연결). 친구에겐 태그를 밀어
+  GitHub Actions 가 만든 APK 를 준다.
 
 ## exe 로 묶을 때 (build_exe.py)
 
@@ -207,17 +304,20 @@
 
 ## 다음 작업
 
-1. **작업표시줄용 슬림 바 다듬기** — 크기는 맞았고 보기 좋게가 남았다.
+1. **서버 배포** (Supabase SQL 실행 → Vercel 환경변수 2개 → 배포). 폰 앱은 이게 있어야 돈다.
+2. **폰에서 실기 확인** — 위젯·상태바·잠금화면·AOD(Now Bar)·배경화면, 배터리.
+3. **작업표시줄용 슬림 바 다듬기** — 크기는 맞았고 보기 좋게가 남았다.
    요청서는 `docs/디자인_요청서.md`
-2. 폰 위젯 서버 배포 (Supabase + Vercel)
-2. 서버 배포 (Supabase SQL 실행 → Vercel 환경변수 2개 → 배포)
-3. `limits[]` 의 `severity` 를 색상 임계값 대신 쓸지 검토 (지금은 50/80 자체 기준)
+4. `limits[]` 의 `severity` 를 색상 임계값 대신 쓸지 검토 (지금은 50/80 자체 기준)
+5. 폰 마스코트 '클로디' 를 데스크탑 수준으로 (지금은 숨쉬기·통통·깜빡만)
 
 ## 하지 말 것
 
 - `.credentials.json` 내용이나 accessToken 을 서버로 보내지 말 것. 퍼센트만 전송.
+- **폰이 `api.anthropic.com` 을 직접 치게 만들지 말 것.** OAuth 리프레시가 토큰을
+  회전시켜 **PC 의 Claude Code 로그인이 풀린다.** 폰은 릴레이에서만 읽는다.
 - `SUPABASE_SERVICE_ROLE_KEY` 를 클라이언트 번들이나 에이전트에 넣지 말 것.
-- 폴링 간격을 300초 미만으로 낮추지 말 것.
+- 폴링 간격을 300초 미만으로 낮추지 말 것 (폰은 15분).
 - `claude_cooldown` 테이블에 RLS 정책을 추가하지 말 것 (anon 차단 상태가 의도된 설계).
 - 위젯에서 `os.startfile` 로 외부 파일·프로그램을 열지 말 것 — 프로즌(`--windowed`)·
   pythonw 환경에서 앱이 통째로 꺼지는 일이 있다. 파일 내용은 창을 직접 그려 보여 준다.
@@ -229,3 +329,6 @@
 - 내가 만드는 `.bat` 은 **순수 ASCII 로 쓸 것.** Write 도구가 UTF-8(BOM 없음)로 저장하는데
   한국어 Windows cmd 는 배치를 cp949 로 읽어, 한글이 든 줄(주석 포함)에서 바이트가 어긋나
   뒤따르는 명령까지 깨진다. 한글 안내는 파이썬(`build_exe.py`)이 콘솔에 출력하게 맡긴다.
+- 폰 앱에 **툴팁·도움말 문단을 넣지 말 것**(폴더 전체 규칙). 설명이 필요하면 항목 이름을
+  하는 일로 바꾸고 지금 상태를 화면에 그대로 보여 준다 — 예: 알림 스위치 아래에
+  설명 대신 `상태바 칩 · 잠금화면 · AOD`(이 기기에서 실제로 되는 것)를 적는다.

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 밝게 (windows/skins/base.py 의 LIGHT 팔레트). 어둡게는 values-night/colors.xml.
+     흐린 글자도 배경 대비 4.5:1 이상 — 위계는 밝기가 아니라 글자 크기로 준다.
+     새 색을 넣을 때는 두 벌 다 채울 것. -->
+<resources>
+    <color name="bg">#f3f5f7</color>
+    <color name="title">#12161b</color>
+    <color name="label">#57606a</color>
+    <color name="sub">#2f3742</color>
+    <color name="faint">#616a75</color>
+    <color name="track">#dce1e7</color>
+    <color name="line">#e3e8ed</color>
+    <color name="green">#1a7f37</color>
+    <color name="amber">#8a6100</color>
+    <color name="red">#cf222e</color>
+
+    <!-- 클로드 코랄 — 마스코트 '클로디'. 밝게/어둡게 양쪽에서 그대로 쓴다 -->
+    <color name="coral">#d97757</color>
+</resources>

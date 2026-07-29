@@ -14,6 +14,8 @@ pip install -r ../requirements.txt
 
 from __future__ import annotations
 
+import atexit
+import faulthandler
 import json
 import os
 import queue
@@ -21,10 +23,11 @@ import sys
 import threading
 import time
 import tkinter as tk
+import traceback
 from datetime import datetime
 
 import pystray
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -40,6 +43,7 @@ from cooldown_core import (  # noqa: E402
 )
 
 import cooldown_ping  # noqa: E402
+import cooldown_push  # noqa: E402
 import skins  # noqa: E402
 from skins.base import KR, NUM, P, set_palette, tone  # noqa: E402
 
@@ -53,6 +57,71 @@ STARTUP_LNK = os.path.join(
     "클로드 쿨다운.lnk",
 )
 
+# ---------------------------------------------------------------- 블랙박스
+# pythonw·exe(--windowed) 로 돌면 콘솔이 없어 오류가 **어디에도 안 남는다** —
+# 앱이 소리 없이 사라져도 원인을 알 길이 없었다. 그래서 켜고·끄고·죽는 순간을
+# 여기 한 줄씩 남긴다. 다음에 또 꺼지면 이 파일부터 본다.
+#   '종료 — …' 줄 없이 다음 '시작' 이 나오면 = 밖에서 죽임(또는 갑작스런 종료),
+#   'Fatal Python error' 뭉치가 있으면 = 파이썬이 스스로 abort (faulthandler 가 남김).
+APPLOG_PATH = os.path.join(HOME, ".claude_cooldown_app.log")
+APPLOG_KEEP = 400  # 시작할 때 이 줄 수만 남기고 줄인다
+_applog_file = None
+
+
+def open_applog() -> None:
+    """로그를 열어 둔다. 돌아가는 동안엔 덧붙이기만 하고, 줄이는 건 시작할 때 한 번.
+    faulthandler 가 같은 파일 핸들로 C 스택까지 쏟아부으므로 열어 둔 채로 둔다."""
+    global _applog_file
+    try:
+        if os.path.exists(APPLOG_PATH):
+            with open(APPLOG_PATH, encoding="utf-8", errors="replace") as f:
+                keep = f.read().splitlines()[-APPLOG_KEEP:]
+            with open(APPLOG_PATH, "w", encoding="utf-8") as f:
+                f.write("\n".join(keep) + "\n")
+        _applog_file = open(APPLOG_PATH, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        _applog_file = None
+
+
+def applog(line: str) -> None:
+    if _applog_file is None:
+        return
+    try:
+        _applog_file.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {line}\n")
+        _applog_file.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def install_crash_log() -> None:
+    """죽는 길을 전부 로그로 모은다. 콘솔이 없어도 흔적이 남게."""
+    open_applog()
+    if _applog_file is not None:
+        try:
+            # 파이썬이 통째로 죽을 때(abort·세그폴트) 마지막 스택을 남긴다.
+            # 어젯밤 c0000409(FATAL_APP_EXIT) 같은 게 이 길로 잡힌다.
+            faulthandler.enable(file=_applog_file)
+        except (OSError, ValueError, RuntimeError):
+            pass
+
+    def on_uncaught(exc_type, exc, tb):
+        applog("치명적 오류\n" + "".join(traceback.format_exception(exc_type, exc, tb)).rstrip())
+
+    def on_thread_error(args):
+        name = getattr(args.thread, "name", "?")
+        applog(
+            f"스레드 오류 ({name})\n"
+            + "".join(
+                traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
+            ).rstrip()
+        )
+
+    sys.excepthook = on_uncaught
+    threading.excepthook = on_thread_error
+    # quit() 은 os._exit 로 끝내므로 여기까지 오면 '메뉴로 끝낸 게 아닌' 종료다
+    atexit.register(lambda: applog("종료 — 인터프리터 정리"))
+
+
 WARN_AT = 80  # 한도가 이 % 를 넘으면 알림
 WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
 RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
@@ -65,7 +134,6 @@ PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
 THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
-DOCK_LABEL = "작업표시줄에 붙이기 (슬림 바)"
 ALPHA = 0.96  # 평소 창 불투명도
 BUSY_ALPHA = 0.78  # 새로고침 누른 직후
 
@@ -144,7 +212,7 @@ def load_state() -> dict:
         "x": 60,
         "y": 60,
         "topmost": False,
-        "dock": False,  # 작업표시줄에 붙이기
+        "dock": True,  # 슬림 바는 작업표시줄에 붙는 게 기본 (자유 위치로 끌면 꺼진다)
         "theme": "auto",  # auto(윈도우 설정 따름) / light / dark
         "skin": skins.DEFAULT,
     }
@@ -431,11 +499,22 @@ class App:
         self._ping_busy = False
         self._last_ping_dt = cooldown_ping._parse_iso(self.ping_cfg.get("last_ping"))
 
+        # 폰으로 보내기 — 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다
+        self.push_cfg = cooldown_push.load_cfg()
+        self.push_out: queue.Queue = queue.Queue()
+        self._push_busy = False
+        self.push_error = ""  # 마지막 전송 실패 사유 (성공하면 비운다)
+
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
         # '최소화로 시작' 표시 상태를 넘기는 경우가 있어, withdraw → deiconify 를
         # 거쳐 저장된 위치·크기로 확실히 펴지게 한다.
         self.root.withdraw()
+        # Tk 콜백에서 난 오류는 원래 stderr 로 나가는데, 콘솔이 없으면 그대로 증발한다.
+        # (그림 그리다 한 번 어긋나면 그 뒤로 조용히 안 도는 식) — 블랙박스로 돌린다.
+        self.root.report_callback_exception = lambda exc, val, tb: applog(
+            "화면 오류\n" + "".join(traceback.format_exception(exc, val, tb)).rstrip()
+        )
         self.applied_theme = set_palette(self.state["theme"])
         self.root.configure(bg=P.bg)
 
@@ -478,19 +557,24 @@ class App:
 
     def switch_skin(self, key: str) -> None:
         if key == self.skin.key:
+            # 이미 이 디자인이다 — 슬림 바를 다시 고르면 작업표시줄로 되붙인다.
+            # (자유 위치로 떼어 낸 걸 되돌리는 유일한 길. 붙이기 토글은 없앴다.)
+            if self.skin.dockable and not self.state["dock"]:
+                self.state["dock"] = True
+                save_state(self.state)
+                self.show_window()
             return
         self.state["skin"] = key
         self.skin = skins.make(key)
-        if not self.skin.dockable:
-            # 작업표시줄 높이에 안 맞는 모양이라 붙여 둘 수 없다 — 저장된 자리로 돌아간다
-            self.state["dock"] = False
+        # 붙일 수 있는 디자인(슬림 바)이면 자동으로 작업표시줄에 붙는다.
+        # 아니면 저장된 자유 위치로 돌아간다.
+        self.state["dock"] = self.skin.dockable
         save_state(self.state)
         self._build_body()
         self.height = 0  # 스킨마다 크기가 다르므로 다시 잰다
         self._replay()
         self.show_window()
         self.var_skin.set(self.skin.key)
-        self._sync_dock_menu()
 
     def switch_theme(self, kind: str) -> None:
         self.state["theme"] = kind
@@ -539,10 +623,10 @@ class App:
     def _build_menu(self) -> None:
         self.var_topmost = tk.BooleanVar(self.root, bool(self.state["topmost"]))
         self.var_autostart = tk.BooleanVar(self.root, autostart_enabled())
-        self.var_dock = tk.BooleanVar(self.root, bool(self.state["dock"]))
         self.var_skin = tk.StringVar(self.root, self.skin.key)
         self.var_theme = tk.StringVar(self.root, self.state["theme"])
         self.var_ping = tk.BooleanVar(self.root, bool(self.ping_cfg.get("enabled")))
+        self.var_push = tk.BooleanVar(self.root, bool(self.push_cfg.get("enabled")))
 
         # 메인 메뉴는 두 진입점으로 나눈다 — 하나의 앱이지만 기능은 직관적으로 분리.
         #   · 쿨다운 (사용량 표시): 위젯 모양·동작 (새로고침·디자인·밝기·붙이기·항상위)
@@ -574,9 +658,8 @@ class App:
             )
         cool.add_cascade(label="밝기", menu=theme)
 
-        # 이름에 (슬림 바) 를 넣어, 누르면 그 디자인으로 바뀐다는 걸 미리 알린다.
-        # 잠가 두면 기본 디자인에서 늘 회색이라 이유를 알 길이 없다.
-        cool.add_checkbutton(label=DOCK_LABEL, variable=self.var_dock, command=self.toggle_dock)
+        # '작업표시줄에 붙이기' 는 따로 두지 않는다 — 디자인에서 '슬림 바' 를 고르면
+        # 바로 작업표시줄에 붙고, 끌어 옮기면 그 자리에 남는다.
         cool.add_checkbutton(
             label="항상 위에 표시", variable=self.var_topmost, command=self.toggle_topmost
         )
@@ -598,6 +681,16 @@ class App:
         ping.add_command(label="실행 기록…", command=self.open_ping_log)
         self.menu.add_cascade(label="모닝 스타터 (5시간 자동 시작)", menu=ping)
 
+        # ---- 폰에서 보기 ----
+        # 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다. 폰 앱이 그걸 읽는다.
+        phone = tk.Menu(self.menu, tearoff=0)
+        phone.add_checkbutton(
+            label="폰으로 보내기", variable=self.var_push, command=self.toggle_push
+        )
+        phone.add_separator()
+        phone.add_command(label="폰 연결…", command=self.open_phone_link)
+        self.menu.add_cascade(label="폰에서 보기 (앱·위젯)", menu=phone)
+
         # ---- 앱 공통 ----
         self.menu.add_separator()
         self.menu.add_checkbutton(
@@ -607,8 +700,6 @@ class App:
         )
         self.menu.add_separator()
         self.menu.add_command(label="종료", command=self.quit)
-
-        self._sync_dock_menu()
 
     def _build_tray(self) -> pystray.Icon:
         return pystray.Icon(
@@ -638,6 +729,13 @@ class App:
         self._dy = e.y_root - self.root.winfo_y()
         self._from = (e.x_root, e.y_root)
         self._dragging = True
+        # 누른 순간 마스코트가 반응한다 (스킨이 지원하면). 끌기로 이어져도 무해하다.
+        # _dx/_dy 는 창 기준 누른 자리 = 캔버스 좌표(창을 꽉 채우므로) — 마스코트를
+        # 직접 찔렀는지 스킨이 이 값으로 판단한다.
+        try:
+            self.skin.react(self._dx, self._dy)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _drag(self, e):
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
@@ -665,14 +763,12 @@ class App:
         )
         self.root.geometry(f"+{x}+{y}")
         self.state.update(x=x, y=y, dock=False)
-        self.var_dock.set(False)
         self.root.attributes("-topmost", bool(self.state["topmost"]))
         save_state(self.state)
 
     def _popup(self, e):
         self.var_topmost.set(bool(self.state["topmost"]))
         self.var_autostart.set(autostart_enabled())
-        self._sync_dock_menu()
         self.var_skin.set(self.skin.key)
         self.var_theme.set(self.state["theme"])
         self.var_ping.set(bool(self.ping_cfg.get("enabled")))
@@ -802,26 +898,6 @@ class App:
         if docked:
             raise_above_taskbar(self.root)
 
-    def toggle_dock(self):
-        turning_on = not self.state["dock"]
-        if turning_on and not self.skin.dockable:
-            # 작업표시줄 높이에 맞춰 그리는 디자인으로 먼저 바꾼다.
-            # 항목 이름에 (슬림 바) 라고 적혀 있으니 놀랄 일은 아니다.
-            target = next((c.key for c in skins.SKINS if c.dockable), None)
-            if target is None:
-                self.var_dock.set(False)
-                return
-            self.state["dock"] = True  # switch_skin 이 끄지 않도록 먼저 세운다
-            self.switch_skin(target)
-        else:
-            self.state["dock"] = turning_on
-        self.var_dock.set(bool(self.state["dock"]))
-        save_state(self.state)
-        self.show_window()
-
-    def _sync_dock_menu(self):
-        self.var_dock.set(bool(self.state["dock"]) and self.skin.dockable)
-
     def quit(self):
         self.alive = False
         self._remember_spot()
@@ -831,7 +907,15 @@ class App:
             self.tray.stop()
         except Exception:  # noqa: BLE001
             pass
-        self.root.destroy()
+        applog("종료 — 메뉴")
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        # 데몬 스레드(트레이·폴러·핑)가 살아 있는 채로 인터프리터를 정리하면 파이썬이
+        # abort() 로 죽는다 — WER 에 c0000409 / FATAL_APP_EXIT 로 찍힌 그 크래시다.
+        # 저장은 위에서 이미 끝냈으니 뒷정리를 건너뛰고 곧바로 끝낸다.
+        os._exit(0)
 
     # -------------------------------------------------- 화면 갱신
     def _pump(self):
@@ -887,6 +971,12 @@ class App:
             except queue.Empty:
                 break
             self._on_ping_result(ok, detail, manual, when)
+
+        while True:
+            try:
+                self.push_error = self.push_out.get_nowait()
+            except queue.Empty:
+                break
 
     @staticmethod
     def _stamp(usage: Usage) -> str:
@@ -945,6 +1035,7 @@ class App:
         self.skin.show(usage, self._stamp(usage))
         self._reassert_dock()
         export(usage)
+        self._start_push(usage)
 
         self.tray.icon = draw_icon(usage.five.pct)
         self.tray.title = self._tray_text(usage)[:127]
@@ -1064,6 +1155,139 @@ class App:
     def send_ping_now(self):
         """지금 한 번 쏜다 (테스트/즉시 창 열기). 앵커 정렬과 무관."""
         self._start_ping(manual=True)
+
+    # -------------------------------------------------- 폰으로 보내기
+    def toggle_push(self):
+        self.push_cfg["enabled"] = not self.push_cfg.get("enabled")
+        cooldown_push.save_cfg(self.push_cfg)
+        self.var_push.set(bool(self.push_cfg["enabled"]))
+        if self.push_cfg["enabled"] and self.last_usage is not None:
+            self._start_push(self.last_usage)  # 켜자마자 한 번 올려 폰이 바로 받게
+
+    def _start_push(self, usage: Usage) -> None:
+        """퍼센트만 릴레이 서버로. 네트워크는 별도 스레드 — Tk 를 붙잡으면 위젯이 언다."""
+        if self._push_busy or not cooldown_push.ready(self.push_cfg):
+            return
+        self._push_busy = True
+
+        def worker():
+            try:
+                cooldown_push.push(usage, self.push_cfg)
+                self.push_out.put("")
+            except Exception as e:  # noqa: BLE001
+                self.push_out.put(str(e) or "전송 실패")
+            finally:
+                self._push_busy = False
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def open_phone_link(self):
+        """폰 연결 — 서버 주소를 넣고, 폰 앱이 찍을 QR 을 본다."""
+        try:
+            top, body = self._open_panel("폰 연결")
+            wrap = tk.Frame(body, bg=P.bg)
+            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(4, PANEL_PAD))
+            width = 300
+
+            row = tk.Frame(wrap, bg=P.bg)
+            row.pack(fill="x")
+            tk.Label(
+                row, text="서버 주소", bg=P.bg, fg=P.label, font=(KR, 9)
+            ).pack(side="left", padx=(0, 8))
+            entry = tk.Entry(
+                row,
+                bg=P.track,
+                fg=P.title,
+                insertbackground=P.title,
+                relief="flat",
+                highlightthickness=0,
+                font=(NUM, 9),
+            )
+            entry.pack(side="left", fill="x", expand=True, ipady=4)
+            entry.insert(0, self.push_cfg.get("url") or "")
+
+            hold = tk.Frame(wrap, bg=P.bg)  # QR 또는 안내가 들어가는 자리
+            hold.pack(fill="x", pady=(12, 0))
+
+            state = tk.Label(wrap, text="", bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w")
+            state.pack(fill="x", pady=(10, 0))
+
+            def render():
+                for child in hold.winfo_children():
+                    child.destroy()
+                uri = cooldown_push.pair_uri(self.push_cfg)
+                img = cooldown_push.qr_image(uri)
+                if img is not None:
+                    photo = ImageTk.PhotoImage(img)
+                    lbl = tk.Label(hold, image=photo, bg=P.bg, bd=0)
+                    lbl.image = photo  # 참조를 잡아 두지 않으면 지워져 빈칸이 된다
+                    lbl.pack()
+                    tk.Label(
+                        hold, text="폰 앱에서 QR 스캔", bg=P.bg, fg=P.sub, font=(KR, 9)
+                    ).pack(pady=(8, 0))
+                elif uri:
+                    # qrcode 가 없어 그림을 못 만든다 — 폰에 손으로 넣을 값을 보여 준다
+                    tk.Label(
+                        hold,
+                        text=cooldown_push.read_url(self.push_cfg),
+                        bg=P.bg,
+                        fg=P.sub,
+                        font=(NUM, 8),
+                        wraplength=width - PANEL_PAD * 2,
+                        justify="left",
+                    ).pack(anchor="w")
+                else:
+                    tk.Label(
+                        hold,
+                        text="주소를 넣으면 QR 이 나와요.",
+                        bg=P.bg,
+                        fg=P.faint,
+                        font=(KR, 9),
+                    ).pack(anchor="w")
+
+                when = cooldown_push.last_ok_at(self.push_cfg)
+                if self.push_error:
+                    state.config(text=f"마지막 전송 실패 · {self.push_error}", fg=P.red)
+                elif when:
+                    state.config(text=f"마지막 전송  {self._friendly_time(when)}", fg=P.faint)
+                else:
+                    state.config(text="아직 보낸 적이 없어요.", fg=P.faint)
+                self._refit_panel(top, width)
+
+            def save():
+                url = cooldown_push.normalize_url(entry.get())
+                entry.delete(0, "end")
+                entry.insert(0, url)
+                self.push_cfg["url"] = url
+                # 주소를 넣었다는 건 보내겠다는 뜻이다 — 체크박스를 따로 켜게 하지 않는다
+                self.push_cfg["enabled"] = bool(url)
+                cooldown_push.save_cfg(self.push_cfg)
+                self.var_push.set(bool(self.push_cfg["enabled"]))
+                render()
+                if self.last_usage is not None:
+                    self._start_push(self.last_usage)
+
+            def regen():
+                self.push_cfg["key"] = cooldown_push.new_key()
+                self.push_cfg["last_ok"] = ""
+                cooldown_push.save_cfg(self.push_cfg)
+                self.push_error = ""
+                render()
+                if self.last_usage is not None:
+                    self._start_push(self.last_usage)
+
+            entry.bind("<Return>", lambda _e: save())
+
+            buttons = tk.Frame(wrap, bg=P.bg)
+            buttons.pack(fill="x", pady=(14, 0))
+            self._themed_button(buttons, "저장", save, primary=True).pack(side="right")
+            self._themed_button(buttons, "키 바꾸기", regen).pack(side="right", padx=(0, 8))
+
+            render()
+            self._finalize_panel(top, width)
+            entry.focus_set()
+        except Exception:  # noqa: BLE001
+            pass
 
     # -------------------------------------------------- 위젯과 같은 결의 팝업
     # 팝업도 본체 위젯과 똑같이: 테두리 없는 둥근 창 + 왼쪽 액센트 바 + 볼드 제목,
@@ -1398,7 +1622,11 @@ class App:
 if __name__ == "__main__":
     # 두 번 실행해도 위젯이 둘로 늘지 않는다 — 이미 떠 있으면 그쪽을 앞으로 부른다.
     # (시작 프로그램 + 바로가기 + .bat 이 겹쳐 눌리기 쉽다)
+    # 로그는 이 판정 뒤에 연다 — 겹쳐 눌린 프로세스가 로그를 어지럽히지 않게.
     if already_running():
         summon_running_instance()
         sys.exit(0)
+    install_crash_log()
+    applog("시작")
     App().run()
+    applog("종료 — 창이 닫힘")  # quit() 을 안 거치고 mainloop 이 끝난 길

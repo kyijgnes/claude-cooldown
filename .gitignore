@@ -9,3 +9,10 @@ build/
 dist/
 *.spec
 windows/앱아이콘.ico
+
+# 안드로이드 (android/)
+.gradle/
+android/local.properties
+android/.kotlin/
+*.apk
+*.aab

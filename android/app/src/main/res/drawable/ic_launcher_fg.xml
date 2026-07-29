@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 바탕화면 위젯 아이콘(build_exe.py make_icon)과 같은 모양 — 게이지 두 줄 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 5시간 (초록, 30%) -->
+    <path
+        android:fillColor="#2a3038"
+        android:pathData="M32,44 L76,44 A5,5 0 0 1 76,54 L32,54 A5,5 0 0 1 32,44 Z" />
+    <path
+        android:fillColor="#3fb950"
+        android:pathData="M32,44 L45,44 A5,5 0 0 1 45,54 L32,54 A5,5 0 0 1 32,44 Z" />
+
+    <!-- 주간 (노랑, 72%) -->
+    <path
+        android:fillColor="#2a3038"
+        android:pathData="M32,60 L76,60 A5,5 0 0 1 76,70 L32,70 A5,5 0 0 1 32,60 Z" />
+    <path
+        android:fillColor="#e3b341"
+        android:pathData="M32,60 L64,60 A5,5 0 0 1 64,70 L32,70 A5,5 0 0 1 32,60 Z" />
+</vector>

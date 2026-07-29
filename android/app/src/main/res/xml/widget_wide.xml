@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 5시간·주간 두 줄 게이지. 남은 시간은 '17:32 초기화' 처럼 절대 시각으로 적어
+     15분마다만 갱신해도 화면이 틀리지 않는다. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="70dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:description="@string/wallpaper_desc"
+    android:initialLayout="@layout/widget"
+    android:previewLayout="@layout/widget"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen|keyguard" />

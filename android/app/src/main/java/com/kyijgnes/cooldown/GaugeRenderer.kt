@@ -1,0 +1,188 @@
+package com.kyijgnes.cooldown
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
+
+/**
+ * **화면 넷이 함께 쓰는 단 하나의 그리기 코드** — 홈 위젯, 앱 화면, 라이브 배경화면,
+ * 상태바 아이콘. 모양을 바꾸려면 여기만 고친다.
+ *
+ * 데스크탑 스킨과 같은 규칙:
+ *   · 흐린 글자도 배경 대비 4.5:1 이상 — 위계는 밝기가 아니라 글자 크기로 준다
+ *   · 100% 가 아니면 게이지를 끝까지 채우지 않는다 (99% 와 구별돼야 한다)
+ */
+object GaugeRenderer {
+
+    private val REGULAR = Typeface.create("sans-serif", Typeface.NORMAL)
+    private val MEDIUM = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+
+    private fun paint(size: Float, color: Int, face: Typeface) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = size
+        this.color = color
+        typeface = face
+    }
+
+    // ---------------------------------------------------------------- 조각
+
+    /** 둥근 막대 게이지. 100% 가 아니면 끝을 살짝 남긴다. */
+    fun drawBar(c: Canvas, r: RectF, pct: Float?, p: Palette) {
+        val radius = r.height() / 2f
+        c.drawRoundRect(r, radius, radius, paint(0f, p.track, REGULAR))
+        if (pct == null || pct <= 0f) return
+        val full = r.width()
+        var w = full * (pct / 100f)
+        if (pct < 100f) w = w.coerceAtMost(full - r.height() * 0.35f)
+        w = w.coerceAtLeast(r.height())  // 1% 도 보이게 최소한 동그라미 하나
+        val fill = RectF(r.left, r.top, r.left + w, r.bottom)
+        c.drawRoundRect(fill, radius, radius, paint(0f, p.tone(pct), REGULAR))
+    }
+
+    /** 270도 열린 링 게이지 (작은 위젯·배경화면용). */
+    fun drawArc(c: Canvas, box: RectF, pct: Float?, p: Palette, thickness: Float) {
+        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = thickness
+            strokeCap = Paint.Cap.ROUND
+        }
+        val inset = thickness / 2f
+        val r = RectF(box.left + inset, box.top + inset, box.right - inset, box.bottom - inset)
+        ring.color = p.track
+        c.drawArc(r, 135f, 270f, false, ring)
+        if (pct == null || pct <= 0f) return
+        ring.color = p.tone(pct)
+        val sweep = (270f * (pct / 100f)).coerceAtMost(if (pct < 100f) 266f else 270f)
+        c.drawArc(r, 135f, sweep.coerceAtLeast(4f), false, ring)
+    }
+
+    /** 가운데 정렬 글자. y 는 글자 상자의 세로 중심. */
+    private fun centerText(c: Canvas, text: String, cx: Float, cy: Float, pt: Paint) {
+        val fm = pt.fontMetrics
+        c.drawText(text, cx - pt.measureText(text) / 2f, cy - (fm.ascent + fm.descent) / 2f, pt)
+    }
+
+    private fun baseline(cy: Float, pt: Paint): Float {
+        val fm = pt.fontMetrics
+        return cy - (fm.ascent + fm.descent) / 2f
+    }
+
+    // ---------------------------------------------------------------- 넓은 판
+
+    /**
+     * 5시간·주간 두 줄. 4×1 홈 위젯과 앱 화면이 쓴다.
+     *
+     * `[5시간] [47%] [━━━━게이지━━━━] [17:32 초기화]`
+     */
+    fun wide(ctx: Context, wPx: Int, hPx: Int, snap: Snapshot, now: Long, card: Boolean = true): Bitmap {
+        val p = Palette(ctx)
+        val w = wPx.coerceAtLeast(120)
+        val h = hPx.coerceAtLeast(60)
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+
+        val pad = h * 0.10f
+        if (card) {
+            val radius = (h * 0.20f).coerceAtMost(48f)
+            c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), radius, radius,
+                paint(0f, p.bg, REGULAR))
+        }
+
+        val rows = listOf(snap.five, snap.week)
+        val rh = (h - pad * 2) / rows.size
+        val labelPt = paint(rh * 0.30f, p.label, REGULAR)
+        val pctPt = paint(rh * 0.42f, p.title, MEDIUM)
+        val rightPt = paint(rh * 0.26f, p.faint, REGULAR)
+
+        // 칸 폭은 가장 긴 글자를 미리 재서 잡는다 — 값이 바뀌어도 게이지가 안 흔들린다
+        val labelW = rows.maxOf { labelPt.measureText(it.label) } + rh * 0.30f
+        val pctW = pctPt.measureText("100%") + rh * 0.30f
+        val rightW = rightPt.measureText("7/31 09:00 초기화") + rh * 0.20f
+
+        rows.forEachIndexed { i, limit ->
+            val top = pad + rh * i
+            val cy = top + rh / 2f
+            var x = pad
+
+            c.drawText(limit.label, x, baseline(cy, labelPt), labelPt)
+            x += labelW
+
+            pctPt.color = if (limit.pct == null) p.faint else p.title
+            c.drawText(limit.pctText(), x, baseline(cy, pctPt), pctPt)
+            x += pctW
+
+            val barW = w - pad - rightW - x
+            if (barW > rh * 0.8f) {
+                val barH = rh * 0.22f
+                drawBar(c, RectF(x, cy - barH / 2f, x + barW - rh * 0.30f, cy + barH / 2f),
+                    limit.pct, p)
+            }
+
+            val text = limit.whenText(now)
+            c.drawText(text, w - pad - rightPt.measureText(text), baseline(cy, rightPt), rightPt)
+        }
+
+        drawStaleMark(c, w.toFloat(), pad, snap, p)
+        return bmp
+    }
+
+    /**
+     * PC 가 꺼져 값이 오래됐다는 표시. 글로 설명하지 않고 **모서리 점 하나**로 —
+     * 숫자 자체는(초기화 보정 덕분에) 맞으므로 크게 말할 일이 아니다.
+     */
+    private fun drawStaleMark(c: Canvas, w: Float, pad: Float, snap: Snapshot, p: Palette) {
+        if (!snap.stale || snap.updatedAt == 0L) return
+        c.drawCircle(w - pad * 0.6f, pad * 0.6f, pad * 0.22f, paint(0f, p.faint, REGULAR))
+    }
+
+    // ---------------------------------------------------------------- 작은 판
+
+    /** 링 하나 + 큰 숫자. 1×1 홈 위젯(잠금화면 위젯이 열리면 거기도) 용. */
+    fun small(ctx: Context, sizePx: Int, snap: Snapshot, now: Long, card: Boolean = true): Bitmap {
+        val p = Palette(ctx)
+        val s = sizePx.coerceAtLeast(72)
+        val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val limit = snap.worst()
+
+        if (card) {
+            val radius = s * 0.24f
+            c.drawRoundRect(RectF(0f, 0f, s.toFloat(), s.toFloat()), radius, radius,
+                paint(0f, p.bg, REGULAR))
+        }
+
+        val pad = s * 0.13f
+        drawArc(c, RectF(pad, pad, s - pad, s - pad), limit.pct, p, s * 0.075f)
+
+        val numPt = paint(s * 0.30f, if (limit.pct == null) p.faint else p.title, MEDIUM)
+        centerText(c, limit.pctText(), s / 2f, s * 0.46f, numPt)
+
+        val labelPt = paint(s * 0.14f, p.label, REGULAR)
+        centerText(c, limit.label, s / 2f, s * 0.70f, labelPt)
+
+        drawStaleMark(c, s.toFloat(), pad, snap, p)
+        return bmp
+    }
+
+    // ---------------------------------------------------------------- 상태바 아이콘
+
+    /**
+     * 상태바에 숫자만 (배터리 % 처럼). 시스템이 **알파를 마스크로 써서 한 가지 색으로
+     * 물들이므로** 흰 글자 + 투명 배경으로 그린다. 색을 넣어도 무시된다.
+     */
+    fun statusIcon(pct: Float?): Bitmap {
+        val s = 96
+        val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val text = pct?.let { Math.round(it).toString() } ?: "–"
+        val pt = paint(s * 0.78f, Color.WHITE, MEDIUM)
+        // 세 자리('100')면 폭이 넘치므로 들어갈 때까지 줄인다
+        val maxW = s * 0.94f
+        while (pt.measureText(text) > maxW && pt.textSize > 8f) pt.textSize -= 2f
+        centerText(c, text, s / 2f, s / 2f, pt)
+        return bmp
+    }
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">클로드 쿨다운</string>
+    <string name="widget_small">클로드 쿨다운 · 숫자</string>
+    <string name="widget_wide">클로드 쿨다운 · 게이지</string>
+    <string name="wallpaper_name">클로드 쿨다운</string>
+    <string name="wallpaper_desc">5시간·주간 한도가 보이는 배경화면</string>
+    <string name="channel_name">사용량</string>
+</resources>

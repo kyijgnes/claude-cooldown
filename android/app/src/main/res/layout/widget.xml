@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 위젯은 그림 한 장이다 — 내용은 GaugeRenderer 가 비트맵으로 그려 넣는다.
+     (RemoteViews 의 제한된 위젯 집합으로 게이지를 흉내 내는 것보다 정확하고,
+      배경화면·알림 아이콘과 그리기 코드를 한 벌로 공유할 수 있다) -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/canvas"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:adjustViewBounds="true"
+        android:contentDescription="@string/app_name"
+        android:scaleType="fitCenter" />
+</FrameLayout>
