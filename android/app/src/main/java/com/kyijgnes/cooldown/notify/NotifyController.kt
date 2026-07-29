@@ -103,9 +103,9 @@ object NotifyController {
 
     private fun bodyText(snap: Snapshot, now: Long): String {
         if (snap.updatedAt == 0L) return "PC 연결 필요"
-        val week = snap.week
-        val base = "주간 ${week.whenText(now)}"
-        return if (snap.stale) "$base · PC 꺼짐" else base
+        val base = "주간 ${snap.week.whenText(now)}"
+        val age = snap.ageText(now)
+        return if (age.isEmpty()) base else "$base · $age"
     }
 
     /**

@@ -1,19 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 밝게 (windows/skins/base.py 의 LIGHT 팔레트). 어둡게는 values-night/colors.xml.
+<!-- 밝게 — '상어' 파란 테마. 어둡게는 values-night/colors.xml.
      흐린 글자도 배경 대비 4.5:1 이상 — 위계는 밝기가 아니라 글자 크기로 준다.
      새 색을 넣을 때는 두 벌 다 채울 것. -->
 <resources>
-    <color name="bg">#f3f5f7</color>
-    <color name="title">#12161b</color>
-    <color name="label">#57606a</color>
-    <color name="sub">#2f3742</color>
-    <color name="faint">#616a75</color>
-    <color name="track">#dce1e7</color>
-    <color name="line">#e3e8ed</color>
+    <color name="bg">#eaf2fb</color>
+    <color name="title">#0c1b2a</color>
+    <color name="label">#3f5b74</color>
+    <color name="sub">#274156</color>
+    <color name="faint">#42607a</color>
+    <color name="track">#cfe0f0</color>
+    <color name="line">#d8e6f3</color>
     <color name="green">#1a7f37</color>
     <color name="amber">#8a6100</color>
     <color name="red">#cf222e</color>
 
-    <!-- 클로드 코랄 — 마스코트 '클로디'. 밝게/어둡게 양쪽에서 그대로 쓴다 -->
-    <color name="coral">#d97757</color>
+    <!-- 마스코트 액센트 — 상어 몸통색. 밝게/어둡게 양쪽에서 그대로 쓴다 -->
+    <color name="coral">#7cb0dd</color>
+
+    <!-- 상어 배경화면 팔레트 (실측). 바다는 위→아래 그라데이션 -->
+    <color name="sea_top">#cfe4f7</color>
+    <color name="sea_bottom">#bbd8f3</color>
+    <color name="shark_body">#9bc3ea</color>
+    <color name="shark_belly">#ffffff</color>
+    <color name="shark_outline">#0d1115</color>
+    <color name="bubble">#cce2f6</color>
+    <color name="shark_shadow">#a2c6e3</color>
 </resources>

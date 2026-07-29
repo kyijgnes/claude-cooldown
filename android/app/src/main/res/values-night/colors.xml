@@ -1,16 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 어둡게 (windows/skins/base.py 의 DARK 팔레트) -->
+<!-- 어둡게 — '상어' 파란 테마 (깊은 바다) -->
 <resources>
-    <color name="bg">#15171c</color>
-    <color name="title">#e6edf3</color>
-    <color name="label">#8b949e</color>
-    <color name="sub">#c2cad4</color>
-    <color name="faint">#7d8590</color>
-    <color name="track">#252a32</color>
-    <color name="line">#232830</color>
+    <color name="bg">#0d1620</color>
+    <color name="title">#e6eef7</color>
+    <color name="label">#8ba6bf</color>
+    <color name="sub">#c2d3e4</color>
+    <color name="faint">#7d95ac</color>
+    <color name="track">#1e2c3a</color>
+    <color name="line">#1b2734</color>
     <color name="green">#3fb950</color>
     <color name="amber">#e3b341</color>
     <color name="red">#ff5c61</color>
 
-    <color name="coral">#d97757</color>
+    <color name="coral">#5f93c2</color>
+
+    <!-- 상어 배경화면 팔레트 (깊은 바다 버전) -->
+    <color name="sea_top">#12283d</color>
+    <color name="sea_bottom">#0a1826</color>
+    <color name="shark_body">#2e4d6e</color>
+    <color name="shark_belly">#b9d0e6</color>
+    <color name="shark_outline">#04090f</color>
+    <color name="bubble">#1c3350</color>
+    <color name="shark_shadow">#16283a</color>
 </resources>

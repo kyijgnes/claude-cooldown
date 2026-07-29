@@ -21,6 +21,15 @@ class Palette(ctx: Context) {
     val red = ctx.getColor(R.color.red)
     val coral = ctx.getColor(R.color.coral)
 
+    // 상어 배경화면 팔레트
+    val seaTop = ctx.getColor(R.color.sea_top)
+    val seaBottom = ctx.getColor(R.color.sea_bottom)
+    val sharkBody = ctx.getColor(R.color.shark_body)
+    val sharkBelly = ctx.getColor(R.color.shark_belly)
+    val sharkOutline = ctx.getColor(R.color.shark_outline)
+    val bubble = ctx.getColor(R.color.bubble)
+    val sharkShadow = ctx.getColor(R.color.shark_shadow)
+
     /** 여유 초록 / 보통 노랑 / 임박 빨강. 값을 모르면 흐린 색. */
     fun tone(pct: Float?): Int = when {
         pct == null -> faint

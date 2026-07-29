@@ -112,7 +112,8 @@ class MainActivity : Activity() {
         if (err.isNotEmpty()) return "$err · $clock 시도"
         val snap = Store.snapshot(this)
         val head = "$clock 갱신"
-        return if (snap.stale) "$head · PC 꺼짐" else head
+        val age = snap.ageText(System.currentTimeMillis())
+        return if (age.isEmpty()) head else "$head · $age"
     }
 
     // ---------------------------------------------------------------- 동작

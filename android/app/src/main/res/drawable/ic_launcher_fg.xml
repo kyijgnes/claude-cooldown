@@ -1,24 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 바탕화면 위젯 아이콘(build_exe.py make_icon)과 같은 모양 — 게이지 두 줄 -->
+<!-- 흰 상어 실루엣 (오른쪽을 본다). 안전 영역 안(가운데 ~66dp)에 담는다.
+     monochrome 로도 쓰이므로 한 덩어리 실루엣으로 둔다. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 5시간 (초록, 30%) -->
+    <!-- 꼬리지느러미 -->
     <path
-        android:fillColor="#2a3038"
-        android:pathData="M32,44 L76,44 A5,5 0 0 1 76,54 L32,54 A5,5 0 0 1 32,44 Z" />
+        android:fillColor="#ffffff"
+        android:pathData="M31,54 L20,43 L25,54 L20,65 Z" />
+    <!-- 등지느러미 -->
     <path
-        android:fillColor="#3fb950"
-        android:pathData="M32,44 L45,44 A5,5 0 0 1 45,54 L32,54 A5,5 0 0 1 32,44 Z" />
-
-    <!-- 주간 (노랑, 72%) -->
+        android:fillColor="#ffffff"
+        android:pathData="M45,45 L55,29 L61,45 Z" />
+    <!-- 가슴지느러미 -->
     <path
-        android:fillColor="#2a3038"
-        android:pathData="M32,60 L76,60 A5,5 0 0 1 76,70 L32,70 A5,5 0 0 1 32,60 Z" />
+        android:fillColor="#ffffff"
+        android:pathData="M51,61 L60,73 L65,59 Z" />
+    <!-- 몸통 -->
     <path
-        android:fillColor="#e3b341"
-        android:pathData="M32,60 L64,60 A5,5 0 0 1 64,70 L32,70 A5,5 0 0 1 32,60 Z" />
+        android:fillColor="#ffffff"
+        android:pathData="M80,54 C75,44 61,41 48,43 C40,44 33,48 29,54 C33,60 40,64 48,65 C61,67 75,64 80,54 Z" />
+    <!-- 눈 (바다색으로 파여 보이게) -->
+    <path
+        android:fillColor="#24547f"
+        android:pathData="M69,51 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z" />
 </vector>

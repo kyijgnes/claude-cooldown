@@ -95,6 +95,23 @@ data class Snapshot(
     /** 둘 중 더 급한 쪽 — 상태바 아이콘 숫자처럼 하나만 보여 줄 때. */
     fun worst(): Limit = if ((week.pct ?: -1f) > (five.pct ?: -1f)) week else five
 
+    /**
+     * 값이 오래됐으면 '얼마나 오래됐는지'. 안 오래됐으면 빈 문자열.
+     *
+     * 'PC 꺼짐' 이라고 단정하지 않는다 — PC 가 켜져 있어도 위젯이 안 떠 있거나
+     * 보내기가 꺼져 있으면 똑같이 값이 안 올라온다. 원인을 짐작해 적으면
+     * 오히려 엉뚱한 데를 보게 된다. 사실(몇 분 전 값인지)만 적는다.
+     */
+    fun ageText(now: Long): String {
+        if (!stale || updatedAt == 0L) return ""
+        val mins = ((now - updatedAt) / 60_000L).coerceAtLeast(0L)
+        return when {
+            mins >= 1440 -> "PC 값 ${mins / 1440}일 전"
+            mins >= 60 -> "PC 값 ${mins / 60}시간 전"
+            else -> "PC 값 ${mins}분 전"
+        }
+    }
+
     companion object {
         val EMPTY = Snapshot(Limit("5시간", null, null), Limit("주간", null, null), 0L, true)
 
