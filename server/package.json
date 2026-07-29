@@ -1,0 +1,22 @@
+{
+  "name": "claude-cooldown-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "폰 앱이 읽어가는 릴레이. PC 가 올린 퍼센트만 들고 있다.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.111.0",
+    "next": "^16.2.12",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.9.0"
+  }
+}

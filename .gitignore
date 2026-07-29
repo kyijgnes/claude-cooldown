@@ -10,6 +10,10 @@ dist/
 *.spec
 windows/앱아이콘.ico
 
+# Next.js 릴레이 서버 (server/)
+.next/
+next-env.d.ts
+
 # 안드로이드 (android/)
 .gradle/
 android/local.properties
