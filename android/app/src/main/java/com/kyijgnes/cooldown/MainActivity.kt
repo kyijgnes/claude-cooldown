@@ -83,9 +83,11 @@ class MainActivity : Activity() {
         url.setText(Store.url(this))
         key.setText(Store.key(this))
         notify.isChecked = Store.notifyOn(this)
+        // 이 기기에서 실제로 어떻게 보이는지를 그대로 적는다 (설명 문단 대신).
+        // 안드로이드 16 미만에서도 AOD 알림 아이콘 줄에 숫자가 뜬다 — S20 Ultra 실측 확인.
         notifyNote.text =
-            if (NotifyController.canPromote(this)) "상태바 칩 · 잠금화면 · AOD"
-            else "상태바 아이콘 · 잠금화면"
+            if (NotifyController.canPromote(this)) "상태바 칩 · 잠금화면 · AOD 진행바"
+            else "상태바 · 잠금화면 · AOD 에 숫자"
 
         drawGauge()
         status.text = statusLine()
