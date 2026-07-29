@@ -7,5 +7,10 @@
         <item name="android:colorBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
+
+        <!-- ★ 상태바를 밝은 색으로 칠했으면 이걸 켜야 시계·배터리 글씨가 **검게** 바뀐다.
+             안 켜면 흰 글씨가 흰 바탕에 얹혀 통째로 안 보인다. 어둡게는 values-night 에서 끈다. -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>
