@@ -17,12 +17,11 @@
     <!-- 마스코트 액센트 — 상어 몸통색. 밝게/어둡게 양쪽에서 그대로 쓴다 -->
     <color name="coral">#7cb0dd</color>
 
-    <!-- 상어 배경화면 팔레트 (실측). 바다는 위→아래 그라데이션 -->
-    <color name="sea_top">#cfe4f7</color>
+    <!-- 상어 배경화면 팔레트 — 폰 테마 원본 실측값. 바다는 단색이다(위아래 같은 색) -->
+    <color name="sea_top">#bbd8f3</color>
     <color name="sea_bottom">#bbd8f3</color>
-    <color name="shark_body">#9bc3ea</color>
-    <color name="shark_belly">#ffffff</color>
-    <color name="shark_outline">#0d1115</color>
-    <color name="bubble">#cce2f6</color>
-    <color name="shark_shadow">#a2c6e3</color>
+    <color name="shark_tint">#ffffff</color>   <!-- 곱하기 필터. 흰색이면 그림 그대로 -->
+    <color name="bubble">#ffffff</color>
+    <!-- 원본 실측은 #97bfdd @70% 인데, 곁에 아무것도 없는 화면에선 그 값이 너무 도드라진다 -->
+    <color name="shark_shadow">#6e97bfdd</color>
 </resources>

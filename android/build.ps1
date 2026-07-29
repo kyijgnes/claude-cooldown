@@ -1,4 +1,4 @@
-# 안드로이드 앱 빌드 — 이 파일을 오른쪽 클릭 > PowerShell 로 실행
+﻿# 안드로이드 앱 빌드 — 이 파일을 오른쪽 클릭 > PowerShell 로 실행
 #
 #   .\build.ps1            APK 만들기 (app/build/outputs/apk/debug/app-debug.apk)
 #   .\build.ps1 install    만들고 USB 로 연결된 폰에 넣기
@@ -16,6 +16,14 @@ $ErrorActionPreference = 'Stop'
 $real = $PSScriptRoot
 $link = Join-Path $env:LOCALAPPDATA 'cooldown-android'
 
+# 정션이 끊겨 있어도 Test-Path 는 참이다 — 실제로 저장소가 보이는지로 판정한다.
+# (끊긴 정션에 쓰면 '됐다' 고 하고선 아무 데도 안 남아, Gradle 이 폴더를 못 만든다며 죽는다)
+if (Test-Path $link) {
+    if (-not (Test-Path (Join-Path $link 'settings.gradle.kts'))) {
+        cmd /c rmdir "$link"
+        Write-Host "끊긴 빌드 경로를 지웠다: $link"
+    }
+}
 if (-not (Test-Path $link)) {
     New-Item -ItemType Junction -Path $link -Target $real | Out-Null
     Write-Host "빌드용 ASCII 경로 만듦: $link"

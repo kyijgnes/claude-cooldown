@@ -22,7 +22,6 @@ class CooldownWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
         private val runner = Runnable { drawFrame() }
         private var showing = false
-        private var frame = 0L
 
         override fun onVisibilityChanged(visible: Boolean) {
             showing = visible
@@ -44,14 +43,14 @@ class CooldownWallpaperService : WallpaperService() {
         }
 
         private fun drawFrame() {
-            frame++
             var canvas: Canvas? = null
             try {
                 canvas = surfaceHolder.lockCanvas()
                 if (canvas != null) {
                     val ctx = this@CooldownWallpaperService
+                    // 박자는 시계로 몬다 — 프레임을 몇 장 흘려도 상어가 느려지지 않는다
                     val now = System.currentTimeMillis()
-                    WallpaperArt.render(ctx, canvas, Store.snapshot(ctx).settled(now), now, frame)
+                    WallpaperArt.render(ctx, canvas, Store.snapshot(ctx).settled(now), now)
                 }
             } catch (e: Exception) {
                 // 표면이 사라지는 중 — 다음 프레임에 다시 온다

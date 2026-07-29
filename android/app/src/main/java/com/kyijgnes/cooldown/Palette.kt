@@ -21,12 +21,11 @@ class Palette(ctx: Context) {
     val red = ctx.getColor(R.color.red)
     val coral = ctx.getColor(R.color.coral)
 
-    // 상어 배경화면 팔레트
+    // 상어 배경화면 팔레트. 상어 자체는 그림(drawable-nodpi/shark_open.png)이라
+    // 색이 아니라 shark_tint 로 물들인다.
     val seaTop = ctx.getColor(R.color.sea_top)
     val seaBottom = ctx.getColor(R.color.sea_bottom)
-    val sharkBody = ctx.getColor(R.color.shark_body)
-    val sharkBelly = ctx.getColor(R.color.shark_belly)
-    val sharkOutline = ctx.getColor(R.color.shark_outline)
+    val sharkTint = ctx.getColor(R.color.shark_tint)
     val bubble = ctx.getColor(R.color.bubble)
     val sharkShadow = ctx.getColor(R.color.shark_shadow)
 

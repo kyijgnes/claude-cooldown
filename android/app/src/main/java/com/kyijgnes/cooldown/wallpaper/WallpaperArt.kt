@@ -1,56 +1,92 @@
 package com.kyijgnes.cooldown.wallpaper
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import com.kyijgnes.cooldown.GaugeRenderer
 import com.kyijgnes.cooldown.Limit
 import com.kyijgnes.cooldown.Palette
+import com.kyijgnes.cooldown.R
 import com.kyijgnes.cooldown.Snapshot
+import kotlin.math.PI
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 
 /**
  * 배경화면 **그리기만** 한다 — 화면·수명 관리는 CooldownWallpaperService 가 맡는다.
  * (데스크탑에서 앱과 스킨을 나눈 것과 같은 결. 폰 없이 테스트로 그림을 뽑아 볼 수 있다)
  *
- * 결: 사용자가 쓰던 **파란 상어 바다**. 위쪽은 상어가 헤엄치는 바다(잠금화면 시계·알림 자리),
- * 아래 1/3 에만 게이지를 둔다.
+ * 결: 사용자가 폰에서 쓰던 **파란 상어 바다**. 상어 그림·배치·박자는 그 테마에서 그대로
+ * 가져왔다(아래 dp 값은 원본 `animation.xml` 실측치. 출처는 클로드 디자인 프로젝트
+ * `Shark Wallpaper Request` 의 `theme_package/`).
+ * 위쪽은 상어가 헤엄치는 바다(잠금화면 시계·알림 자리), 아래 1/3 에만 게이지를 둔다.
  */
 object WallpaperArt {
 
     private val REGULAR: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     private val MEDIUM: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
-    fun render(ctx: Context, c: Canvas, snap: Snapshot, now: Long, frame: Long) {
+    /** 폰 원본 배경화면과 같은 **입 벌린** 상어. 다문 얼굴로 바꾸려면 `R.drawable.shark`. */
+    private val SHARK_ART = R.drawable.shark_open
+
+    // ── 원본 테마 좌표계 (360×640dp 캔버스) ────────────────────────────────
+    private const val CANVAS_W = 360f
+    private const val ART_BOTTOM = 431.5f    // 그림자가 1.3배로 커졌을 때의 아랫변
+
+    private const val SHARK_CX = 184.25f     // 상어 칸 한가운데
+    private const val SHARK_CY = 348f
+    private const val SHARK_W = 110f
+    private const val DIVE = 16.486f         // 883ms 동안 내려가는 거리
+    private const val SWIM_MS = 883L         // 상어·그림자 한쪽 방향 시간
+
+    private const val SHADOW_CX = 181f       // 그림자는 제자리에서 커지기만 한다
+    private const val SHADOW_CY = 417.625f
+    private const val SHADOW_W = 52f
+    private const val SHADOW_H = 21.25f
+    private const val SHADOW_GROW = 0.3f     // 상어가 다 내려가면 1.3배
+
+    // ── 게이지 자리 (화면 높이 비율) ──────────────────────────────────────
+    private const val ROW_TOP = 0.63f
+    private const val ROW_GAP = 0.11f
+    private const val LABEL_UP = 0.035f      // '클로드 쿨다운' 글자를 첫 줄 위로 올린 만큼
+
+    fun render(ctx: Context, c: Canvas, snap: Snapshot, now: Long) {
         val p = Palette(ctx)
         val w = c.width.toFloat()
         val h = c.height.toFloat()
 
         drawBackdrop(c, w, h, p)
-        drawBubbles(c, w, h, frame, p)
 
-        // 상어는 위쪽 바다에서 둥실 떠 있다 (게이지 위, 잠금화면 시계 아래쯤)
-        val swim = sin(frame * 0.02).toFloat()
-        drawShark(c, w * 0.50f, h * 0.37f + h * 0.012f * swim, w * 0.36f, frame, p)
+        // 바다 그림은 게이지 윗변까지만 쓴다. 안 들어가면 통째로 줄여 가운데 놓는다.
+        val artBottom = h * (ROW_TOP - LABEL_UP) - w * 0.045f
+        val k = min(w / CANVAS_W, artBottom / ART_BOTTOM)
+        val ox = (w - CANVAS_W * k) / 2f
+        val oy = (artBottom - ART_BOTTOM * k) / 2f
+
+        drawBubbles(c, k, ox, oy, now, p)
+        drawShark(ctx, c, k, ox, oy, now, p)
 
         val pad = w * 0.09f
-        val top = h * 0.63f
-        val gap = h * 0.11f
+        val top = h * ROW_TOP
 
-        c.drawText("클로드 쿨다운", pad, top - h * 0.035f, paint(w * 0.033f, p.faint, REGULAR))
+        c.drawText("클로드 쿨다운", pad, top - h * LABEL_UP, paint(w * 0.033f, p.faint, REGULAR))
 
         listOf(snap.five, snap.week).forEachIndexed { i, limit ->
-            drawRow(c, limit, now, pad, top + gap * i, w, p)
+            drawRow(c, limit, now, pad, top + h * ROW_GAP * i, w, p)
         }
     }
 
     private fun drawBackdrop(c: Canvas, w: Float, h: Float, p: Palette) {
-        // 원본 배경화면처럼 거의 평평한 파스텔 바다 — 위가 아주 살짝 밝다
+        // 원본은 단색 바다다(밝게). 어둡게에서만 위아래로 깊어진다.
         val sea = Paint().apply {
             shader = LinearGradient(
                 0f, 0f, 0f, h,
@@ -62,137 +98,121 @@ object WallpaperArt {
         c.drawRect(0f, 0f, w, h, sea)
     }
 
-    /** 위로 올라가는 물방울 몇 개. 프레임에 따라 천천히 떠오른다. */
-    private fun drawBubbles(c: Canvas, w: Float, h: Float, frame: Long, p: Palette) {
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.bubble }
-        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = w * 0.004f
-            color = p.sharkShadow
-            alpha = 120
-        }
-        // (x비율, 반지름비율, 속도, 시작높이비율)
-        val bubbles = listOf(
-            floatArrayOf(0.14f, 0.016f, 0.9f, 0.20f),
-            floatArrayOf(0.28f, 0.010f, 1.4f, 0.52f),
-            floatArrayOf(0.72f, 0.020f, 0.7f, 0.34f),
-            floatArrayOf(0.84f, 0.012f, 1.1f, 0.60f),
-            floatArrayOf(0.62f, 0.008f, 1.7f, 0.14f),
-            floatArrayOf(0.40f, 0.014f, 1.0f, 0.44f),
+    /**
+     * 상어와 그림자. **883ms 왕복 하나로 둘 다 몬다** —
+     * 상어가 16.5dp 내려가는 동안 그림자가 1.3배로 커진다(원본과 같은 박자).
+     */
+    private fun drawShark(
+        ctx: Context, c: Canvas, k: Float, ox: Float, oy: Float, now: Long, p: Palette,
+    ) {
+        val t = swing(now)  // 0 → 1 → 0
+
+        val grow = 1f + SHADOW_GROW * t
+        val sw = SHADOW_W * k * grow / 2f
+        val sh = SHADOW_H * k * grow / 2f
+        val scx = ox + SHADOW_CX * k
+        val scy = oy + SHADOW_CY * k
+        c.drawOval(
+            RectF(scx - sw, scy - sh, scx + sw, scy + sh),
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkShadow },
         )
-        for (b in bubbles) {
-            val cycle = h * 0.5f
-            val rise = (frame * b[2] * (h * 0.0016f)) % cycle
-            val cy = h * (0.10f + b[3] * 0.9f) - rise
-            if (cy < -h * 0.05f) continue
-            val cx = w * b[0] + w * 0.01f * sin((frame * 0.03 + b[0] * 10).toDouble()).toFloat()
-            val r = w * b[1]
-            c.drawCircle(cx, cy, r, fill)
-            c.drawCircle(cx, cy, r, ring)
-        }
+
+        val bmp = sharkArt(ctx)
+        val bw = SHARK_W * k
+        val bh = bw * bmp.height / bmp.width
+        val cx = ox + SHARK_CX * k
+        val cy = oy + (SHARK_CY + DIVE * t) * k
+        c.drawBitmap(
+            bmp,
+            null,
+            RectF(cx - bw / 2f, cy - bh / 2f, cx + bw / 2f, cy + bh / 2f),
+            artPaint(p.sharkTint),
+        )
+    }
+
+    /** 883ms 에 걸쳐 0 → 1, 다시 883ms 에 걸쳐 1 → 0 (원본 repeatMode=REVERSE·선형). */
+    private fun swing(now: Long): Float {
+        val phase = (now % (SWIM_MS * 2)).toFloat() / SWIM_MS
+        return if (phase <= 1f) phase else 2f - phase
     }
 
     /**
-     * 옆에서 본 상어. 오른쪽을 보고, 숨쉬듯 위아래로 흔들리며 꼬리를 젓는다.
-     * **몸통은 늘 파란색** — 사용량 상태는 아래 게이지가 맡는다.
+     * 물방울 다섯 덩이. 원본은 제자리에서 프레임만 도는 그림이라 **떠오르지 않는다** —
+     * 크기·투명도만 흔들린다. 주기 1440/1600/1920ms 가 서로 안 나누어떨어져
+     * 다섯이 절대 같은 박자로 안 논다. **이 어긋남이 자연스러움의 핵심이라 그대로 둔다.**
      */
-    private fun drawShark(c: Canvas, cx: Float, cy: Float, len: Float, frame: Long, p: Palette) {
-        val t = frame * 0.05
-        val l = len
-
-        val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkBody }
-        val belly = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkBelly }
-        val dark = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkOutline }
-        val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private fun drawBubbles(c: Canvas, k: Float, ox: Float, oy: Float, now: Long, p: Palette) {
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.bubble }
+        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = l * 0.014f
-            strokeJoin = Paint.Join.ROUND
-            color = p.sharkOutline
+            color = p.bubble
         }
-
-        // 바닥 그림자 (바로 아래, 납작하게)
-        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkShadow; alpha = 90 }
-        c.drawOval(RectF(cx - 0.42f * l, cy + 0.30f * l, cx + 0.40f * l, cy + 0.40f * l), shadow)
-
-        // 꼬리지느러미 — 위아래 끝이 같이 흔들려 젓는 느낌
-        val wag = sin(t * 1.8).toFloat() * 0.05f * l
-        val tj = cx - 0.50f * l
-        val tail = Path().apply {
-            moveTo(tj + 0.04f * l, cy)
-            lineTo(tj - 0.16f * l, cy - 0.24f * l + wag)
-            lineTo(tj - 0.05f * l, cy)
-            lineTo(tj - 0.14f * l, cy + 0.20f * l + wag)
-            close()
+        for (cl in CLUSTERS) {
+            val phase = (now % cl.periodMs).toFloat() / cl.periodMs
+            cl.drops.forEachIndexed { i, d ->
+                val a = 2.0 * PI * (phase + i * 0.31f)
+                val r = d.r * k * (1f + 0.16f * sin(a).toFloat())
+                val x = ox + (cl.cx + d.dx) * k
+                val y = oy + (cl.cy + d.dy) * k + 1.4f * k * sin(a + 1.1).toFloat()
+                val alpha = (185 + 60 * sin(a + 2.2)).toInt()
+                if (d.ring) {
+                    ring.alpha = alpha
+                    ring.strokeWidth = max(0.7f * k, r * 0.26f)
+                    c.drawCircle(x, y, r, ring)
+                } else {
+                    fill.alpha = alpha
+                    c.drawCircle(x, y, r, fill)
+                }
+            }
         }
-        c.drawPath(tail, body)
-        c.drawPath(tail, outline)
+    }
 
-        // 등지느러미
-        val dorsal = Path().apply {
-            moveTo(cx - 0.06f * l, cy - 0.17f * l)
-            lineTo(cx + 0.05f * l, cy - 0.42f * l)
-            lineTo(cx + 0.15f * l, cy - 0.16f * l)
-            close()
+    /** 물방울 한 알 — 덩이 한가운데 기준 dp 오프셋·반지름, `ring` 이면 속이 빈 동그라미. */
+    private class Drop(val dx: Float, val dy: Float, val r: Float, val ring: Boolean = false)
+
+    /** 원본 `component_4`~`8` 의 60×60dp 칸 — 위치와 주기는 실측치, 알 배치는 원본 그림을 따랐다. */
+    private class Cluster(
+        val cx: Float, val cy: Float, val periodMs: Long, val drops: List<Drop>,
+    )
+
+    private val CLUSTERS = listOf(
+        Cluster(
+            91.25f, 199.5f, 1920L,
+            listOf(Drop(-8f, -6f, 3.1f, ring = true), Drop(7f, 2f, 1.7f), Drop(2f, 12f, 1.2f)),
+        ),
+        Cluster(
+            273.25f, 142.5f, 1440L,
+            listOf(Drop(6f, -8f, 2.6f), Drop(-7f, 3f, 1.9f, ring = true), Drop(9f, 10f, 1.3f, ring = true)),
+        ),
+        Cluster(
+            109.25f, 300.75f, 1920L,
+            listOf(Drop(-9f, 4f, 2.8f, ring = true), Drop(5f, -7f, 2.1f), Drop(10f, 9f, 1.4f)),
+        ),
+        Cluster(
+            254.75f, 293.75f, 1440L,
+            listOf(Drop(8f, 5f, 2.4f, ring = true), Drop(-6f, -6f, 1.8f), Drop(-2f, 11f, 1.2f, ring = true)),
+        ),
+        Cluster(
+            170.75f, 50.5f, 1600L,
+            listOf(Drop(-5f, -4f, 2.2f), Drop(8f, 6f, 1.6f, ring = true), Drop(-9f, 9f, 1.1f)),
+        ),
+    )
+
+    // 상어 비트맵과 물들이기 필터는 한 번만 만든다 (16fps 로 계속 다시 그린다)
+    private var art: Bitmap? = null
+    private var tinted: PorterDuffColorFilter? = null
+    private var tintOf = 0
+
+    private fun sharkArt(ctx: Context): Bitmap =
+        art ?: BitmapFactory.decodeResource(ctx.resources, SHARK_ART).also { art = it }
+
+    /** 어둡게에서는 곱하기로 상어를 깊은 바다색까지 내린다. 흰색이면 원본 그대로. */
+    private fun artPaint(tint: Int): Paint {
+        if (tint != tintOf) {
+            tintOf = tint
+            tinted = if (tint == -1) null else PorterDuffColorFilter(tint, PorterDuff.Mode.MULTIPLY)
         }
-        c.drawPath(dorsal, body)
-        c.drawPath(dorsal, outline)
-
-        // 가슴지느러미
-        val pec = Path().apply {
-            moveTo(cx + 0.04f * l, cy + 0.13f * l)
-            lineTo(cx + 0.18f * l, cy + 0.34f * l)
-            lineTo(cx + 0.22f * l, cy + 0.11f * l)
-            close()
-        }
-        c.drawPath(pec, body)
-        c.drawPath(pec, outline)
-
-        // 몸통 (어뢰꼴, 코가 오른쪽)
-        val bodyPath = Path().apply {
-            moveTo(cx + 0.50f * l, cy)
-            cubicTo(cx + 0.42f * l, cy - 0.17f * l, cx + 0.10f * l, cy - 0.21f * l, cx - 0.20f * l, cy - 0.15f * l)
-            cubicTo(cx - 0.36f * l, cy - 0.11f * l, cx - 0.46f * l, cy - 0.06f * l, cx - 0.52f * l, cy)
-            cubicTo(cx - 0.46f * l, cy + 0.06f * l, cx - 0.36f * l, cy + 0.11f * l, cx - 0.20f * l, cy + 0.16f * l)
-            cubicTo(cx + 0.10f * l, cy + 0.22f * l, cx + 0.42f * l, cy + 0.17f * l, cx + 0.50f * l, cy)
-            close()
-        }
-        c.drawPath(bodyPath, body)
-
-        // 흰 배 — 몸통 안쪽 아래 절반에만
-        c.save()
-        c.clipPath(bodyPath)
-        val bellyPath = Path().apply {
-            moveTo(cx + 0.46f * l, cy + 0.02f * l)
-            cubicTo(cx + 0.20f * l, cy + 0.14f * l, cx - 0.12f * l, cy + 0.15f * l, cx - 0.34f * l, cy + 0.07f * l)
-            lineTo(cx - 0.34f * l, cy + 0.30f * l)
-            lineTo(cx + 0.46f * l, cy + 0.30f * l)
-            close()
-        }
-        c.drawPath(bellyPath, belly)
-        c.restore()
-
-        c.drawPath(bodyPath, outline)
-
-        // 아가미 세 줄
-        val gill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = l * 0.012f
-            strokeCap = Paint.Cap.ROUND
-            color = p.sharkOutline
-            alpha = 150
-        }
-        for (i in 0..2) {
-            val gx = cx + 0.24f * l - i * 0.05f * l
-            c.drawLine(gx, cy - 0.09f * l, gx - 0.02f * l, cy + 0.08f * l, gill)
-        }
-
-        // 입 — 코 아래 짧은 선
-        c.drawLine(cx + 0.48f * l, cy + 0.05f * l, cx + 0.34f * l, cy + 0.075f * l, gill)
-
-        // 눈
-        c.drawCircle(cx + 0.36f * l, cy - 0.04f * l, l * 0.035f, dark)
-        val glint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkBelly }
-        c.drawCircle(cx + 0.372f * l, cy - 0.052f * l, l * 0.012f, glint)
+        return Paint(Paint.FILTER_BITMAP_FLAG).apply { colorFilter = tinted }
     }
 
     private fun drawRow(
@@ -219,14 +239,4 @@ object WallpaperArt {
             this.color = color
             typeface = face
         }
-
-    /** 두 색을 섞는다 (0 이면 a, 1 이면 b). */
-    private fun blend(a: Int, b: Int, ratio: Float): Int {
-        fun mix(shift: Int): Int {
-            val x = (a shr shift) and 0xff
-            val y = (b shr shift) and 0xff
-            return (x + (y - x) * ratio).toInt().coerceIn(0, 255)
-        }
-        return (0xff shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
-    }
 }

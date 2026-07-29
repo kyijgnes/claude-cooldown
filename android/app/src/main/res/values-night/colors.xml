@@ -17,9 +17,7 @@
     <!-- 상어 배경화면 팔레트 (깊은 바다 버전) -->
     <color name="sea_top">#12283d</color>
     <color name="sea_bottom">#0a1826</color>
-    <color name="shark_body">#2e4d6e</color>
-    <color name="shark_belly">#b9d0e6</color>
-    <color name="shark_outline">#04090f</color>
-    <color name="bubble">#1c3350</color>
-    <color name="shark_shadow">#16283a</color>
+    <color name="shark_tint">#7d93ad</color>   <!-- 곱하기 필터 — 상어도 깊은 바다까지 내린다 -->
+    <color name="bubble">#bcd7f0</color>
+    <color name="shark_shadow">#5c040a12</color>
 </resources>

@@ -1,30 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 흰 상어 실루엣 (오른쪽을 본다). 안전 영역 안(가운데 ~66dp)에 담는다.
-     monochrome 로도 쓰이므로 한 덩어리 실루엣으로 둔다. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+<!-- 배경화면과 같은 상어 그림을 그대로 얹는다 — 파란 몸통 + 두꺼운 검은 윤곽이
+     폰 테마 아이콘팩과 같은 결이다. 아이콘 크기에선 이빨이 뭉개져서 입은 다문 쪽.
 
-    <!-- 꼬리지느러미 -->
-    <path
-        android:fillColor="#ffffff"
-        android:pathData="M31,54 L20,43 L25,54 L20,65 Z" />
-    <!-- 등지느러미 -->
-    <path
-        android:fillColor="#ffffff"
-        android:pathData="M45,45 L55,29 L61,45 Z" />
-    <!-- 가슴지느러미 -->
-    <path
-        android:fillColor="#ffffff"
-        android:pathData="M51,61 L60,73 L65,59 Z" />
-    <!-- 몸통 -->
-    <path
-        android:fillColor="#ffffff"
-        android:pathData="M80,54 C75,44 61,41 48,43 C40,44 33,48 29,54 C33,60 40,64 48,65 C61,67 75,64 80,54 Z" />
-    <!-- 눈 (바다색으로 파여 보이게) -->
-    <path
-        android:fillColor="#24547f"
-        android:pathData="M69,51 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z" />
-</vector>
+     여백은 % 로 준다 — 런처가 아이콘을 어떤 크기로 달라 하든 같은 비율로 나온다
+     (dp 로 주면 화면 밀도·요청 크기에 따라 상어만 커지거나 작아진다).
+     ★ 이 판은 108dp 인데 실제로 보이는 건 가운데 72dp 뿐이라 **1.5배로 확대돼 보인다.**
+     보이는 폭의 70% 로 두려면 판 기준 46.67% → 좌우 여백 26.67%.
+     세로 여백은 그림 비율(512:272)에 맞춰 잡아서 상어가 찌그러지지 않는다.
+     원으로 잘리는 런처에서도 코·꼬리가 안 잘린다(반지름 0.5 안에 0.35).
+
+     monochrome 으로도 쓰이는데, 그때는 그림의 투명도만 써서 상어 실루엣이 된다. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/shark"
+    android:insetBottom="37.6%"
+    android:insetLeft="26.67%"
+    android:insetRight="26.67%"
+    android:insetTop="37.6%" />

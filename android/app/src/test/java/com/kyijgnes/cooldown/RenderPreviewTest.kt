@@ -55,10 +55,29 @@ class RenderPreviewTest {
         save(GaugeRenderer.statusIcon(100f), "상태바_100.png")
         save(GaugeRenderer.statusIcon(null), "상태바_값없음.png")
 
-        // 라이브 배경화면 (FHD+ 세로)
-        val wall = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
-        WallpaperArt.render(ctx, Canvas(wall), snap(37f, 62f), now, 12L)
-        save(wall, "배경화면.png")
+        // 라이브 배경화면 (FHD+ 세로) — 상어가 제일 위일 때와 다 내려갔을 때
+        for ((name, at) in listOf("배경화면" to now, "배경화면_내려감" to now + 883L)) {
+            val wall = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+            WallpaperArt.render(ctx, Canvas(wall), snap(37f, 62f), at)
+            save(wall, "$name.png")
+        }
+
+        // 앱 아이콘 — 런처가 달라는 크기가 제각각이라 두 크기로 뽑아 비율을 확인한다
+        for (size in listOf(432, 144)) {
+            ctx.getDrawable(R.mipmap.ic_launcher)?.let { icon ->
+                val ic = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                icon.setBounds(0, 0, size, size)
+                icon.draw(Canvas(ic))
+                save(ic, "앱아이콘_$size.png")
+            }
+        }
+
+        // 어둡게 (깊은 바다) — 상어 그림은 한 장이라 shark_tint 로 물들여 내린다
+        RuntimeEnvironment.setQualifiers("+night")
+        val dark = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+        WallpaperArt.render(RuntimeEnvironment.getApplication(), Canvas(dark), snap(37f, 62f), now)
+        save(dark, "배경화면_어둡게.png")
+        RuntimeEnvironment.setQualifiers("+notnight")
     }
 
     @Test
