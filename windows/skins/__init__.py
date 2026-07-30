@@ -32,7 +32,7 @@ def _load() -> list[type[Skin]]:
 
 
 SKINS: list[type[Skin]] = _load()
-DEFAULT = "card"
+DEFAULT = "slim"  # 작업표시줄에 붙는 슬림 바가 기본
 
 
 def make(key: str) -> Skin:
