@@ -40,12 +40,22 @@ from cooldown_core import (  # noqa: E402
     Usage,
     UsageError,
     fetch,
+    pace,
 )
 
 import cooldown_ping  # noqa: E402
 import cooldown_push  # noqa: E402
 import skins  # noqa: E402
-from skins.base import KR, NUM, P, set_palette, tone  # noqa: E402
+from skins.base import (  # noqa: E402
+    KR,
+    MARK_W,
+    NUM,
+    P,
+    mark_x,
+    pace_color,
+    set_palette,
+    tone,
+)
 
 HOME = os.path.expanduser("~")
 STATE_PATH = os.path.join(HOME, ".claude_cooldown_widget.json")
@@ -634,6 +644,10 @@ class App:
         # 공통(앱 전체)인 자동 실행·종료만 메인에 둔다.
         self.menu = tk.Menu(self.root, tearoff=0)
 
+        # 게이지의 '지금쯤' 눈금이 무슨 뜻인지, 숫자와 판정까지 여기서 다 본다.
+        self.menu.add_command(label="이번 주 사용 속도…", command=self.open_pace)
+        self.menu.add_separator()
+
         # ---- 쿨다운 (사용량 표시) ----
         # '지금 새로고침' 항목은 뺀다 — 위젯을 클릭하면 새로고침되고 스피너가 돈다.
         cool = tk.Menu(self.menu, tearoff=0)
@@ -714,6 +728,9 @@ class App:
                     default=True,
                 ),
                 pystray.MenuItem("지금 새로고침", lambda: self.refresh_now()),
+                pystray.MenuItem(
+                    "이번 주 사용 속도", lambda: self.commands.put("pace")
+                ),
                 pystray.MenuItem(
                     "윈도우 켤 때 자동 실행",
                     lambda: self.commands.put("toggle_autostart"),
@@ -951,6 +968,7 @@ class App:
                 "quit": self.quit,
                 "front": self.bring_to_front,
                 "toggle_autostart": self.toggle_autostart,
+                "pace": self.open_pace,
             }[cmd]()
             if cmd == "quit":
                 return
@@ -1058,6 +1076,10 @@ class App:
         for limit in (usage.five, usage.week):
             if limit.pct is not None:
                 parts.append(f"{limit.label} {limit.pct:.0f}%  {limit.left}")
+        # 좁은 스킨(슬림 바)에는 눈금만 서므로, 숫자는 여기서도 읽을 수 있게 한다
+        p = pace(usage)
+        if p is not None:
+            parts.append(f"이번 주 지금쯤 {p.due:.0f}%  ·  {p.verdict}")
         if self.ping_cfg.get("enabled"):
             times = cooldown_ping.parse_times(self.ping_cfg["times"])
             nxt = cooldown_ping.predict_next(datetime.now(), times, self._five_resets_local())
@@ -1288,6 +1310,94 @@ class App:
             entry.focus_set()
         except Exception:  # noqa: BLE001
             pass
+
+    # -------------------------------------------------- 이번 주 사용 속도
+    def open_pace(self):
+        """주간 한도를 '지금쯤 얼마나 썼어야 하나' 와 견줘 보여 준다.
+
+        주간 창은 달력 주가 아니라 초기화 시각에서 7일 뺀 순간부터다 — 창이 흐른
+        만큼이 곧 알맞은 사용률이고, 게이지의 눈금이 그 자리다.
+        """
+        W = 300
+        try:
+            top, body = self._open_panel("이번 주 사용 속도")
+            wrap = tk.Frame(body, bg=P.bg)
+            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
+            inner = W - PANEL_PAD * 2
+
+            p = pace(self.last_usage) if self.last_usage is not None else None
+            if p is None:
+                tk.Label(
+                    wrap,
+                    text="주간 한도 값을 아직 못 받았어요.",
+                    bg=P.bg,
+                    fg=P.faint,
+                    font=(KR, 9),
+                ).pack(anchor="w", pady=16)
+                self._finalize_panel(top, W)
+                return
+
+            tk.Label(
+                wrap, text=p.verdict, bg=P.bg, fg=pace_color(p.level),
+                font=(KR, 16, "bold"),
+            ).pack(anchor="w")
+
+            # 위젯 게이지와 같은 그림 — 채운 색이 눈금을 앞질렀으면 빨리 쓰는 중
+            bar = tk.Canvas(
+                wrap, width=inner, height=10, bg=P.bg, highlightthickness=0, bd=0
+            )
+            bar.pack(fill="x", pady=(10, 14))
+            bar.create_rectangle(0, 0, inner, 10, fill=P.track, width=0)
+            bar.create_rectangle(0, 0, inner * p.used / 100, 10, fill=tone(p.used), width=0)
+            x = mark_x(p.due, inner)
+            bar.create_rectangle(x, 0, x + MARK_W, 10, fill=P.title, width=0)
+
+            self._pair(wrap, "지금쯤", f"{p.due:.0f}%", P.sub)
+            self._pair(wrap, "지금", f"{p.used:.0f}%", tone(p.used))
+
+            tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(10, 8))
+
+            if p.projected is not None:
+                self._pair(
+                    wrap, "이 속도면 주 끝", f"{min(999, p.projected):.0f}%",
+                    pace_color(p.level),
+                )
+            per = p.per_day
+            if per is not None:
+                self._pair(wrap, f"남은 {int(p.days_left)}일 · 하루", f"{per:.0f}%", P.sub)
+            else:
+                hours = int(p.left_sec // 3600)
+                self._pair(
+                    wrap, f"남은 {hours}시간", f"{max(0.0, 100 - p.used):.0f}%", P.sub
+                )
+            if p.runout is not None:
+                self._pair(wrap, "다 쓰는 때", self._when_text(p.runout), P.red)
+            reset = self.last_usage.week.resets_at
+            if reset is not None:
+                self._pair(wrap, "초기화", self._when_text(reset), P.sub)
+
+            self._finalize_panel(top, W)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _pair(parent: tk.Misc, label: str, value: str, color: str) -> None:
+        """왼쪽 이름 · 오른쪽 값 한 줄."""
+        row = tk.Frame(parent, bg=P.bg)
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text=label, bg=P.bg, fg=P.label, font=(KR, 9)).pack(side="left")
+        tk.Label(row, text=value, bg=P.bg, fg=color, font=(KR, 9, "bold")).pack(
+            side="right"
+        )
+
+    @staticmethod
+    def _when_text(when: datetime) -> str:
+        """'8/02(토) 09:12' — 응답은 UTC 라 로컬로 돌려서 보여 준다."""
+        try:
+            t = when.astimezone()
+        except (ValueError, OSError):
+            return ""
+        return f"{t.month}/{t.day:02d}({'월화수목금토일'[t.weekday()]}) {t:%H:%M}"
 
     # -------------------------------------------------- 위젯과 같은 결의 팝업
     # 팝업도 본체 위젯과 똑같이: 테두리 없는 둥근 창 + 왼쪽 액센트 바 + 볼드 제목,

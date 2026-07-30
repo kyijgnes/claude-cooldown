@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -158,6 +158,98 @@ def parse(raw: dict) -> Usage:
     return Usage(five=five, week=week, scoped=scoped, raw=raw)
 
 
+# ---------------------------------------------------------------- 속도 분석
+
+WEEK_SPAN = timedelta(days=7)
+DAY_PP = 100 / 7  # 하루치 사용량(%p). 판정을 '며칠 앞섰나' 로 잡는 기준이다.
+PROJECT_AFTER = 0.15  # 창이 이만큼(약 하루) 흐른 뒤부터 '이 속도면' 을 셈한다
+
+
+@dataclass
+class Pace:
+    """주간 한도를 '지금쯤 얼마나 썼어야 하나' 와 견준 결과.
+
+    주간 창은 달력의 월요일이 아니라 **resets_at 에서 7일 뺀 순간**부터다.
+    창이 흐른 비율이 곧 알맞은 사용률(`due`) — 창이 2/7 흘렀으면 28% 가 제 속도다.
+    """
+
+    used: float  # 지금 쓴 %
+    due: float  # 이 시점에 알맞은 % (창이 흐른 만큼)
+    elapsed: float  # 창이 흐른 비율 0~1
+    left_sec: float  # 초기화까지 남은 초
+    projected: float | None  # 이 속도면 주 끝에 몇 % (창 초반엔 튀므로 None)
+    runout: datetime | None  # 이 속도면 100% 에 닿는 시각 (창 안에서 안 닿으면 None)
+    verdict: str  # '여유' / '알맞음' / '조금 빠름' / '많이 빠름' / '다 씀'
+    level: int  # 0 넉넉 · 1 주의 · 2 위험 (색은 화면 쪽에서 고른다)
+
+    @property
+    def over(self) -> float:
+        """알맞은 양보다 얼마나 앞섰나 (%p). 음수면 덜 쓴 것."""
+        return self.used - self.due
+
+    @property
+    def days_left(self) -> float:
+        return self.left_sec / 86400
+
+    @property
+    def per_day(self) -> float | None:
+        """남은 기간 하루에 쓸 수 있는 %. 남은 게 하루 미만이면 None (그땐 하루로 못 나눈다)."""
+        days = self.days_left
+        if days < 1:
+            return None
+        return max(0.0, 100 - self.used) / days
+
+
+def pace(usage: Usage, now: datetime | None = None) -> Pace | None:
+    """주간 한도 속도 분석. 주간 값이나 초기화 시각이 없으면 None.
+
+    **5시간 한도에는 쓰지 않는다** — 그 창은 첫 메시지에 열려 앞쪽에 몰아 쓰는 게
+    정상이라, 고르게 쓰는 걸 전제로 한 이 계산이 뜻을 못 가진다.
+    """
+    week = usage.week
+    if week.pct is None or week.resets_at is None:
+        return None
+
+    now = now or datetime.now(timezone.utc)
+    end = week.resets_at
+    if end.tzinfo is None:  # 시간대가 빠진 값이 오면 UTC 로 본다 (빼기가 터진다)
+        end = end.replace(tzinfo=timezone.utc)
+
+    span = WEEK_SPAN.total_seconds()
+    # 창이 열린 순간부터 지금까지. 시계가 어긋나거나 창이 막 열렸어도
+    # 0 으로 나누지 않게 아래를 60초로 막는다.
+    elapsed = min(span, max(60.0, (now - (end - WEEK_SPAN)).total_seconds()))
+    frac = elapsed / span
+    used = float(week.pct)
+    due = frac * 100
+    left_sec = max(0.0, (end - now).total_seconds())
+
+    # 창 초반에는 표본이 짧아 '이 속도면' 이 수백 %로 튄다 — 하루는 지나고 셈한다.
+    # (창이 막 열렸을 땐 몇 분치 속도로 '4분 뒤 소진' 같은 헛말이 나온다)
+    projected = runout = None
+    if frac >= PROJECT_AFTER:
+        projected = used / frac
+        rate = used / elapsed  # %/초
+        if rate > 0 and used < 100:
+            when = now + timedelta(seconds=(100 - used) / rate)
+            if when < end:  # 이 창 안에서 다 쓸 것 같을 때만 뜻이 있다
+                runout = when
+
+    over = used - due
+    if used >= 99.5:
+        verdict, level = "다 씀", 2
+    elif over <= -DAY_PP:  # 하루치 이상 덜 썼다
+        verdict, level = "여유", 0
+    elif over <= DAY_PP / 2:  # 반나절 앞까지는 제 속도로 본다
+        verdict, level = "알맞음", 0
+    elif over <= DAY_PP * 1.5:
+        verdict, level = "조금 빠름", 1
+    else:
+        verdict, level = "많이 빠름", 2
+
+    return Pace(used, due, frac, left_sec, projected, runout, verdict, level)
+
+
 # ---------------------------------------------------------------- 조회
 
 
@@ -208,4 +300,13 @@ def fetch() -> Usage:
 
 
 if __name__ == "__main__":
-    print(json.dumps(fetch_raw(), ensure_ascii=False, indent=2))
+    _raw = fetch_raw()
+    print(json.dumps(_raw, ensure_ascii=False, indent=2))
+    _p = pace(parse(_raw))
+    if _p is not None:
+        _line = f"주간 {_p.used:.0f}% · 지금쯤 {_p.due:.0f}% · {_p.verdict}"
+        if _p.projected is not None:
+            _line += f" · 이 속도면 {_p.projected:.0f}%"
+        if _p.runout is not None:
+            _line += f" · {_p.runout.astimezone():%m/%d %H:%M} 소진"
+        print("\n" + _line)

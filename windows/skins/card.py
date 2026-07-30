@@ -1,30 +1,44 @@
 """
 카드형 — 여백을 두고 숫자를 크게 앞세운 기본 모양.
 위계: 숫자(24pt) > 남은시간(10pt) > 항목 이름(8pt). 게이지는 3px 선으로 절제.
+
+주간 줄에는 '지금쯤 29% · 알맞음' 이 오른쪽에 붙고, 게이지의 그 자리에 눈금이 선다.
 """
 
 from __future__ import annotations
 
 import tkinter as tk
 
-from cooldown_core import Usage
+from cooldown_core import Pace, Usage, pace
 
-from .base import KR, NUM, P, Skin, scoped_text, tone
+from .base import KR, MARK_W, NUM, P, Skin, mark_x, pace_color, scoped_text, tone
 
 PAD = 18
+BAR_H = 3  # 게이지 두께
+BAR_TOP = 3  # 게이지 위 여백 (눈금이 위아래로 삐져나올 자리를 캔버스 안에 둔다)
+BAR_BOX = 9  # 게이지 칸 전체 높이
 
 
 class Section:
     """한 한도 덩어리 — 이름 / 큰 숫자 + 남은시간 / 얇은 게이지."""
 
-    def __init__(self, parent: tk.Misc, label: str, inner: int):
+    def __init__(self, parent: tk.Misc, label: str, inner: int, hint: bool = False):
         self.inner = inner
         box = tk.Frame(parent, bg=P.bg)
         box.pack(fill="x", padx=PAD)
 
-        tk.Label(box, text=label, bg=P.bg, fg=P.label, font=(KR, 8), anchor="w").pack(
-            fill="x"
+        head = tk.Frame(box, bg=P.bg)
+        head.pack(fill="x")
+        tk.Label(head, text=label, bg=P.bg, fg=P.label, font=(KR, 8), anchor="w").pack(
+            side="left"
         )
+        # 속도 자리 — 주간에만 둔다. 5시간 창은 앞쪽에 몰아 쓰는 게 정상이라 뜻이 없다.
+        self.verdict = self.due = None
+        if hint:
+            self.verdict = tk.Label(head, text="", bg=P.bg, fg=P.faint, font=(KR, 8))
+            self.verdict.pack(side="right")
+            self.due = tk.Label(head, text="", bg=P.bg, fg=P.label, font=(KR, 8))
+            self.due.pack(side="right", padx=(0, 7))
 
         row = tk.Frame(box, bg=P.bg)
         row.pack(fill="x")
@@ -33,23 +47,38 @@ class Section:
         self.left = tk.Label(row, text="", bg=P.bg, fg=P.sub, font=(KR, 10))
         self.left.pack(side="right", anchor="s", pady=(0, 9))
 
+        # 바탕은 P.bg 다 — 게이지 띠(P.track)는 안에 직접 그린다. 눈금이 띠 위아래로
+        # 조금 삐져나와야 채워진 색 위에서도 눈에 걸린다.
         self.bar = tk.Canvas(
-            box, height=3, width=inner, bg=P.track, highlightthickness=0, bd=0
+            box, height=BAR_BOX, width=inner, bg=P.bg, highlightthickness=0, bd=0
         )
-        self.bar.pack(fill="x", pady=(3, 0))
+        self.bar.pack(fill="x")
 
-    def set(self, pct: float | None, left: str) -> None:
+    def set(self, pct: float | None, left: str, p: Pace | None = None) -> None:
         color = tone(pct)
         self.value.config(text="--" if pct is None else f"{pct:.0f}%", fg=color)
         self.left.config(text=left, fg=P.sub if pct is not None else P.faint)
+
+        if self.due is not None:
+            self.due.config(text="" if p is None else f"지금쯤 {p.due:.0f}%")
+            self.verdict.config(
+                text="" if p is None else p.verdict,
+                fg=P.faint if p is None else pace_color(p.level),
+            )
+
         self.bar.delete("all")
         # 배치 전에는 winfo_width() 가 0 이 아니라 **1** 을 돌려준다.
         # `or` 로 받으면 1 이 참이라 폴백이 죽고, 게이지가 0.4px 로 그려진 뒤
         # 다음 조회(최대 5분)까지 그대로 남는다. 디자인을 바꿀 때 이 경로를 탄다.
         measured = self.bar.winfo_width()
         width = measured if measured > 1 else self.inner
+        y0, y1 = BAR_TOP, BAR_TOP + BAR_H
+        self.bar.create_rectangle(0, y0, width, y1, fill=P.track, width=0)
         if pct is not None:
-            self.bar.create_rectangle(0, 0, width * pct / 100, 3, fill=color, width=0)
+            self.bar.create_rectangle(0, y0, width * pct / 100, y1, fill=color, width=0)
+        if p is not None:
+            x = mark_x(p.due, width)
+            self.bar.create_rectangle(x, 0, x + MARK_W, BAR_BOX, fill=P.title, width=0)
 
 
 class CardSkin(Skin):
@@ -75,8 +104,8 @@ class CardSkin(Skin):
         self.stamp.pack(side="right")
 
         self.five = Section(parent, "5시간 한도", inner)
-        tk.Frame(parent, bg=P.bg, height=17).pack()
-        self.week = Section(parent, "주간 한도", inner)
+        tk.Frame(parent, bg=P.bg, height=14).pack()
+        self.week = Section(parent, "주간 한도", inner, hint=True)
 
         tk.Frame(parent, bg=P.line, height=1).pack(fill="x", padx=PAD, pady=(18, 0))
 
@@ -108,7 +137,7 @@ class CardSkin(Skin):
     def show(self, usage: Usage, stamp: str) -> None:
         self._head_normal()
         self.five.set(usage.five.pct, usage.five.left)
-        self.week.set(usage.week.pct, usage.week.left)
+        self.week.set(usage.week.pct, usage.week.left, pace(usage))
         self.stamp.config(text=f"{stamp} 기준")
 
         text = scoped_text(usage)

@@ -118,6 +118,22 @@ def tone(pct: float | None) -> str:
     return P.red
 
 
+# '지금쯤' 눈금 — 주간 게이지 위에 세로로 긋는 가는 선. 색은 P.title(대비 최대)로
+# 고정한다. 게이지 색(초록/노랑/빨강)을 쓰면 값처럼 보여 두 개를 헷갈린다.
+MARK_W = 2
+
+
+def pace_color(level: int) -> str:
+    """속도 판정 색 — 0 넉넉 초록 / 1 주의 노랑 / 2 위험 빨강."""
+    return (P.green, P.amber, P.red)[max(0, min(2, level))]
+
+
+def mark_x(due: float, width: float) -> float:
+    """게이지 폭 안에서 '지금쯤' 눈금이 설 x. 오른쪽 끝을 넘어가 잘리지 않게 당긴다."""
+    x = width * max(0.0, min(100.0, due)) / 100
+    return max(0.0, min(x, width - MARK_W))
+
+
 def worst(usage: Usage) -> float | None:
     """두 한도 중 더 급한 쪽 — 한 개짜리 상태 표시에 쓴다."""
     values = [x for x in (usage.five.pct, usage.week.pct) if x is not None]
@@ -160,3 +176,8 @@ class Skin:
         거짓이면 값이 없다는 뜻이므로 비운다 (로그인 만료).
         """
         raise NotImplementedError
+
+    def react(self, x: float | None = None, y: float | None = None) -> None:
+        """위젯을 눌렀을 때의 반응(선택). `x`/`y` 는 창 기준 누른 자리(스킨이 쓰면).
+        기본은 아무것도 하지 않는다."""
+        pass

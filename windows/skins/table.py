@@ -9,9 +9,9 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import font as tkfont
 
-from cooldown_core import Usage
+from cooldown_core import Usage, pace
 
-from .base import KR, NUM, P, Skin, scoped_text, tone, worst
+from .base import KR, MARK_W, NUM, P, Skin, mark_x, scoped_text, tone, worst
 
 PAD = 14
 # 한도 / 사용률 / 게이지 / 초기화까지
@@ -46,7 +46,7 @@ class Row:
     def rename(self, text: str) -> None:
         self.name.config(text=text)
 
-    def set(self, pct: float | None, left: str) -> None:
+    def set(self, pct: float | None, left: str, due: float | None = None) -> None:
         color = tone(pct)
         self.pct.config(text="--" if pct is None else f"{pct:.0f}%", fg=color)
         self.left.config(text=left)
@@ -65,6 +65,10 @@ class Row:
                 x0, 0, x0 + step - GAP, GAUGE_H,
                 fill=color if i < filled else P.track, width=0,
             )
+        # '지금쯤' 눈금 — 칸 사이 틈에 떨어져도 보이게 맨 위에 대비색으로 긋는다
+        if due is not None:
+            x = mark_x(due, GAUGE_W)
+            self.bar.create_rectangle(x, 0, x + MARK_W, GAUGE_H, fill=P.title, width=0)
 
     def clear(self) -> None:
         """줄 자리는 그대로 두고 안만 비운다 — 해당 한도가 아예 없을 때."""
@@ -170,8 +174,9 @@ class TableSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._head_normal(worst(usage))
+        p = pace(usage)
         self.five.set(usage.five.pct, usage.five.left)
-        self.week.set(usage.week.pct, usage.week.left)
+        self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
         self.stamp.config(text=f"{stamp} 기준")
 
         # 모델별 한도가 없으면 base.scoped_text 가 빈 문자열을 준다 — 그 줄은 비운다.

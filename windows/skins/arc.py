@@ -12,7 +12,7 @@ import math
 import tkinter as tk
 import tkinter.font as tkfont
 
-from cooldown_core import Usage
+from cooldown_core import Usage, pace
 
 from .base import KR, NUM, P, Skin, scoped_text, tone
 
@@ -64,8 +64,14 @@ def _cap(d, c: float, r: float, ang: float, w: float, fill: str) -> None:
     d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=fill)
 
 
-def _ring(pct: float | None):
-    """링 한 개를 이미지로 그린다. PIL 의 arc 는 bbox 안쪽으로 두께를 그린다."""
+def _angle(pct: float) -> float:
+    """사용률(0~100) 이 링 위에서 서는 각도."""
+    return START + SWEEP * max(0.0, min(100.0, pct)) / 100.0
+
+
+def _ring(pct: float | None, due: float | None = None):
+    """링 한 개를 이미지로 그린다. PIL 의 arc 는 bbox 안쪽으로 두께를 그린다.
+    `due` 를 주면 그 자리에 '지금쯤' 눈금을 링을 가로질러 긋는다."""
     size = 2 * R_OUT + 2
     s = size * SS
     img = Image.new("RGB", (s, s), P.bg)
@@ -82,11 +88,22 @@ def _ring(pct: float | None):
 
     if pct is not None:
         color = tone(pct)
-        end = START + SWEEP * max(0.0, min(100.0, pct)) / 100.0
+        end = _angle(pct)
         if end - START > 0.6:
             d.arc(box, START, end, fill=color, width=int(w))
         _cap(d, c, r, START, w, color)
         _cap(d, c, r, end, w, color)
+
+    if due is not None:
+        # 링 두께를 한 뼘씩 넘겨 그어야 채워진 색 위에서도 눈에 걸린다
+        a = math.radians(_angle(due))
+        r0 = (R_MID - W_ARC / 2 - 1) * SS
+        r1 = (R_MID + W_ARC / 2 + 1) * SS
+        d.line(
+            (c + r0 * math.cos(a), c + r0 * math.sin(a),
+             c + r1 * math.cos(a), c + r1 * math.sin(a)),
+            fill=P.title, width=int(2 * SS),
+        )
 
     return ImageTk.PhotoImage(img.resize((size, size), RESAMPLE))
 
@@ -118,7 +135,7 @@ class Gauge:
         if HAVE_PIL:
             self.image = _ring(None)
             self.ring = canvas.create_image(cx, CY, image=self.image)
-            self.track = self.arc = None
+            self.track = self.arc = self.mark = None
         else:
             box = (cx - R_MID, CY - R_MID, cx + R_MID, CY + R_MID)
             self.ring = None
@@ -129,6 +146,9 @@ class Gauge:
             self.arc = canvas.create_arc(
                 *box, start=225, extent=-0.01, style="arc",
                 outline=P.track, width=W_ARC, state="hidden",
+            )
+            self.mark = canvas.create_line(
+                0, 0, 0, 0, fill=P.title, width=2, state="hidden"
             )
 
         self.num = canvas.create_text(
@@ -141,23 +161,36 @@ class Gauge:
         self.left = canvas.create_text(cx, Y_RESET, text="", fill=P.sub, font=F_SMALL)
         self._percent(None, P.faint)
 
-    def set(self, pct: float | None, left: str) -> None:
+    def set(self, pct: float | None, left: str, due: float | None = None) -> None:
         color = tone(pct)
-        self._ring(pct, color)
+        self._ring(pct, color, due)
         self._percent(pct, color)
         self.c.itemconfigure(
             self.left, text=left, fill=P.sub if pct is not None else P.faint
         )
 
-    def _ring(self, pct: float | None, color: str) -> None:
-        if pct == self.drawn:
+    def _ring(self, pct: float | None, color: str, due: float | None) -> None:
+        # 눈금은 1분마다 조금씩 움직이므로 값과 함께 '마지막으로 그린 것'에 넣는다
+        if (pct, due) == self.drawn:
             return
-        self.drawn = pct
+        self.drawn = (pct, due)
         if HAVE_PIL:
-            image = _ring(pct)  # 캔버스에 먼저 걸고 나서 참조를 옮긴다
+            image = _ring(pct, due)  # 캔버스에 먼저 걸고 나서 참조를 옮긴다
             self.c.itemconfigure(self.ring, image=image)
             self.image = image  # 놓으면 GC 로 사라진다
             return
+
+        if due is None:
+            self.c.itemconfigure(self.mark, state="hidden")
+        else:
+            a = math.radians(_angle(due))
+            r0, r1 = R_MID - W_ARC / 2 - 1, R_MID + W_ARC / 2 + 1
+            self.c.coords(
+                self.mark,
+                self.cx + r0 * math.cos(a), CY + r0 * math.sin(a),
+                self.cx + r1 * math.cos(a), CY + r1 * math.sin(a),
+            )
+            self.c.itemconfigure(self.mark, state="normal")
         if pct is None or pct <= 0:
             self.c.itemconfigure(self.arc, state="hidden")
             return
@@ -236,8 +269,9 @@ class ArcSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._ok_stamp = stamp  # 값이 언제 것인지 — 오류 띠에서도 이걸 쓴다
+        p = pace(usage)
         self.five.set(usage.five.pct, usage.five.left)
-        self.week.set(usage.week.pct, usage.week.left)
+        self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
         self._error(None, stamp)
         self._foot(stamp, usage)
 
