@@ -20,3 +20,7 @@ android/local.properties
 android/.kotlin/
 *.apk
 *.aab
+
+# 릴리스 서명 키 — 절대 올리지 말 것. 백업은 GitHub Secret 쪽에 있다(CLAUDE.md 참고).
+android/keystore/
+android/keystore.properties

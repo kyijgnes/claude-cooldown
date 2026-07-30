@@ -288,20 +288,43 @@
 
 ### 빌드
 
-- **`android/build.ps1`** 로 돌린다 (`build` / `install` / `test` / `release`).
-- ★ **한글 경로에서 유닛 테스트가 깨진다.** 저장소가 `13. 클로드 사용량` 아래라, Gradle 이
-  테스트용 자식 JVM 에 클래스패스를 넘길 때 한글이 깨져 `ClassNotFoundException` 이 난다
-  (APK 빌드는 됨). 그래서 `build.ps1` 이 `%LOCALAPPDATA%\cooldown-android` 에 **정션**을
-  만들어 거기서 빌드한다. 손으로 `gradlew` 를 부르지 말 것.
+- **`android/build.ps1`** 로 돌린다 (`build` / `install` / `install-release` / `test` / `release`).
+- ★ **한글 경로는 유닛 테스트만 깨뜨린다.** 저장소가 `13. 클로드 사용량` 아래라, Gradle 이
+  테스트용 자식 JVM 에 클래스패스를 넘길 때 한글이 깨져 `ClassNotFoundException` 이 난다.
+  **APK 빌드는 한글 경로에서도 된다.** 그래서 `build.ps1` 은 `test` 일 때만
+  `%LOCALAPPDATA%\cooldown-android` 정션을 거치고, 나머지는 저장소에서 바로 돌린다 —
+  정션이 망가져도 APK 빌드는 안 막힌다. 손으로 `gradlew` 를 부르지 말 것.
   같은 이유로 `gradle.properties` 에 `android.overridePathCheck=true` 가 필요하다.
-- ★ **정션이 끊기면 Gradle 이 "Failed to create directory" 로 죽는다.** 끊긴 정션도
-  `Test-Path` 는 참이라 예전엔 스스로 못 고쳤다 — 지금은 `build.ps1` 이 정션 너머로
-  `settings.gradle.kts` 가 보이는지 확인하고, 안 보이면 지웠다가 다시 만든다.
+- ★ **정션은 읽기는 되면서 쓰기만 조용히 사라지는 상태가 된다** (원인 미확정 — 보안 솔루션 의심).
+  그러면 Gradle 이 "Failed to create directory" 로 죽는다. `Test-Path` 도 참이고
+  파일 목록도 제대로 보이므로 그런 검사로는 못 잡는다 — `build.ps1` 은 **정션으로 쓴 폴더가
+  저장소에 실제로 나타나는지**로 판정하고(`Test-JunctionWrites`), 아니면 지웠다가 다시 만든다.
 - **`gradlew testDebugUnitTest` 는 폰 없이 화면 그림을 뽑는 도구다** —
   `app/build/미리보기/*.png` 에 위젯·배경화면·상태바 아이콘이 최악값까지 렌더된다.
   화면을 고쳤으면 이걸로 먼저 확인할 것 (데스크탑의 `_shot_skin.py` 와 같은 역할).
-- 폰에 넣기: `.\build.ps1 install` (USB 디버깅 켠 갤럭시 연결). 친구에겐 태그를 밀어
-  GitHub Actions 가 만든 APK 를 준다.
+- 폰에 넣기: `.\build.ps1 install-release` (USB 나 무선 디버깅으로 연결).
+  **`install`(디버그 키) 대신 `install-release` 를 쓸 것** — 디버그 키로 깔아 두면 나중에
+  나눠주는 APK 로 덮어쓸 수가 없다(서명이 달라 '앱이 설치되지 않음').
+
+### 나눠주기 (친구에게 APK)
+
+**태그를 밀면 GitHub Actions 가 APK 를 만들어 릴리스에 붙인다** (`v0.2` 처럼). 순서:
+
+1. `app/build.gradle.kts` 의 **`versionCode` 를 올린다.** 안 올리면 폰이 업데이트인지 못 가린다.
+2. `git tag v0.N` → `git push origin v0.N`
+
+- ★ **서명은 고정 키다.** 예전엔 release 도 디버그 키로 서명했는데, 디버그 키는 PC 마다 다르고
+  CI 는 매번 새 VM 이라 **빌드마다 서명이 바뀌어 친구가 업데이트를 못 받았다**(지웠다 깔아야 하고
+  그러면 페어링 QR 도 다시). 지금은 `android/keystore/cooldown-release.jks` 로 서명한다.
+  지문 `SHA-256 726dfa27…7c117b` / `CN=Claude Cooldown, O=kyijgnes, C=KR`.
+- 키와 비밀번호는 **`android/keystore.properties`(gitignore)** 에 있고, CI 는 시크릿
+  **`COOLDOWN_KEYSTORE_B64`**(jks 를 base64) · **`COOLDOWN_KEYSTORE_PASSWORD`** 로 받는다.
+  **이 시크릿이 키의 백업이다** — 로컬 파일을 잃으면 여기서 되살린다.
+- ★ **키를 잃으면 끝이다.** 친구들이 이미 깐 앱을 다시는 업데이트 못 한다(전부 지우고 재설치).
+  **새 키를 만들지 말고** 시크릿에서 복구할 것.
+- 시크릿이 없으면 워크플로가 **일부러 첫 단계에서 멈춘다** — 조용히 디버그 서명으로
+  나가면 이 문제가 되돌아오기 때문. 서명 지문은 빌드 로그('서명 지문 남기기')에 남는다.
+- 손으로 만들 때: `.\build.ps1 release` → `app/build/outputs/apk/release/app-release.apk` (3.1MB)
 
 ## exe 로 묶을 때 (build_exe.py)
 
@@ -340,6 +363,8 @@
 ## 하지 말 것
 
 - `.credentials.json` 내용이나 accessToken 을 서버로 보내지 말 것. 퍼센트만 전송.
+- **`android/keystore/` · `android/keystore.properties` 를 커밋하지 말 것.** 서명 키와 비밀번호다.
+  `.gitignore` 에 있지만 `git add -f` 로 뚫지 말 것.
 - **폰이 `api.anthropic.com` 을 직접 치게 만들지 말 것.** OAuth 리프레시가 토큰을
   회전시켜 **PC 의 Claude Code 로그인이 풀린다.** 폰은 릴레이에서만 읽는다.
 - `SUPABASE_SERVICE_ROLE_KEY` 를 클라이언트 번들이나 에이전트에 넣지 말 것.
