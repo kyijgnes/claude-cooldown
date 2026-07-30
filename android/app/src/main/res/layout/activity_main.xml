@@ -151,6 +151,14 @@
             android:text="배경화면으로 설정"
             android:textColor="@color/title" />
 
+        <Button
+            android:id="@+id/customize"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="배경화면 꾸미기"
+            android:textColor="@color/title" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

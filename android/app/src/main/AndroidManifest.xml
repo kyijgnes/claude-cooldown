@@ -36,6 +36,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 배경화면 꾸미기 (미리보기 + 끌어서 자리) -->
+        <activity
+            android:name=".CustomizeActivity"
+            android:exported="false"
+            android:label="배경화면 꾸미기"
+            android:parentActivityName=".MainActivity" />
+
         <!-- 홈 위젯 -->
         <receiver
             android:name=".widget.SmallWidget"

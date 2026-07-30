@@ -2,11 +2,13 @@ package com.kyijgnes.cooldown
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.view.View
 import com.kyijgnes.cooldown.wallpaper.WallpaperArt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -36,6 +38,16 @@ class RenderPreviewTest {
         File(out, name).outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** 꾸미기 값 하나만 바꿔 배경화면 한 장. 다음 장에 안 번지게 매번 처음 값으로 되돌린다. */
+    private fun wallpaper(ctx: android.content.Context, name: String, set: () -> Unit) {
+        Look.reset(ctx)
+        set()
+        val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+        WallpaperArt.render(ctx, Canvas(bmp), snap(37f, 62f), now)
+        save(bmp, "$name.png")
+        Look.reset(ctx)
+    }
+
     @Test
     fun `위젯과 배경화면 그림을 남긴다`() {
         val ctx = RuntimeEnvironment.getApplication()
@@ -56,11 +68,32 @@ class RenderPreviewTest {
         save(GaugeRenderer.statusIcon(null), "상태바_값없음.png")
 
         // 라이브 배경화면 (FHD+ 세로) — 상어가 제일 위일 때와 다 내려갔을 때
+        Look.reset(ctx)
         for ((name, at) in listOf("배경화면" to now, "배경화면_내려감" to now + 883L)) {
             val wall = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
             WallpaperArt.render(ctx, Canvas(wall), snap(37f, 62f), at)
             save(wall, "$name.png")
         }
+
+        // 꾸미기 — 고를 수 있는 것들을 한 장씩 (CustomizeActivity 의 선택지와 같은 순서)
+        wallpaper(ctx, "꾸미기_링") { Look.setMeter(ctx, Look.RINGS) }
+        wallpaper(ctx, "꾸미기_숫자만") { Look.setMeter(ctx, Look.NUMBERS) }
+        wallpaper(ctx, "꾸미기_미터기없음") { Look.setMeter(ctx, Look.NONE) }
+        wallpaper(ctx, "꾸미기_입벌린") { Look.setMouth(ctx, Look.OPEN) }
+        wallpaper(ctx, "꾸미기_바다색만") { Look.setScene(ctx, Look.PLAIN) }
+        wallpaper(ctx, "꾸미기_글씨뒤판") { Look.setPlate(ctx, true) }
+        wallpaper(ctx, "꾸미기_크게_위로") {
+            Look.setMeterSize(ctx, Look.METER_MAX)
+            Look.setMeterPos(ctx, 0.5f, 0.28f)
+            Look.setArtSize(ctx, Look.ART_MAX)
+            Look.setArtPos(ctx, 0.5f, 0.7f)
+        }
+        wallpaper(ctx, "꾸미기_작게_구석") {
+            Look.setMeter(ctx, Look.NUMBERS)
+            Look.setMeterSize(ctx, Look.METER_MIN)
+            Look.setMeterPos(ctx, 0f, 1f)   // 화면 밖으로 못 나간다 — 모서리에 붙는다
+        }
+        Look.reset(ctx)
 
         // 앱 아이콘 — 런처가 달라는 크기가 제각각이라 두 크기로 뽑아 비율을 확인한다
         for (size in listOf(432, 144)) {
@@ -78,6 +111,29 @@ class RenderPreviewTest {
         WallpaperArt.render(RuntimeEnvironment.getApplication(), Canvas(dark), snap(37f, 62f), now)
         save(dark, "배경화면_어둡게.png")
         RuntimeEnvironment.setQualifiers("+notnight")
+    }
+
+    /**
+     * 꾸미기 화면 자체도 폰 없이 본다 — 미리보기 판·선택지가 한 화면에 들어오는지.
+     * 미리보기 크기가 화면 크기에서 나오므로 **진짜 폰 해상도(1080×2340)로 재야** 뜻이 있다.
+     */
+    @Test
+    @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+    fun `꾸미기 화면 그림을 남긴다`() {
+        Look.reset(RuntimeEnvironment.getApplication())
+        val controller = Robolectric.buildActivity(CustomizeActivity::class.java).setup()
+        val root = controller.get().window.decorView
+        val w = 1080
+        val h = 2340
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
+        )
+        root.layout(0, 0, w, h)
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        root.draw(Canvas(bmp))
+        save(bmp, "꾸미기화면.png")
+        controller.pause().destroy()
     }
 
     @Test

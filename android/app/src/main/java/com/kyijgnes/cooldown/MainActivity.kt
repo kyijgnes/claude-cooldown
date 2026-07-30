@@ -52,6 +52,9 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.save).setOnClickListener { save() }
         findViewById<Button>(R.id.scan).setOnClickListener { scan() }
         findViewById<Button>(R.id.wallpaper).setOnClickListener { pickWallpaper() }
+        findViewById<Button>(R.id.customize).setOnClickListener {
+            startActivity(Intent(this, CustomizeActivity::class.java))
+        }
 
         notify.setOnCheckedChangeListener { _: CompoundButton, on: Boolean ->
             Store.setNotifyOn(this, on)

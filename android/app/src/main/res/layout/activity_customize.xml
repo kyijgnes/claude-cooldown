@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 꾸미기 화면 — 뼈대만 XML 이고, 고르는 칸(선택지·슬라이더)은 CustomizeActivity 가
+     고른 값에 따라 다시 만든다. 안 쓰는 칸은 숨기는 게 아니라 아예 안 만든다. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="32dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="배경화면 꾸미기"
+            android:textColor="@color/title"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <!-- 지금 이대로 걸린다. 여기서 끌면 자리가 바뀐다 -->
+        <ImageView
+            android:id="@+id/preview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="16dp"
+            android:contentDescription="@string/wallpaper_name" />
+
+        <TextView
+            android:id="@+id/preview_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_horizontal"
+            android:textColor="@color/faint"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:id="@+id/controls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
+
+        <Button
+            android:id="@+id/apply"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="배경화면으로 설정"
+            android:textColor="@color/title" />
+
+        <Button
+            android:id="@+id/reset"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="처음 모양으로"
+            android:textColor="@color/title" />
+    </LinearLayout>
+</ScrollView>
