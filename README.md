@@ -34,6 +34,7 @@
 - 나눠줄 exe 만들기: `pip install pyinstaller` 후 `python build_exe.py` → `dist/클로드 쿨다운.exe`
 - 폰 앱 빌드: `android/build.ps1` (APK) / `android/build.ps1 install` (연결된 폰에 설치)
   / `android/build.ps1 test` (폰 없이 화면 그림만 PNG 로)
-- 릴레이 서버: `server/schema.sql` 을 Supabase 에서 실행하고 `server/` 를 Vercel 에 올린 뒤,
-  환경변수 `NEXT_PUBLIC_SUPABASE_URL` 과 `SUPABASE_SERVICE_ROLE_KEY` 를 넣으세요.
+- 릴레이 서버: Upstash Redis 를 하나 만들고 `server/` 를 Vercel 에 올린 뒤,
+  환경변수 `UPSTASH_REDIS_REST_URL` 과 `UPSTASH_REDIS_REST_TOKEN` 을 넣으세요
+  (자세한 절차·확인·되돌리기는 `server/README.md`).
   그 주소를 컴퓨터 위젯의 `폰 연결…` 창에 붙여 넣으면 됩니다.

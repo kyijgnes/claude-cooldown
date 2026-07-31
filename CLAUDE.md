@@ -10,14 +10,14 @@
 ## 구조
 
 **윈도우 앱**(주력)은 서버를 거치지 않고 로컬에서 직접 조회한다.
-**폰 앱**은 서버 릴레이로 받는다 — 서버는 아직 미배포.
+**폰 앱**은 서버 릴레이로 받는다 (Vercel 에 배포돼 있다 — `server/README.md`).
 
 ```
 내 PC (OAuth 토큰은 여기서만 — 절대 안 나간다)
   └─ windows/cooldown_app.py   바탕화면 위젯 + 트레이. 직접 조회
         │  조회 성공할 때마다 POST {key, 퍼센트·초기화시각}   (cooldown_push.py)
         ▼
-  server/  Next.js API route → Supabase (service_role)
+  server/  Next.js API route → Upstash Redis (REST)
         ▲
         │  GET ?key=...   15분마다
   android/  갤럭시 앱 — 상태바 알림 · 홈 위젯 · 라이브 배경화면
@@ -43,7 +43,8 @@
 | `cooldown_push.py` | **폰으로 보내기.** 키 생성·주소 정돈·POST·QR 만들기 |
 | `agent/cooldown_agent.py` | 헤드리스 전용 상주 에이전트(위젯 안 쓰는 PC용). 보통은 필요 없다 |
 | `server/app/api/cooldown/route.ts` | POST(업서트) / GET(조회) 릴레이 |
-| `server/schema.sql` | `public.claude_cooldown` 테이블, RLS on + 정책 없음 |
+| `server/README.md` | **릴레이 문서 한 곳.** 저장소 만들기·환경변수·확인·되돌리기·무료 한도 계산 |
+| `server/relay_check.mjs` | 릴레이가 폰과 맺은 약속을 지키는지 확인(저장소를 또 바꿀 때의 합격 기준) |
 | `android/` | **갤럭시 앱** — 아래 '폰 앱' 절 |
 | `android/art/paint_gums.py` | 상어 잇몸을 핑크로 칠하는 일회성 아트 도구(+ 흰 잇몸 원본 보관) |
 | `.github/workflows/android.yml` | 태그 밀면 APK 만들어 릴리스에 붙임 |
@@ -430,9 +431,12 @@
   `.gitignore` 에 있지만 `git add -f` 로 뚫지 말 것.
 - **폰이 `api.anthropic.com` 을 직접 치게 만들지 말 것.** OAuth 리프레시가 토큰을
   회전시켜 **PC 의 Claude Code 로그인이 풀린다.** 폰은 릴레이에서만 읽는다.
-- `SUPABASE_SERVICE_ROLE_KEY` 를 클라이언트 번들이나 에이전트에 넣지 말 것.
+- `UPSTASH_REDIS_REST_TOKEN` 을 클라이언트 번들이나 에이전트에 넣지 말 것.
 - 폴링 간격을 300초 미만으로 낮추지 말 것 (폰은 15분).
-- `claude_cooldown` 테이블에 RLS 정책을 추가하지 말 것 (anon 차단 상태가 의도된 설계).
+- **릴레이의 주소·경로·GET 응답 일곱 필드를 바꾸지 말 것** — 폰에 이미 깔린 앱이
+  전부 재페어링이다. 저장소를 바꿔도 이건 그대로 간다(`server/relay_check.mjs` 로 확인).
+- **릴레이 로그·에러 메시지에 `key` 를 남기지 말 것.** 읽기 비밀번호다
+  (저장소에도 원문이 아니라 SHA-256 만 들어간다).
 - 위젯에서 `os.startfile` 로 외부 파일·프로그램을 열지 말 것 — 프로즌(`--windowed`)·
   pythonw 환경에서 앱이 통째로 꺼지는 일이 있다. 파일 내용은 창을 직접 그려 보여 준다.
 - **팝업(핑 시각·핑 기록)은 본체 위젯과 같은 결로 통일** — OS 창틀이 아니라
