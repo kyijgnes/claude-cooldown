@@ -31,8 +31,14 @@ object NotifyController {
     private const val CHANNEL = "cooldown"
     private const val ID = 1
 
+    /** 옛 판에서 잠깐 썼던 '상태바 없이' 채널 — 지우고 다닌다(안 지우면 설정에 남는다). */
+    private const val CHANNEL_DEAD = "cooldown_quiet"
+    private const val ID_DEAD = 2
+
     fun update(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        nm.cancel(ID_DEAD)
+        nm.deleteNotificationChannel(CHANNEL_DEAD)
         if (!Store.notifyOn(ctx)) {
             nm.cancel(ID)
             return
@@ -91,7 +97,9 @@ object NotifyController {
     }
 
     fun cancel(ctx: Context) {
-        ctx.getSystemService(NotificationManager::class.java)?.cancel(ID)
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        nm.cancel(ID)
+        nm.cancel(ID_DEAD)
     }
 
     /** 지금 기기가 라이브 업데이트(상태바 칩·AOD)를 띄워 줄 수 있는가. */
@@ -130,7 +138,8 @@ object NotifyController {
         val ch = NotificationChannel(
             CHANNEL,
             ctx.getString(R.string.channel_name),
-            // 조용해야 하지만 너무 낮으면 상태바·잠금화면에서 접힌다 — 소리만 끈다
+            // 조용해야 하지만 너무 낮으면 상태바·잠금화면에서 접힌다 — 소리만 끈다.
+            // ★ MIN 으로 내리지 말 것 — 삼성 잠금화면·AOD 에서도 통째로 사라진다(실기 확인).
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             setSound(null, null)

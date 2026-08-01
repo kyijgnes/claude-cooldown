@@ -36,12 +36,19 @@
             </intent-filter>
         </activity>
 
+        <!-- 옵션 — PC 연결·알림·배경화면 -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="옵션"
+            android:parentActivityName=".MainActivity" />
+
         <!-- 배경화면 꾸미기 (미리보기 + 끌어서 자리) -->
         <activity
             android:name=".CustomizeActivity"
             android:exported="false"
             android:label="배경화면 꾸미기"
-            android:parentActivityName=".MainActivity" />
+            android:parentActivityName=".SettingsActivity" />
 
         <!-- 홈 위젯 -->
         <receiver

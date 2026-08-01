@@ -38,15 +38,18 @@ class RenderPreviewTest {
         File(out, name).outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    /** 꾸미기 값 하나만 바꿔 배경화면 한 장. 다음 장에 안 번지게 매번 처음 값으로 되돌린다. */
-    private fun wallpaper(ctx: android.content.Context, name: String, set: () -> Unit) {
-        Look.reset(ctx)
-        set()
+    /** 꾸미기 값 한 벌로 배경화면 한 장. `locked` 는 잠금화면(상어가 입을 다문 쪽). */
+    private fun wallpaper(
+        ctx: android.content.Context, name: String, locked: Boolean = true,
+        look: Look.Values = SEA, at: Long = now,
+    ) {
         val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
-        WallpaperArt.render(ctx, Canvas(bmp), snap(37f, 62f), now)
+        WallpaperArt.render(ctx, Canvas(bmp), snap(37f, 62f), at, look, locked)
         save(bmp, "$name.png")
-        Look.reset(ctx)
     }
+
+    /** 사진을 안 고른 기본값은 상어 바다로 내려간다 — 그림으로 확인할 땐 대놓고 상어 바다로. */
+    private val SEA = Look.DEFAULT.copy(scene = Look.SEA)
 
     @Test
     fun `위젯과 배경화면 그림을 남긴다`() {
@@ -64,36 +67,33 @@ class RenderPreviewTest {
 
         // 상태바 아이콘 (실제로는 24dp 로 줄어든다)
         save(GaugeRenderer.statusIcon(7f), "상태바_7.png")
+        save(GaugeRenderer.statusIcon(47f), "상태바_47.png")
         save(GaugeRenderer.statusIcon(100f), "상태바_100.png")
         save(GaugeRenderer.statusIcon(null), "상태바_값없음.png")
 
         // 라이브 배경화면 (FHD+ 세로) — 상어가 제일 위일 때와 다 내려갔을 때
-        Look.reset(ctx)
-        for ((name, at) in listOf("배경화면" to now, "배경화면_내려감" to now + 883L)) {
-            val wall = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
-            WallpaperArt.render(ctx, Canvas(wall), snap(37f, 62f), at)
-            save(wall, "$name.png")
-        }
+        wallpaper(ctx, "배경화면")
+        wallpaper(ctx, "배경화면_내려감", at = now + 883L)
+        // 잠금이 풀리면 상어가 입을 벌린다
+        wallpaper(ctx, "배경화면_잠금해제", locked = false)
 
         // 꾸미기 — 고를 수 있는 것들을 한 장씩 (CustomizeActivity 의 선택지와 같은 순서)
-        wallpaper(ctx, "꾸미기_링") { Look.setMeter(ctx, Look.RINGS) }
-        wallpaper(ctx, "꾸미기_숫자만") { Look.setMeter(ctx, Look.NUMBERS) }
-        wallpaper(ctx, "꾸미기_미터기없음") { Look.setMeter(ctx, Look.NONE) }
-        wallpaper(ctx, "꾸미기_입벌린") { Look.setMouth(ctx, Look.OPEN) }
-        wallpaper(ctx, "꾸미기_바다색만") { Look.setScene(ctx, Look.PLAIN) }
-        wallpaper(ctx, "꾸미기_글씨뒤판") { Look.setPlate(ctx, true) }
-        wallpaper(ctx, "꾸미기_크게_위로") {
-            Look.setMeterSize(ctx, Look.METER_MAX)
-            Look.setMeterPos(ctx, 0.5f, 0.28f)
-            Look.setArtSize(ctx, Look.ART_MAX)
-            Look.setArtPos(ctx, 0.5f, 0.7f)
-        }
-        wallpaper(ctx, "꾸미기_작게_구석") {
-            Look.setMeter(ctx, Look.NUMBERS)
-            Look.setMeterSize(ctx, Look.METER_MIN)
-            Look.setMeterPos(ctx, 0f, 1f)   // 화면 밖으로 못 나간다 — 모서리에 붙는다
-        }
-        Look.reset(ctx)
+        wallpaper(ctx, "꾸미기_링", look = SEA.copy(meter = Look.RINGS))
+        wallpaper(ctx, "꾸미기_숫자만", look = SEA.copy(meter = Look.NUMBERS))
+        wallpaper(ctx, "꾸미기_미터기없음", look = SEA.copy(meter = Look.NONE))
+        wallpaper(ctx, "꾸미기_글씨뒤판", look = SEA.withPlate(true))
+        wallpaper(
+            ctx, "꾸미기_크게_위로",
+            look = SEA.copy(meterSize = Look.METER_MAX, seaSize = Look.ART_MAX)
+                .withMeterPos(0.5f, 0.28f).withBg(0.5f, 0.7f),
+        )
+        wallpaper(
+            ctx, "꾸미기_작게_구석",
+            // 화면 밖으로 못 나간다 — 모서리에 붙는다
+            look = SEA.copy(meter = Look.NUMBERS, meterSize = Look.METER_MIN).withMeterPos(0f, 1f),
+        )
+        // 사진을 못 읽으면(안 골랐거나 지웠거나) 빈 파랑이 아니라 상어 바다로 내려간다
+        wallpaper(ctx, "꾸미기_사진못읽음", look = Look.DEFAULT.copy(photo = "content://없는것/1"))
 
         // 앱 아이콘 — 런처가 달라는 크기가 제각각이라 두 크기로 뽑아 비율을 확인한다
         for (size in listOf(432, 144)) {
@@ -108,7 +108,9 @@ class RenderPreviewTest {
         // 어둡게 (깊은 바다) — 상어 그림은 한 장이라 shark_tint 로 물들여 내린다
         RuntimeEnvironment.setQualifiers("+night")
         val dark = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
-        WallpaperArt.render(RuntimeEnvironment.getApplication(), Canvas(dark), snap(37f, 62f), now)
+        WallpaperArt.render(
+            RuntimeEnvironment.getApplication(), Canvas(dark), snap(37f, 62f), now, SEA, true,
+        )
         save(dark, "배경화면_어둡게.png")
         RuntimeEnvironment.setQualifiers("+notnight")
     }
@@ -120,7 +122,8 @@ class RenderPreviewTest {
     @Test
     @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
     fun `꾸미기 화면 그림을 남긴다`() {
-        Look.reset(RuntimeEnvironment.getApplication())
+        // 기본은 '내 사진'인데 테스트엔 사진이 없다 — 상어 바다로 두고 칸을 다 보이게 한다
+        Look.write(RuntimeEnvironment.getApplication(), SEA)
         val controller = Robolectric.buildActivity(CustomizeActivity::class.java).setup()
         val root = controller.get().window.decorView
         val w = 1080

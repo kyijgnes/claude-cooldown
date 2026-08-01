@@ -48,12 +48,13 @@
             android:layout_marginTop="8dp"
             android:orientation="vertical" />
 
+        <!-- 글씨가 곧 상태다 — 손댄 게 있으면 '저장', 없으면 '저장됨'(누를 수 없음) -->
         <Button
-            android:id="@+id/apply"
+            android:id="@+id/save"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:text="배경화면으로 설정"
+            android:text="저장"
             android:textColor="@color/title" />
 
         <Button

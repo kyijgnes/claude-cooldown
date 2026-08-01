@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 홈 — **지금 값만** 본다. 설정·PC 연결은 전부 [옵션] 안으로 들어갔다.
+     PC 가 연결 안 돼 있으면 [PC 연결하기] 가 대신 나와서 그것부터 하게 된다. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -26,7 +28,7 @@
             android:id="@+id/gauge"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="20dp"
             android:adjustViewBounds="true"
             android:contentDescription="@string/app_name"
             android:scaleType="fitCenter" />
@@ -40,131 +42,28 @@
             android:textSize="13sp" />
 
         <Button
+            android:id="@+id/connect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="PC 연결하기"
+            android:textColor="@color/title"
+            android:textStyle="bold" />
+
+        <Button
             android:id="@+id/refresh"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="16dp"
             android:text="지금 새로고침"
             android:textColor="@color/title" />
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginVertical="24dp"
-            android:background="@color/line" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="PC 연결"
-            android:textColor="@color/label"
-            android:textSize="13sp" />
-
-        <EditText
-            android:id="@+id/url"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:autofillHints="url"
-            android:background="@color/track"
-            android:hint="서버 주소"
-            android:inputType="textUri"
-            android:padding="12dp"
-            android:textColor="@color/title"
-            android:textColorHint="@color/faint"
-            android:textSize="15sp" />
-
-        <EditText
-            android:id="@+id/key"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:autofillHints="password"
-            android:background="@color/track"
-            android:hint="키 (32자리)"
-            android:inputType="textNoSuggestions"
-            android:maxLength="32"
-            android:padding="12dp"
-            android:textColor="@color/title"
-            android:textColorHint="@color/faint"
-            android:textSize="15sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/scan"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="PC 화면 QR 찍기"
-                android:textColor="@color/title" />
-
-            <Button
-                android:id="@+id/save"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:text="저장"
-                android:textColor="@color/title" />
-        </LinearLayout>
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginVertical="24dp"
-            android:background="@color/line" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="어디에 보일지"
-            android:textColor="@color/label"
-            android:textSize="13sp" />
-
-        <Switch
-            android:id="@+id/notify"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:minHeight="48dp"
-            android:text="상태바·잠금화면·AOD"
-            android:textColor="@color/title"
-            android:textSize="15sp" />
-
-        <TextView
-            android:id="@+id/notify_note"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/faint"
-            android:textSize="12sp" />
-
         <Button
-            android:id="@+id/wallpaper"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="배경화면으로 설정"
-            android:textColor="@color/title" />
-
-        <Button
-            android:id="@+id/customize"
+            android:id="@+id/options"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="배경화면 꾸미기"
+            android:text="옵션"
             android:textColor="@color/title" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="홈 위젯은 홈 화면 길게 누르기 → 위젯 → 클로드 쿨다운"
-            android:textColor="@color/faint"
-            android:textSize="12sp" />
     </LinearLayout>
 </ScrollView>

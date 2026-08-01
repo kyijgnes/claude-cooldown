@@ -1,17 +1,16 @@
 package com.kyijgnes.cooldown
 
 import android.app.Activity
+import android.app.KeyguardManager
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.Button
@@ -30,12 +29,20 @@ import com.kyijgnes.cooldown.wallpaper.WallpaperArt
  * **설명 문구 대신 미리보기다** — 고르면 바로 위에서 그대로 바뀌고, 자리는 그 미리보기를
  * 손가락으로 끌어서 정한다. 미터기를 짚으면 미터기가, 그 밖을 짚으면 배경이 따라온다.
  * 값(크기 %)은 칸 이름에 그대로 적는다.
+ *
+ * ★ **손댄 것은 `저장` 을 눌러야 실제로 걸린다.** 화면이 들고 있는 `draft` 만 바뀌고
+ *   미리보기도 그걸로 그린다. 저장 버튼 글씨가 곧 상태다 — `저장` / `저장됨`.
  */
 class CustomizeActivity : Activity() {
 
     private lateinit var preview: ImageView
     private lateinit var hint: TextView
     private lateinit var controls: LinearLayout
+    private lateinit var save: Button
+
+    /** 저장 전 값. 화면·미리보기는 전부 이걸 본다. */
+    private var draft = Look.DEFAULT
+    private var saved = Look.DEFAULT
 
     private var frame: Bitmap? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -52,15 +59,18 @@ class CustomizeActivity : Activity() {
         preview = findViewById(R.id.preview)
         hint = findViewById(R.id.preview_hint)
         controls = findViewById(R.id.controls)
+        save = findViewById(R.id.save)
+
+        saved = Look.read(this)
+        draft = saved
 
         sizePreview()
         preview.setOnTouchListener { _, ev -> drag(ev) }
 
-        findViewById<Button>(R.id.apply).setOnClickListener { applyWallpaper() }
+        save.setOnClickListener { apply() }
         findViewById<Button>(R.id.reset).setOnClickListener {
-            Look.reset(this)
-            buildControls()
-            paint()
+            // 고른 사진은 남긴다 — 다시 고르게 만들 일이 아니다
+            change(Look.DEFAULT.copy(photo = draft.photo))
         }
 
         buildControls()
@@ -74,6 +84,45 @@ class CustomizeActivity : Activity() {
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(ticker)
+    }
+
+    // ---------------------------------------------------------------- 값 바꾸기
+
+    /** 저장 전 값만 바꾼다. 실제 배경화면은 `저장` 을 눌러야 바뀐다. */
+    private fun change(next: Look.Values, rebuild: Boolean = true) {
+        draft = next
+        if (rebuild) buildControls() else syncSave()
+        paint()
+    }
+
+    private fun syncSave() {
+        val dirty = draft != saved
+        save.text = if (dirty) "저장" else "저장됨"
+        save.isEnabled = dirty
+    }
+
+    private fun apply() {
+        Look.write(this, draft)
+        saved = draft
+        syncSave()
+        // 아직 배경화면으로 안 걸었으면 고르는 화면을 띄운다. 이미 걸려 있으면 그대로 반영된다.
+        if (WallpaperManager.getInstance(this).wallpaperInfo?.packageName == packageName) {
+            Toast.makeText(this, "배경화면에 반영됐어요", Toast.LENGTH_SHORT).show()
+        } else {
+            pickWallpaper()
+        }
+    }
+
+    private fun pickWallpaper() {
+        val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).putExtra(
+            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+            ComponentName(this, CooldownWallpaperService::class.java),
+        )
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "배경화면 설정을 열 수 없어요", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // ---------------------------------------------------------------- 미리보기
@@ -96,20 +145,24 @@ class CustomizeActivity : Activity() {
     private fun paint() {
         val bmp = frame ?: return
         val now = System.currentTimeMillis()
-        WallpaperArt.render(this, Canvas(bmp), Store.snapshot(this).settled(now), now)
+        // 앱을 보는 중이니 잠금은 풀린 상태다 — 상어도 그때 얼굴(입 벌린)로 보여 준다
+        WallpaperArt.render(
+            this, Canvas(bmp), Store.snapshot(this).settled(now), now, draft, locked(),
+        )
         preview.invalidate()
         handler.removeCallbacks(ticker)
         handler.postDelayed(ticker, 60L)   // 배경화면과 같은 박자
     }
 
+    private fun locked(): Boolean =
+        getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: false
+
     /** 미터기를 짚으면 미터기가, 그 밖을 짚으면 배경이 따라온다. */
     private fun drag(ev: MotionEvent): Boolean {
         val bmp = frame ?: return false
         if (preview.width == 0) return false
-        val sx = bmp.width.toFloat() / preview.width
-        val sy = bmp.height.toFloat() / preview.height
-        val x = ev.x * sx
-        val y = ev.y * sy
+        val x = ev.x * bmp.width / preview.width
+        val y = ev.y * bmp.height / preview.height
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
 
@@ -117,15 +170,17 @@ class CustomizeActivity : Activity() {
             MotionEvent.ACTION_DOWN -> {
                 // 세로로 끌면 스크롤뷰가 채 가는 걸 막는다
                 preview.parent?.requestDisallowInterceptTouchEvent(true)
-                movingMeter = WallpaperArt.hitsMeter(this, w, h, x, y)
+                movingMeter = WallpaperArt.hitsMeter(w, h, draft, x, y)
             }
 
             MotionEvent.ACTION_MOVE -> {
                 val dx = x - lastX
                 val dy = y - lastY
-                if (movingMeter) WallpaperArt.dragMeter(this, w, h, dx, dy)
-                else WallpaperArt.dragArt(this, w, h, dx, dy)
-                paint()
+                change(
+                    if (movingMeter) WallpaperArt.dragMeter(w, h, draft, dx, dy)
+                    else WallpaperArt.dragBg(this, w, h, draft, dx, dy),
+                    rebuild = false,
+                )
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
@@ -140,40 +195,23 @@ class CustomizeActivity : Activity() {
 
     private fun buildControls() {
         controls.removeAllViews()
-        val scene = Look.scene(this)
+        syncSave()
 
-        hint.text = when {
-            Look.meter(this) == Look.NONE && scene != Look.SEA -> ""
-            else -> "끌어서 자리 옮기기"
-        }
+        hint.text = if (draft.meter == Look.NONE && draft.scene != Look.SEA) "" else "끌어서 자리 옮기기"
 
         section("배경")
-        chips(
-            listOf("상어 바다" to Look.SEA, "바다색만" to Look.PLAIN, "내 사진" to Look.PHOTO),
-            scene,
-        ) { pick ->
-            Look.setScene(this, pick)
-            if (pick == Look.PHOTO && Look.photo(this).isEmpty()) pickPhoto()
-            buildControls()
-            paint()
+        chips(listOf("내 사진" to Look.PHOTO, "상어 바다" to Look.SEA), draft.scene) { pick ->
+            change(draft.copy(scene = pick))
+            if (pick == Look.PHOTO && draft.photo.isEmpty()) pickPhoto()
         }
 
-        if (scene == Look.PHOTO) {
-            button(if (Look.photo(this).isEmpty()) "사진 고르기" else "다른 사진") { pickPhoto() }
+        if (draft.scene == Look.PHOTO) {
+            button(if (draft.photo.isEmpty()) "사진 고르기" else "다른 사진") { pickPhoto() }
         }
 
-        if (scene == Look.SEA) {
-            section("상어 얼굴")
-            chips(
-                listOf("입 다문" to Look.CLOSED, "입 벌린" to Look.OPEN),
-                Look.mouth(this),
-            ) { pick ->
-                Look.setMouth(this, pick)
-                buildControls()
-                paint()
-            }
-            slider("상어 크기", Look.artSize(this), Look.ART_MIN, Look.ART_MAX) {
-                Look.setArtSize(this, it)
+        if (draft.scene == Look.SEA) {
+            slider("상어 크기", draft.seaSize, Look.ART_MIN, Look.ART_MAX) {
+                change(draft.copy(seaSize = it.coerceIn(Look.ART_MIN, Look.ART_MAX)), rebuild = false)
             }
         }
 
@@ -183,21 +221,17 @@ class CustomizeActivity : Activity() {
                 "막대" to Look.BARS, "링" to Look.RINGS,
                 "숫자만" to Look.NUMBERS, "없음" to Look.NONE,
             ),
-            Look.meter(this),
-        ) { pick ->
-            Look.setMeter(this, pick)
-            buildControls()
-            paint()
-        }
+            draft.meter,
+        ) { pick -> change(draft.copy(meter = pick)) }
 
-        if (Look.meter(this) != Look.NONE) {
-            slider("미터기 크기", Look.meterSize(this), Look.METER_MIN, Look.METER_MAX) {
-                Look.setMeterSize(this, it)
+        if (draft.meter != Look.NONE) {
+            slider("미터기 크기", draft.meterSize, Look.METER_MIN, Look.METER_MAX) {
+                change(
+                    draft.copy(meterSize = it.coerceIn(Look.METER_MIN, Look.METER_MAX)),
+                    rebuild = false,
+                )
             }
-            toggle("글씨 뒤 판", Look.plate(this)) {
-                Look.setPlate(this, it)
-                paint()
-            }
+            toggle("글씨 뒤 판", draft.plateOn) { change(draft.withPlate(it), rebuild = false) }
         }
     }
 
@@ -210,30 +244,9 @@ class CustomizeActivity : Activity() {
         })
     }
 
-    /** 고른 것 하나가 색으로 드러나는 한 줄. 항목 이름이 곧 그 모양의 이름이다. */
     private fun chips(items: List<Pair<String, String>>, chosen: String, onPick: (String) -> Unit) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = rowParams(top = 8)
-        }
-        items.forEachIndexed { i, (label, value) ->
-            val on = value == chosen
-            row.addView(TextView(this).apply {
-                text = label
-                gravity = Gravity.CENTER
-                // 고른 것만 진하게 뒤집는다. 두 벌 다 배경 대비 10:1 이상 (밝게·어둡게)
-                setTextColor(getColor(if (on) R.color.bg else R.color.title))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                setPadding(0, dp(12), 0, dp(12))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(getColor(if (on) R.color.sub else R.color.track))
-                }
-                setOnClickListener { onPick(value) }
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { if (i > 0) marginStart = dp(8) }
-            })
-        }
+        val row = LinearLayout(this).apply { layoutParams = rowParams(top = 8) }
+        Chips.fill(row, items, chosen, onPick)
         controls.addView(row)
     }
 
@@ -257,7 +270,6 @@ class CustomizeActivity : Activity() {
                     val v = lo + span * p / 100f
                     onSet(v)
                     label.text = "$title · ${Math.round(v * 100)}%"
-                    paint()
                 }
 
                 override fun onStartTrackingTouch(sb: SeekBar) = Unit
@@ -319,25 +331,8 @@ class CustomizeActivity : Activity() {
         } catch (e: Exception) {
             // 임시 권한만 받은 경우 — 이번 세션에서는 보인다
         }
-        Look.setPhoto(this, uri.toString())
-        Look.setScene(this, Look.PHOTO)
         WallpaperArt.forgetPhoto()
-        buildControls()
-        paint()
-    }
-
-    // ---------------------------------------------------------------- 걸기
-
-    private fun applyWallpaper() {
-        val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).putExtra(
-            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-            ComponentName(this, CooldownWallpaperService::class.java),
-        )
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "배경화면 설정을 열 수 없어요", Toast.LENGTH_SHORT).show()
-        }
+        change(draft.copy(scene = Look.PHOTO, photo = uri.toString(), photoX = 0.5f, photoY = 0.5f))
     }
 
     private companion object {

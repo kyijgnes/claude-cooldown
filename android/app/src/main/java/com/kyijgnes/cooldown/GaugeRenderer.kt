@@ -5,8 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
+import kotlin.math.min
 
 /**
  * **화면 넷이 함께 쓰는 단 하나의 그리기 코드** — 홈 위젯, 앱 화면, 라이브 배경화면,
@@ -169,20 +171,59 @@ object GaugeRenderer {
 
     // ---------------------------------------------------------------- 상태바 아이콘
 
+    private val BOLD = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+
     /**
-     * 상태바에 숫자만 (배터리 % 처럼). 시스템이 **알파를 마스크로 써서 한 가지 색으로
-     * 물들이므로** 흰 글자 + 투명 배경으로 그린다. 색을 넣어도 무시된다.
+     * 상태바·잠금화면·**AOD** 에 뜨는 작은 아이콘 — **클로디 별빛에 감싸인 숫자.**
+     * 앱 아이콘(클로디)과 같은 결이라 상태바에서도 우리 것인 줄 바로 안다.
+     *
+     * 시스템이 **알파를 마스크로 써서 한 가지 색으로 물들이므로** 흰색 + 투명 배경으로
+     * 그린다. 색을 넣어도 무시된다.
+     *
+     * ★ **글자 상자가 아니라 잉크(실제 획)를 재서 칸에 채운다.** 폰트 여백까지 칸으로
+     * 치면 24dp 로 줄었을 때 숫자가 다른 아이콘들보다 눈에 띄게 작아진다 — 상태바에서
+     * 안 보이던 주된 이유다. 좁은 볼드체를 쓰는 것도 같은 이유(세 자리도 안 가늘어진다).
      */
     fun statusIcon(pct: Float?): Bitmap {
         val s = 96
         val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val text = pct?.let { Math.round(it).toString() } ?: "–"
-        val pt = paint(s * 0.78f, Color.WHITE, MEDIUM)
-        // 세 자리('100')면 폭이 넘치므로 들어갈 때까지 줄인다
-        val maxW = s * 0.94f
-        while (pt.measureText(text) > maxW && pt.textSize > 8f) pt.textSize -= 2f
-        centerText(c, text, s / 2f, s / 2f, pt)
+        val mid = s / 2f
+
+        // 클로디의 별빛 — **네 모서리 대각선에만** 놓는다. 가로 띠는 숫자가 다 써야 해서
+        // 여덟 살을 다 그리면 숫자를 그만큼 줄여야 하고, 24dp 로 줄면 그게 더 안 보인다.
+        val ray = paint(0f, Color.WHITE, BOLD).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = s * 0.075f
+            strokeCap = Paint.Cap.ROUND
+        }
+        for (k in 0..3) {
+            val a = Math.PI / 4 + k * Math.PI / 2
+            val dx = Math.cos(a).toFloat()
+            val dy = Math.sin(a).toFloat()
+            c.drawLine(
+                mid + dx * s * 0.47f, mid + dy * s * 0.47f,
+                mid + dx * s * 0.62f, mid + dy * s * 0.62f, ray,
+            )
+        }
+
+        val pt = paint(s.toFloat(), Color.WHITE, BOLD)
+        // ★ 크기는 **두 자리('00')를 기준**으로 한 번만 정한다. 그리는 글자로 재면
+        //   7% 일 때만 숫자가 칸을 꽉 채워 커졌다가 10% 가 되면 확 작아진다 — 그게 더 눈에 띈다.
+        //   '–'(값 없음)도 잉크가 납작해서 기준으로 삼으면 화면 폭짜리 막대가 된다.
+        val ref = Rect()
+        pt.getTextBounds("00", 0, 2, ref)
+        if (ref.width() > 0 && ref.height() > 0) {
+            pt.textSize = s * min(s * 0.80f / ref.height(), s * 0.80f / ref.width())
+        }
+        // 세 자리('100')만 폭이 넘친다 — 그때만 들어갈 만큼 줄인다
+        val wide = pt.measureText(text)
+        if (wide > s * 0.80f) pt.textSize *= s * 0.80f / wide
+
+        val box = Rect()
+        pt.getTextBounds(text, 0, text.length, box)
+        c.drawText(text, (s - box.width()) / 2f - box.left, (s + box.height()) / 2f - box.bottom, pt)
         return bmp
     }
 }

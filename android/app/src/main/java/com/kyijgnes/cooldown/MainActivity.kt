@@ -1,41 +1,33 @@
 package com.kyijgnes.cooldown
 
-import android.Manifest
 import android.app.Activity
-import android.app.WallpaperManager
-import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.text.format.DateFormat
+import android.view.View
 import android.widget.Button
-import android.widget.CompoundButton
-import android.widget.EditText
 import android.widget.ImageView
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import com.kyijgnes.cooldown.notify.NotifyController
-import com.kyijgnes.cooldown.wallpaper.CooldownWallpaperService
 import com.kyijgnes.cooldown.work.RefreshWorker
 import com.kyijgnes.cooldown.work.ResetAlarm
 
 /**
- * 한 화면에 다 있다 — 지금 값, PC 연결, 어디에 보일지.
- * 설명 문단을 두지 않고 **항목 이름과 지금 상태**로 알게 한다.
+ * 홈 — **지금 값만** 본다. 손댈 것(PC 연결·알림·배경화면)은 전부 `SettingsActivity` 로 갔다.
+ *
+ * ★ **PC 가 연결 안 돼 있으면 그것부터 하게 만든다** — 숫자가 있을 자리에
+ *   [PC 연결하기] 가 대신 서고, 앱을 켤 때 한 번은 옵션 화면으로 곧장 보낸다.
+ *   연결 전에는 새로고침할 것도 없다.
  */
 class MainActivity : Activity() {
 
     private lateinit var gauge: ImageView
     private lateinit var status: TextView
-    private lateinit var url: EditText
-    private lateinit var key: EditText
-    private lateinit var notify: Switch
-    private lateinit var notifyNote: TextView
+    private lateinit var connect: Button
+    private lateinit var refresh: Button
+
+    /** 이번에 앱을 켠 뒤 연결 화면으로 한 번 보냈나 (계속 튕겨 나가지 않게). */
+    private var sentToPair = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,26 +35,15 @@ class MainActivity : Activity() {
 
         gauge = findViewById(R.id.gauge)
         status = findViewById(R.id.status)
-        url = findViewById(R.id.url)
-        key = findViewById(R.id.key)
-        notify = findViewById(R.id.notify)
-        notifyNote = findViewById(R.id.notify_note)
+        connect = findViewById(R.id.connect)
+        refresh = findViewById(R.id.refresh)
 
-        findViewById<Button>(R.id.refresh).setOnClickListener { refresh() }
-        findViewById<Button>(R.id.save).setOnClickListener { save() }
-        findViewById<Button>(R.id.scan).setOnClickListener { scan() }
-        findViewById<Button>(R.id.wallpaper).setOnClickListener { pickWallpaper() }
-        findViewById<Button>(R.id.customize).setOnClickListener {
-            startActivity(Intent(this, CustomizeActivity::class.java))
-        }
-
-        notify.setOnCheckedChangeListener { _: CompoundButton, on: Boolean ->
-            Store.setNotifyOn(this, on)
-            if (on) askNotificationPermission()
-            NotifyController.update(this)
-        }
+        connect.setOnClickListener { openOptions() }
+        refresh.setOnClickListener { reload() }
+        findViewById<Button>(R.id.options).setOnClickListener { openOptions() }
 
         takePairFrom(intent)
+        seedWallpaper()
         RefreshWorker.schedule(this)
         ResetAlarm.schedule(this)
     }
@@ -77,22 +58,29 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         showValues()
-        refresh()
+        if (!Store.paired(this)) {
+            if (!sentToPair) {
+                sentToPair = true
+                openOptions()
+            }
+            return
+        }
+        reload()
+    }
+
+    private fun openOptions() {
+        startActivity(Intent(this, SettingsActivity::class.java))
     }
 
     // ---------------------------------------------------------------- 화면
 
     private fun showValues() {
-        url.setText(Store.url(this))
-        key.setText(Store.key(this))
-        notify.isChecked = Store.notifyOn(this)
-        // 이 기기에서 실제로 어떻게 보이는지를 그대로 적는다 (설명 문단 대신).
-        // 안드로이드 16 미만에서도 AOD 알림 아이콘 줄에 숫자가 뜬다 — S20 Ultra 실측 확인.
-        notifyNote.text =
-            if (NotifyController.canPromote(this)) "상태바 칩 · 잠금화면 · AOD 진행바"
-            else "상태바 · 잠금화면 · AOD 에 숫자"
+        val paired = Store.paired(this)
+        connect.visibility = if (paired) View.GONE else View.VISIBLE
+        refresh.visibility = if (paired) View.VISIBLE else View.GONE
+        gauge.visibility = if (paired) View.VISIBLE else View.GONE
 
-        drawGauge()
+        if (paired) drawGauge()
         status.text = statusLine()
     }
 
@@ -108,7 +96,7 @@ class MainActivity : Activity() {
     }
 
     private fun statusLine(): String {
-        if (!Store.paired(this)) return "PC 연결 필요 — 주소와 키를 넣으세요"
+        if (!Store.paired(this)) return "PC 와 연결하면 사용량이 보입니다"
         val err = Store.error(this)
         val fetched = Store.fetchedAt(this)
         val clock = if (fetched > 0) DateFormat.getTimeFormat(this).format(fetched) else "--:--"
@@ -121,82 +109,31 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- 동작
 
-    private fun refresh() {
+    private fun reload() {
         Thread {
             Refresher.refresh(this)
             runOnUiThread { if (!isFinishing) showValues() }
         }.start()
     }
 
-    private fun save() {
-        val u = Store.normalizeUrl(url.text.toString())
-        val k = key.text.toString().trim()
-        if (u.isEmpty()) {
-            toast("서버 주소를 알아볼 수 없어요")
-            return
-        }
-        if (k.length != 32) {
-            toast("키는 32자리예요")
-            return
-        }
-        Store.setPair(this, u, k)
-        showValues()
-        refresh()
-    }
-
-    private fun scan() {
-        val options = GmsBarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .build()
-        GmsBarcodeScanning.getClient(this, options).startScan()
-            .addOnSuccessListener { code ->
-                val raw = code.rawValue ?: return@addOnSuccessListener
-                if (Store.applyPairUri(this, android.net.Uri.parse(raw))) {
-                    showValues()
-                    refresh()
-                } else {
-                    toast("클로드 쿨다운 QR 이 아니에요")
-                }
-            }
-            .addOnFailureListener { toast("QR 을 못 읽었어요 — 아래에 직접 넣어 주세요") }
-    }
-
-    private fun pickWallpaper() {
-        val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).putExtra(
-            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-            ComponentName(this, CooldownWallpaperService::class.java),
-        )
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            toast("배경화면 설정을 열 수 없어요")
-        }
+    /**
+     * 기본 배경은 **쓰던 배경화면 + 미터기**다. 그러려면 우리 라이브 배경화면이 걸리기 전에
+     * 지금 배경화면을 한 장 떠 놔야 한다 — 걸린 뒤엔 '지금 배경화면'이 우리다.
+     * 못 떠 와도 그만이다(상어 바다로 내려간다).
+     */
+    private fun seedWallpaper() {
+        if (Look.read(this).photo.isNotEmpty()) return
+        Thread {
+            val uri = WallpaperGrab.ensure(this)
+            if (uri.isNotEmpty()) Look.write(this, Look.read(this).copy(photo = uri))
+        }.start()
     }
 
     private fun takePairFrom(intent: Intent?) {
         if (Store.applyPairUri(this, intent?.data)) {
-            toast("PC 와 연결됐어요")
-            refresh()
+            Toast.makeText(this, "PC 와 연결됐어요", Toast.LENGTH_SHORT).show()
+            sentToPair = true   // QR 로 방금 붙였다 — 옵션으로 보낼 필요 없다
+            reload()
         }
     }
-
-    private fun askNotificationPermission() {
-        if (Build.VERSION.SDK_INT < 33) return
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-            == PackageManager.PERMISSION_GRANTED
-        ) return
-        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray,
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        NotifyController.update(this)
-        showValues()
-    }
-
-    private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
 }

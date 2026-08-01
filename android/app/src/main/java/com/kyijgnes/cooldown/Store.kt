@@ -71,6 +71,11 @@ object Store {
 
     // ---------------------------------------------------------------- 표시 설정
 
+    /**
+     * 상태바·잠금화면·AOD 는 **한 알림 하나**라서 따로 못 켜고 끈다 — 실기로 확인했다.
+     * 상태바 아이콘을 없애는 유일한 손잡이(채널 중요도 `MIN`)를 쓰면 삼성 잠금화면이
+     * 그 알림을 통째로 감춰서 셋이 같이 사라진다. 그래서 스위치도 하나다.
+     */
     fun notifyOn(ctx: Context): Boolean = prefs(ctx).getBoolean(K_NOTIFY, true)
 
     fun setNotifyOn(ctx: Context, on: Boolean) {

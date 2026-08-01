@@ -26,8 +26,9 @@ import kotlin.math.sin
  * 배경화면 **그리기만** 한다 — 화면·수명 관리는 CooldownWallpaperService 가 맡는다.
  * (데스크탑에서 앱과 스킨을 나눈 것과 같은 결. 폰 없이 테스트로 그림을 뽑아 볼 수 있다)
  *
- * 두 겹이다: **배경**(상어 바다 / 바다색만 / 내 사진)과 그 위에 뜨는 **미터기 판**.
- * 무엇을 어디에 그릴지는 `Look` 이 갖고 있고, 고르는 화면은 `CustomizeActivity` 다.
+ * 두 겹이다: **배경**(내 사진 / 상어 바다)과 그 위에 뜨는 **미터기 판**.
+ * 무엇을 어디에 그릴지는 `Look.Values` 로 받는다 — 이 파일은 설정을 직접 안 읽는다
+ * (꾸미기 화면이 '저장 전' 값으로 미리보기를 그려야 하기 때문).
  *
  * 상어 그림·배치·박자는 폰에 깔려 있던 갤럭시 테마에서 그대로 가져왔다(아래 dp 값은
  * 원본 `animation.xml` 실측치. 출처는 클로드 디자인 프로젝트 `Shark Wallpaper Request`
@@ -57,25 +58,32 @@ object WallpaperArt {
     // ── 미터기 판 (모든 값이 판 너비 u 의 비율. 크기를 키워도 구도가 안 무너진다) ──
     private const val BLOCK_W = 0.82f        // 판 너비 ÷ 화면 너비 (크기 1.0 일 때)
 
-    fun render(ctx: Context, c: Canvas, snap: Snapshot, now: Long) {
+    /**
+     * @param look    지금 그릴 값 한 벌. 꾸미기 화면은 **저장 전 값**을 넘겨 미리보기를 그린다.
+     * @param locked  잠금화면인가. **잠겨 있으면 상어가 입을 다물고, 풀면 벌린다.**
+     */
+    fun render(
+        ctx: Context, c: Canvas, snap: Snapshot, now: Long,
+        look: Look.Values = Look.read(ctx), locked: Boolean = true,
+    ) {
         val p = Palette(ctx)
         val w = c.width.toFloat()
         val h = c.height.toFloat()
-        val scene = Look.scene(ctx)
 
-        if (scene != Look.PHOTO || !drawPhoto(ctx, c, w, h)) drawSea(c, w, h, p)
-
-        if (scene == Look.SEA) {
-            // 원본 360×640dp 캔버스를 **상어 한가운데가 정해진 자리에 오도록** 얹는다 —
+        // 사진을 못 읽으면(안 골랐거나 지웠거나) 빈 파랑 대신 **상어 바다로 내려간다**
+        val sea = look.scene != Look.PHOTO || !drawPhoto(ctx, c, w, h, look)
+        if (sea) {
+            drawSea(c, w, h, p)
+            val k = look.seaSize * min(w / CANVAS_W, h / ART_BOTTOM)
+            // 원본 캔버스를 **상어 한가운데가 정해진 자리에 오도록** 얹는다 —
             // 물방울·그림자까지 한 덩어리로 따라와서 크기를 바꿔도 구도가 안 무너진다
-            val k = artScale(ctx, w, h)
-            val ox = Look.artX(ctx) * w - SHARK_CX * k
-            val oy = Look.artY(ctx) * h - SHARK_CY * k
+            val ox = look.seaX * w - SHARK_CX * k
+            val oy = look.seaY * h - SHARK_CY * k
             drawBubbles(c, k, ox, oy, now, p)
-            drawShark(ctx, c, k, ox, oy, now, p)
+            drawShark(ctx, c, k, ox, oy, now, p, locked)
         }
 
-        drawMeter(ctx, c, w, h, snap, now, p)
+        drawMeter(ctx, c, w, h, snap, now, p, look)
     }
 
     // ---------------------------------------------------------------- 배경
@@ -93,35 +101,32 @@ object WallpaperArt {
         c.drawRect(0f, 0f, w, h, sea)
     }
 
-    /** 고른 사진을 화면에 꽉 차게. 못 읽으면 false — 부르는 쪽이 바다로 내려간다. */
-    private fun drawPhoto(ctx: Context, c: Canvas, w: Float, h: Float): Boolean {
-        val bmp = photoFor(ctx, w.toInt(), h.toInt()) ?: return false
-        val r = photoRect(ctx, bmp, w, h)
-        c.drawBitmap(bmp, null, r, Paint(Paint.FILTER_BITMAP_FLAG))
+    /** 고른 사진을 화면에 꽉 차게. 못 읽으면 false — 부르는 쪽이 상어 바다로 내려간다. */
+    private fun drawPhoto(ctx: Context, c: Canvas, w: Float, h: Float, look: Look.Values): Boolean {
+        val bmp = photoFor(ctx, look.photo) ?: return false
+        c.drawBitmap(bmp, null, photoRect(bmp, w, h, look), Paint(Paint.FILTER_BITMAP_FLAG))
         return true
     }
 
-    /** 짧은 쪽을 화면에 맞춰 꽉 채우고, 남는 쪽은 사용자가 끌어 둔 자리(artX/artY)로 자른다. */
-    private fun photoRect(ctx: Context, bmp: Bitmap, w: Float, h: Float): RectF {
+    /** 짧은 쪽을 화면에 맞춰 꽉 채우고, 남는 쪽은 사용자가 끌어 둔 자리로 자른다. */
+    private fun photoRect(bmp: Bitmap, w: Float, h: Float, look: Look.Values): RectF {
         val s = max(w / bmp.width, h / bmp.height)
         val dw = bmp.width * s
         val dh = bmp.height * s
-        val left = -(dw - w) * Look.artX(ctx)
-        val top = -(dh - h) * Look.artY(ctx)
+        val left = -(dw - w) * look.bgX
+        val top = -(dh - h) * look.bgY
         return RectF(left, top, left + dw, top + dh)
     }
 
     // ---------------------------------------------------------------- 상어
-
-    private fun artScale(ctx: Context, w: Float, h: Float) =
-        Look.artSize(ctx) * min(w / CANVAS_W, h / ART_BOTTOM)
 
     /**
      * 상어와 그림자. **883ms 왕복 하나로 둘 다 몬다** —
      * 상어가 16.5dp 내려가는 동안 그림자가 1.3배로 커진다(원본과 같은 박자).
      */
     private fun drawShark(
-        ctx: Context, c: Canvas, k: Float, ox: Float, oy: Float, now: Long, p: Palette,
+        ctx: Context, c: Canvas, k: Float, ox: Float, oy: Float, now: Long,
+        p: Palette, locked: Boolean,
     ) {
         val t = swing(now)  // 0 → 1 → 0
 
@@ -135,7 +140,7 @@ object WallpaperArt {
             Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkShadow },
         )
 
-        val bmp = sharkArt(ctx)
+        val bmp = sharkArt(ctx, locked)
         val bw = SHARK_W * k
         val bh = bw * bmp.height / bmp.width
         val cx = ox + SHARK_CX * k
@@ -217,21 +222,17 @@ object WallpaperArt {
     )
 
     // 상어 비트맵과 물들이기 필터는 한 번만 만든다 (16fps 로 계속 다시 그린다)
-    private var art: Bitmap? = null
-    private var artOf = 0
+    private val sharks = HashMap<Int, Bitmap>()
     private var tinted: PorterDuffColorFilter? = null
     private var tintOf = 0
 
     /**
-     * 입 다문 얼굴이 기본이다 — 폰 원본이 그랬고, 잇몸도 살짝 핑크다
-     * (`art/paint_gums.py` 로 칠해 넣었다). 입 벌린 쪽은 꾸미기에서 고를 수 있다.
+     * **잠겨 있으면 입을 다물고, 풀면 벌린다.** 폰 원본 테마의 다문 얼굴이 잠금화면 쪽이고,
+     * 잇몸이 살짝 핑크다(`android/art/paint_gums.py` 로 칠해 넣었다).
      */
-    private fun sharkArt(ctx: Context): Bitmap {
-        val id = if (Look.mouth(ctx) == Look.OPEN) R.drawable.shark_open else R.drawable.shark
-        val cached = art
-        if (cached != null && artOf == id) return cached
-        artOf = id
-        return BitmapFactory.decodeResource(ctx.resources, id).also { art = it }
+    private fun sharkArt(ctx: Context, locked: Boolean): Bitmap {
+        val id = if (locked) R.drawable.shark else R.drawable.shark_open
+        return sharks.getOrPut(id) { BitmapFactory.decodeResource(ctx.resources, id) }
     }
 
     /** 어둡게에서는 곱하기로 상어를 깊은 바다색까지 내린다. 흰색이면 원본 그대로. */
@@ -249,13 +250,13 @@ object WallpaperArt {
      * 미터기 판이 놓이는 자리. **화면 밖으로 못 나간다** — 끌다가 넘겨도 여기서 잡는다.
      * (끌기는 언제나 이 '이미 잡힌 자리'에서 시작하므로 되돌릴 때 먹통 구간이 안 생긴다)
      */
-    fun meterRect(ctx: Context, w: Float, h: Float): RectF {
+    fun meterRect(w: Float, h: Float, look: Look.Values): RectF {
         val pad = w * 0.03f
         // 글자 크기도 판 너비에서 나오므로, 판이 화면을 넘으면 글자가 통째로 잘린다
-        val u = min(w * BLOCK_W * Look.meterSize(ctx), w - pad * 2f)
-        val bh = blockHeight(Look.meter(ctx), u)
-        val cx = pin(Look.meterX(ctx) * w, pad + u / 2f, w - pad - u / 2f)
-        val cy = pin(Look.meterY(ctx) * h, pad + bh / 2f, h - pad - bh / 2f)
+        val u = min(w * BLOCK_W * look.meterSize, w - pad * 2f)
+        val bh = blockHeight(look.meter, u)
+        val cx = pin(look.meterX * w, pad + u / 2f, w - pad - u / 2f)
+        val cy = pin(look.meterY * h, pad + bh / 2f, h - pad - bh / 2f)
         return RectF(cx - u / 2f, cy - bh / 2f, cx + u / 2f, cy + bh / 2f)
     }
 
@@ -271,13 +272,13 @@ object WallpaperArt {
     }
 
     private fun drawMeter(
-        ctx: Context, c: Canvas, w: Float, h: Float, snap: Snapshot, now: Long, p: Palette,
+        ctx: Context, c: Canvas, w: Float, h: Float, snap: Snapshot, now: Long,
+        p: Palette, look: Look.Values,
     ) {
-        val style = Look.meter(ctx)
-        if (style == Look.NONE) return
-        val r = meterRect(ctx, w, h)
+        if (look.meter == Look.NONE) return
+        val r = meterRect(w, h, look)
 
-        if (Look.plate(ctx)) {
+        if (look.plateOn) {
             // 판은 글자 둘레로 좀 더 넓게. 미터기를 모서리까지 끌어도 화면 밖으로는 안 나간다
             val pad = r.width() * 0.055f
             val plate = RectF(
@@ -292,14 +293,14 @@ object WallpaperArt {
             )
         }
 
-        when (style) {
+        when (look.meter) {
             Look.RINGS -> drawRings(c, r, snap, now, p)
             Look.NUMBERS -> drawNumbers(c, r, snap, now, p)
             else -> drawBars(c, r, snap, now, p)
         }
     }
 
-    /** 막대 두 줄 — 꾸미기 전과 같은 모양. `[5시간] [47%] ... [2시간 07분 남음]` */
+    /** 막대 두 줄. `[5시간] [47%] [━━게이지━━] [2시간 07분 후]` */
     private fun drawBars(c: Canvas, r: RectF, snap: Snapshot, now: Long, p: Palette) {
         val u = r.width()
         c.drawText("클로드 쿨다운", r.left, r.top + u * 0.045f, paint(u * 0.040f, p.faint, REGULAR))
@@ -370,36 +371,31 @@ object WallpaperArt {
     // ---------------------------------------------------------------- 끌어서 옮기기
 
     /** 손가락이 미터기 판을 짚었는가. 아니면 배경을 끄는 것으로 본다. */
-    fun hitsMeter(ctx: Context, w: Float, h: Float, x: Float, y: Float): Boolean {
-        if (Look.meter(ctx) == Look.NONE) return false
-        val r = meterRect(ctx, w, h)
+    fun hitsMeter(w: Float, h: Float, look: Look.Values, x: Float, y: Float): Boolean {
+        if (look.meter == Look.NONE) return false
+        val r = meterRect(w, h, look)
         val grab = r.width() * 0.06f
         return x >= r.left - grab && x <= r.right + grab &&
             y >= r.top - grab && y <= r.bottom + grab
     }
 
-    /** 미터기 판을 끈 만큼 옮긴다. 자리 계산은 `meterRect` 한 곳에만 있다. */
-    fun dragMeter(ctx: Context, w: Float, h: Float, dx: Float, dy: Float) {
-        val r = meterRect(ctx, w, h)
-        Look.setMeterPos(ctx, (r.centerX() + dx) / w, (r.centerY() + dy) / h)
+    /** 미터기 판을 끈 만큼 옮긴 값. 자리 계산은 `meterRect` 한 곳에만 있다. */
+    fun dragMeter(w: Float, h: Float, look: Look.Values, dx: Float, dy: Float): Look.Values {
+        val r = meterRect(w, h, look)
+        return look.withMeterPos((r.centerX() + dx) / w, (r.centerY() + dy) / h)
     }
 
-    /** 배경을 끈 만큼 옮긴다 — 상어면 상어가, 사진이면 잘려 나간 쪽이 따라온다. */
-    fun dragArt(ctx: Context, w: Float, h: Float, dx: Float, dy: Float) {
-        when (Look.scene(ctx)) {
-            Look.SEA -> Look.setArtPos(ctx, Look.artX(ctx) + dx / w, Look.artY(ctx) + dy / h)
-            Look.PHOTO -> {
-                val bmp = photoFor(ctx, w.toInt(), h.toInt()) ?: return
-                val r = photoRect(ctx, bmp, w, h)
-                val overW = r.width() - w
-                val overH = r.height() - h
-                Look.setArtPos(
-                    ctx,
-                    if (overW > 1f) -(r.left + dx) / overW else Look.artX(ctx),
-                    if (overH > 1f) -(r.top + dy) / overH else Look.artY(ctx),
-                )
-            }
-        }
+    /** 배경을 끈 만큼 옮긴 값 — 상어면 상어가, 사진이면 잘려 나간 쪽이 따라온다. */
+    fun dragBg(ctx: Context, w: Float, h: Float, look: Look.Values, dx: Float, dy: Float): Look.Values {
+        if (look.scene != Look.PHOTO) return look.withBg(look.bgX + dx / w, look.bgY + dy / h)
+        val bmp = photoFor(ctx, look.photo) ?: return look
+        val r = photoRect(bmp, w, h, look)
+        val overW = r.width() - w
+        val overH = r.height() - h
+        return look.withBg(
+            if (overW > 1f) -(r.left + dx) / overW else look.bgX,
+            if (overH > 1f) -(r.top + dy) / overH else look.bgY,
+        )
     }
 
     // ---------------------------------------------------------------- 사진 읽기
@@ -408,16 +404,19 @@ object WallpaperArt {
     private var photo: Bitmap? = null
 
     /**
-     * 고른 사진. **키가 같으면 다시 안 읽는다** — 16fps 로 다시 그리는 화면이라
-     * 매 프레임 디코딩하면 폰이 뜨거워진다. 못 읽었으면 null 을 캐시해 되묻지 않는다.
+     * 고른 사진. **주소가 같으면 다시 안 읽는다** — 16fps 로 다시 그리는 화면이라
+     * 매 프레임 디코딩하면 폰이 뜨거워진다.
+     *
+     * ★ 캐시 키에 **캔버스 크기를 넣지 말 것.** 색을 재려고 96×211 로 작게 한 번 그리는
+     *   길(`onComputeColors`)이 있어서, 크기를 키로 쓰면 그릴 때마다 큰 사진을 다시 읽는다.
+     *   크기는 화면 해상도로 한 번만 정하고, 캔버스가 작으면 그릴 때 줄이면 그만이다.
      */
-    private fun photoFor(ctx: Context, w: Int, h: Int): Bitmap? {
-        val uri = Look.photo(ctx)
+    private fun photoFor(ctx: Context, uri: String): Bitmap? {
         if (uri.isEmpty()) return null
-        val key = "$uri@${w}x$h"
-        if (key == photoKey) return photo
-        photoKey = key
-        photo = decodePhoto(ctx, uri, w, h)
+        if (uri == photoKey && photo != null) return photo
+        val dm = ctx.resources.displayMetrics
+        photoKey = uri
+        photo = decodePhoto(ctx, uri, dm.widthPixels, dm.heightPixels)
         return photo
     }
 
@@ -430,7 +429,7 @@ object WallpaperArt {
         }
         ctx.contentResolver.openInputStream(target).use { BitmapFactory.decodeStream(it, null, opts) }
     } catch (e: Exception) {
-        null   // 지운 사진·권한 만료 — 바다로 내려간다
+        null   // 지운 사진·권한 만료 — 상어 바다로 내려간다
     } catch (e: OutOfMemoryError) {
         null   // 배경화면이 통째로 죽느니 바다를 보여 준다
     }
@@ -448,7 +447,7 @@ object WallpaperArt {
         return s
     }
 
-    /** 꾸미기 화면에서 사진을 바꾸면 캐시를 버린다(주소가 같아도 내용이 다를 수 있다). */
+    /** 사진을 바꾸면 캐시를 버린다(주소가 같아도 내용이 다를 수 있다). */
     fun forgetPhoto() {
         photoKey = ""
         photo = null
