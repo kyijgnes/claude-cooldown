@@ -43,6 +43,13 @@ object WallpaperGrab {
         }
     }
 
+    /**
+     * `getDrawable()` 은 문서상 `MANAGE_EXTERNAL_STORAGE`/`READ_WALLPAPER_INTERNAL` 을 요구한다고
+     * 표시돼 있지만 **보통 앱도 홈 배경화면은 읽힌다**(S20 Ultra / Android 13 실측 — 실제로
+     * 폰에 걸려 있던 사진을 그대로 떠 왔다). 못 읽는 기기에서는 SecurityException 이 날 뿐이고
+     * 아래에서 잡아 null 로 내려가므로, 권한을 새로 달라고 하지 않는다.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
     private fun current(ctx: Context): Bitmap? = try {
         val wm = WallpaperManager.getInstance(ctx)
         // 우리 라이브 배경화면이 이미 걸려 있으면 떠 봐야 우리 그림이다

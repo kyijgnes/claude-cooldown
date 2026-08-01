@@ -101,8 +101,10 @@ class CooldownWallpaperService : WallpaperService() {
                     }
                 }
             }
-            // 잠금이 풀리면 그림이 통째로 바뀔 수 있다(상어 얼굴) — 색도 다시 재게 한다
-            if (wasLocked != locked) {
+            // 잠금이 풀리면 그림이 통째로 바뀔 수 있다(상어 얼굴) — 색도 다시 재게 한다.
+            // ★ notifyColorsChanged 는 API 27 부터다(minSdk 26). 안 막으면 26 에서 죽는다 —
+            //   NoSuchMethodError 는 Error 라 아래 catch(Exception) 에 안 걸린다.
+            if (wasLocked != locked && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 wasLocked = locked
                 try {
                     notifyColorsChanged()
