@@ -93,10 +93,16 @@ class CustomizeActivity : Activity() {
         paint()
     }
 
+    /**
+     * 저장 버튼 **글씨가 곧 상태**다.
+     * ★ 아직 배경화면으로 안 걸었으면 손댄 게 없어도 눌러야 한다 — `저장됨`으로 잠가 두면
+     *   기본 모양이 마음에 든 사람은 **배경화면을 걸 길이 없다**(실제로 막혔던 자리).
+     */
     private fun syncSave() {
         val dirty = draft != saved
-        save.text = if (dirty) "저장" else "저장됨"
-        save.isEnabled = dirty
+        val hung = WallpaperManager.getInstance(this).wallpaperInfo?.packageName == packageName
+        save.text = if (!hung) "배경화면으로 걸기" else if (dirty) "저장" else "저장됨"
+        save.isEnabled = !hung || dirty
     }
 
     private fun apply() {

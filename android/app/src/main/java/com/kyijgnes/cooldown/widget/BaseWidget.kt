@@ -43,9 +43,19 @@ abstract class BaseWidget : AppWidgetProvider() {
     fun draw(ctx: Context, mgr: AppWidgetManager, id: Int) {
         val (wDp, hDp) = sizeDp(mgr, id)
         val density = ctx.resources.displayMetrics.density
-        // RemoteViews 로 넘기는 비트맵은 크면 잘려 나간다 — 넉넉하되 상한을 둔다
-        val wPx = (wDp * density).toInt().coerceIn(72, 1440)
-        val hPx = (hDp * density).toInt().coerceIn(72, 720)
+        var wPx = (wDp * density).toInt().coerceIn(72, 1440)
+        var hPx = (hDp * density).toInt().coerceIn(72, 720)
+
+        // ★★ **그림이 크면 위젯이 통째로 빈 칸이 된다.** RemoteViews 로 넘길 수 있는 양이
+        //   1MB 남짓이라, 4×1 을 4×2 로 늘리면(가로 960 × 세로 450 = 1.7MB) `updateAppWidget`
+        //   이 거부당한다 — 예전엔 그 예외를 조용히 삼켜서 **미터기가 사라진 것처럼** 보였다.
+        //   그래서 넓이×높이 총량을 먼저 줄인다. 비율은 그대로라 `fitCenter` 로 다시 커진다.
+        val over = wPx.toLong() * hPx / MAX_PIXELS.toDouble()
+        if (over > 1.0) {
+            val k = kotlin.math.sqrt(over)
+            wPx = (wPx / k).toInt().coerceAtLeast(72)
+            hPx = (hPx / k).toInt().coerceAtLeast(72)
+        }
 
         val now = System.currentTimeMillis()
         val snap = Store.snapshot(ctx).settled(now)
@@ -55,7 +65,8 @@ abstract class BaseWidget : AppWidgetProvider() {
         try {
             mgr.updateAppWidget(id, views)
         } catch (e: Exception) {
-            // 그림이 너무 커서 거부당한 경우 — 다음 갱신 때 더 작은 칸으로 다시 온다
+            // 그래도 거부당하면 까닭을 남긴다 — 조용히 삼키면 '미터기가 없어졌다'로만 보인다
+            android.util.Log.w(TAG, "위젯 그림을 못 넘겼다 (${wPx}x$hPx): $e")
         }
     }
 
@@ -71,6 +82,13 @@ abstract class BaseWidget : AppWidgetProvider() {
             if (w > 0) w else fallbackDp.first,
             if (h > 0) h else fallbackDp.second,
         )
+    }
+
+    private companion object {
+        const val TAG = "cooldown-widget"
+
+        /** 한 장에 담을 수 있는 점 수. ARGB 4바이트라 230,000 점 ≒ 900KB (한계는 1MB 남짓). */
+        const val MAX_PIXELS = 230_000
     }
 
     private fun openApp(ctx: Context): PendingIntent = PendingIntent.getActivity(

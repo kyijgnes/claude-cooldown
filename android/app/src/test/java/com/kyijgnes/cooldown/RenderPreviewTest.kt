@@ -173,6 +173,28 @@ class RenderPreviewTest {
         controller.pause().destroy()
     }
 
+    /**
+     * ★ **위젯 그림은 1MB 를 넘으면 안 된다** — RemoteViews 로 못 넘겨 위젯이 통째로
+     * 빈 칸이 된다(4×1 을 4×2 로 늘렸을 때 실제로 미터기가 사라졌다).
+     * 4×2·5×3 처럼 큰 칸에서도 총량이 줄어드는지 여기서 지킨다.
+     */
+    @Test
+    fun `위젯 그림이 넘길 수 있는 크기를 안 넘는다`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val limit = 1_000_000  // RemoteViews 한 번에 넘길 수 있는 양 (바이트)
+        for ((wDp, hDp) in listOf(320 to 70, 320 to 150, 320 to 300, 400 to 400)) {
+            val w = (wDp * 3f).toInt()   // xxhdpi 기준
+            val h = (hDp * 3f).toInt()
+            val k = kotlin.math.sqrt(w.toLong() * h / 230_000.0).coerceAtLeast(1.0)
+            val bmp = GaugeRenderer.wide(
+                ctx, (w / k).toInt(),
+                minOf((h / k).toInt(), ((w / k) * 0.30f).toInt()).coerceAtLeast(60),
+                snap(37f, 62f), now, card = false,
+            )
+            assert(bmp.byteCount < limit) { "${wDp}x$hDp → ${bmp.byteCount} 바이트" }
+        }
+    }
+
     @Test
     fun `초기화 시각이 지나면 0퍼센트로 본다`() {
         val past = Limit("5시간", 47f, now - 1_000L)

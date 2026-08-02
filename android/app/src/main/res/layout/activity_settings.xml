@@ -107,20 +107,30 @@
             android:textColor="@color/title"
             android:textSize="15sp" />
 
+        <!-- 어디에 넣을지 두 갈래. 예전엔 '배경화면으로 설정'과 '배경화면 꾸미기'가 따로 있어
+             둘이 뭐가 다른지 알 수 없었다 — 배경화면 쪽은 꾸미기 화면 하나로 합쳤다. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="어디에 넣을지"
+            android:textColor="@color/label"
+            android:textSize="13sp" />
+
         <Button
             android:id="@+id/wallpaper"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="배경화면으로 설정"
+            android:layout_marginTop="10dp"
+            android:text="배경화면에 넣기"
             android:textColor="@color/title" />
 
         <Button
-            android:id="@+id/customize"
+            android:id="@+id/widget"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="배경화면 꾸미기"
+            android:text="홈 화면에 위젯 넣기"
             android:textColor="@color/title" />
     </LinearLayout>
 </ScrollView>

@@ -2,7 +2,7 @@ package com.kyijgnes.cooldown
 
 import android.Manifest
 import android.app.Activity
-import android.app.WallpaperManager
+import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -18,7 +18,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.kyijgnes.cooldown.notify.NotifyController
-import com.kyijgnes.cooldown.wallpaper.CooldownWallpaperService
+import com.kyijgnes.cooldown.widget.WideWidget
 
 /**
  * 옵션 — PC 연결과 표시 설정. 홈은 지금 값만 보여 주고, 손댈 것은 전부 여기 있다.
@@ -44,10 +44,11 @@ class SettingsActivity : Activity() {
 
         findViewById<Button>(R.id.scan).setOnClickListener { scan() }
         findViewById<Button>(R.id.save).setOnClickListener { save() }
-        findViewById<Button>(R.id.wallpaper).setOnClickListener { pickWallpaper() }
-        findViewById<Button>(R.id.customize).setOnClickListener {
+        // 배경화면은 꾸미기 화면 하나로 간다 — 거기서 모양을 보고 저장하면 그때 실제로 걸린다
+        findViewById<Button>(R.id.wallpaper).setOnClickListener {
             startActivity(Intent(this, CustomizeActivity::class.java))
         }
+        findViewById<Button>(R.id.widget).setOnClickListener { pinWidget() }
 
         notify.setOnCheckedChangeListener { _: CompoundButton, on: Boolean ->
             Store.setNotifyOn(this, on)
@@ -108,17 +109,20 @@ class SettingsActivity : Activity() {
         Thread { Refresher.refresh(this) }.start()
     }
 
-    // ---------------------------------------------------------------- 배경화면
+    // ---------------------------------------------------------------- 위젯 넣기
 
-    private fun pickWallpaper() {
-        val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).putExtra(
-            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-            ComponentName(this, CooldownWallpaperService::class.java),
-        )
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            toast("배경화면 설정을 열 수 없어요")
+    /**
+     * **홈 화면에 위젯을 바로 얹어 준다** — 런처가 '추가할까요?' 를 물어보는 화면을 띄운다.
+     * 홈 화면을 길게 눌러 위젯 목록에서 찾는 길을 안내 문구로 적는 대신 버튼 하나로 만든다.
+     * 넣어 주는 건 넓은 게이지(4×1). 작은 것은 위젯 목록에 그대로 있다.
+     */
+    private fun pinWidget() {
+        val mgr = getSystemService(AppWidgetManager::class.java)
+        val wide = ComponentName(this, WideWidget::class.java)
+        if (mgr != null && mgr.isRequestPinAppWidgetSupported) {
+            mgr.requestPinAppWidget(wide, null, null)
+        } else {
+            toast("이 런처는 바로 넣기를 지원하지 않아요")
         }
     }
 
