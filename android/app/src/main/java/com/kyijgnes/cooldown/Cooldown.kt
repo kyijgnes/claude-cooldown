@@ -51,6 +51,22 @@ data class Limit(val label: String, val pct: Float?, val resetAt: Long?) {
         return "$head$hm 초기화"
     }
 
+    /**
+     * '적정선' — 창이 흐른 만큼(0~100). 게이지에 눈금으로 긋는다. 채운 양이 이 눈금을
+     * 앞질렀으면 이대로면 초기화 전에 바닥난다는 뜻. 데스크탑 위젯(cooldown_core.pace/
+     * five_due)의 눈금과 같은 값이다.
+     *
+     * 판정(여유/빠름)은 내지 않는다 — 5시간 창은 앞쪽에 몰아 쓰는 게 정상이라 눈금만.
+     * 창이 없거나(초기화 시각 없음) 창 길이를 벗어난 값이면 null(눈금을 숨긴다).
+     */
+    fun dueFraction(now: Long, spanMs: Long): Float? {
+        val reset = resetAt ?: return null
+        if (pct == null) return null
+        val left = reset - now
+        if (left <= 0L || left > spanMs) return null
+        return ((spanMs - left).toFloat() / spanMs.toFloat() * 100f).coerceIn(0f, 100f)
+    }
+
     /** '2시간 07분 후' — 초 단위로 다시 그리는 배경화면에서만 쓴다. */
     fun leftText(now: Long): String {
         if (resetAt == null) return "사용 전"
@@ -74,6 +90,12 @@ data class Limit(val label: String, val pct: Float?, val resetAt: Long?) {
             c.set(Calendar.MILLISECOND, 0)
         }
         return Math.round((b.timeInMillis - a.timeInMillis) / 86_400_000.0).toLong()
+    }
+
+    companion object {
+        // 창 길이 — dueFraction(적정선) 계산에 쓴다. 데스크탑과 같다(정확히 5시간 / 7일).
+        const val FIVE_SPAN_MS = 5L * 60 * 60 * 1000
+        const val WEEK_SPAN_MS = 7L * 24 * 60 * 60 * 1000
     }
 }
 

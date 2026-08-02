@@ -327,6 +327,11 @@
 
 - **그리기는 `GaugeRenderer` 한 곳**이다. 홈 위젯·앱 화면·상태바 아이콘이 전부 이걸 쓰고,
   배경화면은 `wallpaper/WallpaperArt` 가 같은 조각(`drawBar`·`drawArc`)을 빌려 쓴다. 모양은 여기만 고친다.
+- **적정선 눈금(5시간·주간)** — `drawBar`/`drawArc` 는 `due: Float?`(0~100)를 받아 그 자리에 눈금을
+  긋는다(색은 최대 대비 `p.title` 고정, 데스크탑 위젯과 같은 그림). 값은 `Limit.dueFraction(now, spanMs)`
+  가 창이 흐른 비율로 계산하고, 창 길이는 `Limit.FIVE_SPAN_MS`/`WEEK_SPAN_MS`. 판정(여유/빠름)은
+  안 낸다(5시간은 몰아쓰기가 정상). 초기화 지난 창은 `settled` 로 `resetAt=null` → 눈금 숨김.
+  넣는 곳: `wide`(두 줄) · `small`(worst 링) · 배경화면 `drawBars`·`drawRings`. 상태바 아이콘엔 없다(숫자뿐).
 - **홈 위젯은 반투명이다**(`card = false`) — 배경화면이 그대로 비쳐 보이고 그 위에 미터기만
   뜬다. **배경화면을 못 읽는 요즘 폰에서 '내 배경 그대로 + 사용량'을 얻는 길**이 이것이다.
   ★ 아예 투명하게 두지는 않는다: 위젯 글자색은 폰 테마(밝게/어둡게)를 따르는데 **배경화면이

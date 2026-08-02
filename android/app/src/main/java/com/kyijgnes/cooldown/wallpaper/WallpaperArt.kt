@@ -191,7 +191,11 @@ object WallpaperArt {
             c.drawText(left, r.right - leftPt.measureText(left), pctBase, leftPt)
 
             val barTop = pctBase + u * 0.0366f
-            GaugeRenderer.drawBar(c, RectF(r.left, barTop, r.right, barTop + u * 0.0219f), limit.pct, p)
+            val span = if (i == 0) Limit.FIVE_SPAN_MS else Limit.WEEK_SPAN_MS
+            GaugeRenderer.drawBar(
+                c, RectF(r.left, barTop, r.right, barTop + u * 0.0219f), limit.pct, p,
+                limit.dueFraction(now, span),
+            )
         }
     }
 
@@ -203,7 +207,11 @@ object WallpaperArt {
 
         listOf(snap.five, snap.week).forEachIndexed { i, limit ->
             val cx = r.left + cell * (i + 0.5f)
-            GaugeRenderer.drawArc(c, RectF(cx - d / 2f, r.top, cx + d / 2f, r.top + d), limit.pct, p, d * 0.10f)
+            val span = if (i == 0) Limit.FIVE_SPAN_MS else Limit.WEEK_SPAN_MS
+            GaugeRenderer.drawArc(
+                c, RectF(cx - d / 2f, r.top, cx + d / 2f, r.top + d), limit.pct, p, d * 0.10f,
+                limit.dueFraction(now, span),
+            )
 
             val numPt = paint(d * 0.30f, if (limit.pct == null) p.faint else p.title, MEDIUM)
             center(c, limit.pctText(), cx, r.top + d * 0.52f, numPt)

@@ -54,21 +54,37 @@ object GaugeRenderer {
 
     // ---------------------------------------------------------------- 조각
 
-    /** 둥근 막대 게이지. 100% 가 아니면 끝을 살짝 남긴다. */
-    fun drawBar(c: Canvas, r: RectF, pct: Float?, p: Palette) {
+    /**
+     * 둥근 막대 게이지. 100% 가 아니면 끝을 살짝 남긴다.
+     * `due`(적정선, 0~100)를 주면 그 자리에 눈금을 긋는다 — 데스크탑 위젯과 같은 그림.
+     */
+    fun drawBar(c: Canvas, r: RectF, pct: Float?, p: Palette, due: Float? = null) {
         val radius = r.height() / 2f
         c.drawRoundRect(r, radius, radius, paint(0f, p.track, REGULAR))
-        if (pct == null || pct <= 0f) return
-        val full = r.width()
-        var w = full * (pct / 100f)
-        if (pct < 100f) w = w.coerceAtMost(full - r.height() * 0.35f)
-        w = w.coerceAtLeast(r.height())  // 1% 도 보이게 최소한 동그라미 하나
-        val fill = RectF(r.left, r.top, r.left + w, r.bottom)
-        c.drawRoundRect(fill, radius, radius, paint(0f, p.tone(pct), REGULAR))
+        if (pct != null && pct > 0f) {
+            val full = r.width()
+            var w = full * (pct / 100f)
+            if (pct < 100f) w = w.coerceAtMost(full - r.height() * 0.35f)
+            w = w.coerceAtLeast(r.height())  // 1% 도 보이게 최소한 동그라미 하나
+            val fill = RectF(r.left, r.top, r.left + w, r.bottom)
+            c.drawRoundRect(fill, radius, radius, paint(0f, p.tone(pct), REGULAR))
+        }
+        if (due != null) {
+            // 눈금 색은 최대 대비(p.title) 로 고정 — 게이지 색(초록/노랑/빨강)을 쓰면
+            // 값처럼 보여 헷갈린다. 채운 색 위에서도 걸리게 위아래로 조금 삐져나온다.
+            val mw = (r.height() * 0.30f).coerceAtLeast(2f)
+            val over = r.height() * 0.5f
+            val hi = (r.right - mw).coerceAtLeast(r.left)  // 폭이 좁아도 coerceIn 이 안 터지게
+            val mx = (r.left + r.width() * (due.coerceIn(0f, 100f) / 100f)).coerceIn(r.left, hi)
+            c.drawRect(mx, r.top - over, mx + mw, r.bottom + over, paint(0f, p.title, REGULAR))
+        }
     }
 
-    /** 270도 열린 링 게이지 (작은 위젯·배경화면용). */
-    fun drawArc(c: Canvas, box: RectF, pct: Float?, p: Palette, thickness: Float) {
+    /**
+     * 270도 열린 링 게이지 (작은 위젯·배경화면용).
+     * `due`(적정선)를 주면 링을 가로질러 눈금을 긋는다.
+     */
+    fun drawArc(c: Canvas, box: RectF, pct: Float?, p: Palette, thickness: Float, due: Float? = null) {
         val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = thickness
@@ -78,10 +94,28 @@ object GaugeRenderer {
         val r = RectF(box.left + inset, box.top + inset, box.right - inset, box.bottom - inset)
         ring.color = p.track
         c.drawArc(r, 135f, 270f, false, ring)
-        if (pct == null || pct <= 0f) return
-        ring.color = p.tone(pct)
-        val sweep = (270f * (pct / 100f)).coerceAtMost(if (pct < 100f) 266f else 270f)
-        c.drawArc(r, 135f, sweep.coerceAtLeast(4f), false, ring)
+        if (pct != null && pct > 0f) {
+            ring.color = p.tone(pct)
+            val sweep = (270f * (pct / 100f)).coerceAtMost(if (pct < 100f) 266f else 270f)
+            c.drawArc(r, 135f, sweep.coerceAtLeast(4f), false, ring)
+        }
+        if (due != null) {
+            val ang = Math.toRadians((135f + 270f * (due.coerceIn(0f, 100f) / 100f)).toDouble())
+            val cx = r.centerX()
+            val cy = r.centerY()
+            val rad = r.width() / 2f
+            val r0 = rad - thickness / 2f - thickness * 0.4f
+            val r1 = rad + thickness / 2f + thickness * 0.4f
+            val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = (thickness * 0.34f).coerceAtLeast(2f)
+                color = p.title
+            }
+            c.drawLine(
+                cx + (r0 * Math.cos(ang)).toFloat(), cy + (r0 * Math.sin(ang)).toFloat(),
+                cx + (r1 * Math.cos(ang)).toFloat(), cy + (r1 * Math.sin(ang)).toFloat(), tick,
+            )
+        }
     }
 
     /** 가운데 정렬 글자. y 는 글자 상자의 세로 중심. */
@@ -139,8 +173,9 @@ object GaugeRenderer {
             val barW = w - pad - rightW - x
             if (barW > rh * 0.8f) {
                 val barH = rh * 0.22f
+                val span = if (i == 0) Limit.FIVE_SPAN_MS else Limit.WEEK_SPAN_MS
                 drawBar(c, RectF(x, cy - barH / 2f, x + barW - rh * 0.30f, cy + barH / 2f),
-                    limit.pct, p)
+                    limit.pct, p, limit.dueFraction(now, span))
             }
 
             val text = limit.whenText(now)
@@ -169,11 +204,13 @@ object GaugeRenderer {
         val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val limit = snap.worst()
+        val span = if (limit === snap.week) Limit.WEEK_SPAN_MS else Limit.FIVE_SPAN_MS
 
         plate(c, RectF(0f, 0f, s.toFloat(), s.toFloat()), s * 0.24f, p, card)
 
         val pad = s * 0.13f
-        drawArc(c, RectF(pad, pad, s - pad, s - pad), limit.pct, p, s * 0.075f)
+        drawArc(c, RectF(pad, pad, s - pad, s - pad), limit.pct, p, s * 0.075f,
+            limit.dueFraction(now, span))
 
         val glow = s * 0.055f
         val numPt = paint(s * 0.30f, if (limit.pct == null) p.faint else p.title, MEDIUM)
