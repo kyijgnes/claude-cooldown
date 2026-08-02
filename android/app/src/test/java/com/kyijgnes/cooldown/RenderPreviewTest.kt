@@ -55,15 +55,22 @@ class RenderPreviewTest {
     fun `위젯과 배경화면 그림을 남긴다`() {
         val ctx = RuntimeEnvironment.getApplication()
 
-        // 넓은 위젯 — 보통 / 최악(100%·긴 글자) / 값 없음
-        save(GaugeRenderer.wide(ctx, 1080, 300, snap(37f, 62f), now), "넓은위젯_보통.png")
-        save(GaugeRenderer.wide(ctx, 1080, 300, snap(100f, 100f), now), "넓은위젯_가득.png")
-        save(GaugeRenderer.wide(ctx, 1080, 300, snap(null, null), now), "넓은위젯_값없음.png")
-        save(GaugeRenderer.wide(ctx, 720, 260, snap(37f, 62f, stale = true), now), "넓은위젯_PC꺼짐.png")
+        // 넓은 위젯 — 보통 / 최악(100%·긴 글자) / 값 없음.
+        // ★ 홈 위젯은 **판 없이(card=false)** 배경화면 위에 바로 얹힌다 — 실제와 같게 그린다.
+        //   글자에 바탕색 후광이 둘러져 있는지 그림으로 확인할 것(어두운 배경화면 대비).
+        save(GaugeRenderer.wide(ctx, 1080, 300, snap(37f, 62f), now, card = false), "넓은위젯_보통.png")
+        save(GaugeRenderer.wide(ctx, 1080, 300, snap(100f, 100f), now, card = false), "넓은위젯_가득.png")
+        save(GaugeRenderer.wide(ctx, 1080, 300, snap(null, null), now, card = false), "넓은위젯_값없음.png")
+        save(
+            GaugeRenderer.wide(ctx, 720, 260, snap(37f, 62f, stale = true), now, card = false),
+            "넓은위젯_PC꺼짐.png",
+        )
+        // 앱 화면은 판을 깐 쪽을 쓴다
+        save(GaugeRenderer.wide(ctx, 1080, 300, snap(37f, 62f), now), "앱화면_게이지.png")
 
         // 작은 위젯
-        save(GaugeRenderer.small(ctx, 300, snap(37f, 62f), now), "작은위젯.png")
-        save(GaugeRenderer.small(ctx, 300, snap(93f, 12f), now), "작은위젯_임박.png")
+        save(GaugeRenderer.small(ctx, 300, snap(37f, 62f), now, card = false), "작은위젯.png")
+        save(GaugeRenderer.small(ctx, 300, snap(93f, 12f), now, card = false), "작은위젯_임박.png")
 
         // 상태바 아이콘 (실제로는 24dp 로 줄어든다)
         save(GaugeRenderer.statusIcon(7f), "상태바_7.png")

@@ -107,13 +107,6 @@
             android:textColor="@color/title"
             android:textSize="15sp" />
 
-        <TextView
-            android:id="@+id/notify_note"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/faint"
-            android:textSize="12sp" />
-
         <Button
             android:id="@+id/wallpaper"
             android:layout_width="match_parent"
@@ -129,13 +122,5 @@
             android:layout_marginTop="8dp"
             android:text="배경화면 꾸미기"
             android:textColor="@color/title" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="홈 위젯은 홈 화면 길게 누르기 → 위젯 → 클로드 쿨다운"
-            android:textColor="@color/faint"
-            android:textSize="12sp" />
     </LinearLayout>
 </ScrollView>

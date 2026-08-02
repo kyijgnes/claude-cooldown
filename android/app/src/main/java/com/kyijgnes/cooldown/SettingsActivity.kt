@@ -32,7 +32,6 @@ class SettingsActivity : Activity() {
     private lateinit var url: EditText
     private lateinit var key: EditText
     private lateinit var notify: Switch
-    private lateinit var notifyNote: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,7 +41,6 @@ class SettingsActivity : Activity() {
         url = findViewById(R.id.url)
         key = findViewById(R.id.key)
         notify = findViewById(R.id.notify)
-        notifyNote = findViewById(R.id.notify_note)
 
         findViewById<Button>(R.id.scan).setOnClickListener { scan() }
         findViewById<Button>(R.id.save).setOnClickListener { save() }
@@ -69,9 +67,6 @@ class SettingsActivity : Activity() {
         url.setText(Store.url(this))
         key.setText(Store.key(this))
         notify.isChecked = Store.notifyOn(this)
-        // 이 기기에서 실제로 어떻게 보이는지. 안드로이드 16 미만에서도 AOD 에 숫자가 뜬다
-        notifyNote.text =
-            if (NotifyController.canPromote(this)) "진행바로 크게" else "클로디 안에 숫자"
     }
 
     // ---------------------------------------------------------------- PC 연결

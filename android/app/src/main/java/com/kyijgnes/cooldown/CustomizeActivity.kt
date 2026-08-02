@@ -36,7 +36,6 @@ import com.kyijgnes.cooldown.wallpaper.WallpaperArt
 class CustomizeActivity : Activity() {
 
     private lateinit var preview: ImageView
-    private lateinit var hint: TextView
     private lateinit var controls: LinearLayout
     private lateinit var save: Button
 
@@ -57,7 +56,6 @@ class CustomizeActivity : Activity() {
         setContentView(R.layout.activity_customize)
 
         preview = findViewById(R.id.preview)
-        hint = findViewById(R.id.preview_hint)
         controls = findViewById(R.id.controls)
         save = findViewById(R.id.save)
 
@@ -197,16 +195,31 @@ class CustomizeActivity : Activity() {
         controls.removeAllViews()
         syncSave()
 
-        hint.text = if (draft.meter == Look.NONE && draft.scene != Look.SEA) "" else "끌어서 자리 옮기기"
+        // 배경 칸의 이름이 곧 지금 무엇을 쓰는지다 — 폰에서 떠 온 배경이면 '쓰던 배경',
+        // 직접 고른 사진이면 '내 사진'. 설명 문구를 따로 두지 않는다.
+        // ★ 떠 온 그림이 실제로 있을 때만 '쓰던 배경'이라고 적는다 — 안드로이드 13 부터는
+        //   다른 앱이 배경화면을 읽을 수 없어 못 떠 오는 폰이 많다(그땐 사진을 고르게 한다).
+        val grabbed = WallpaperGrab.saved(this)
+        val ownWallpaper = grabbed.isNotEmpty() && (draft.photo.isEmpty() || draft.photo == grabbed)
 
         section("배경")
-        chips(listOf("내 사진" to Look.PHOTO, "상어 바다" to Look.SEA), draft.scene) { pick ->
+        chips(
+            listOf((if (ownWallpaper) "쓰던 배경" else "내 사진") to Look.PHOTO, "상어" to Look.SEA),
+            draft.scene,
+        ) { pick ->
             change(draft.copy(scene = pick))
-            if (pick == Look.PHOTO && draft.photo.isEmpty()) pickPhoto()
+            // 보여 줄 그림이 아예 없으면 고르는 화면부터 띄운다 (안 그러면 상어가 그대로 남는다)
+            if (pick == Look.PHOTO && draft.photo.isEmpty() && grabbed.isEmpty()) pickPhoto()
         }
 
         if (draft.scene == Look.PHOTO) {
-            button(if (draft.photo.isEmpty()) "사진 고르기" else "다른 사진") { pickPhoto() }
+            button(if (ownWallpaper) "사진 고르기" else "다른 사진") { pickPhoto() }
+            if (!ownWallpaper && grabbed.isNotEmpty()) {
+                button("쓰던 배경으로") {
+                    WallpaperArt.forgetPhoto()
+                    change(draft.copy(photo = grabbed, photoX = 0.5f, photoY = 0.5f))
+                }
+            }
         }
 
         if (draft.scene == Look.SEA) {

@@ -32,20 +32,11 @@
             android:layout_marginTop="16dp"
             android:contentDescription="@string/wallpaper_name" />
 
-        <TextView
-            android:id="@+id/preview_hint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center_horizontal"
-            android:textColor="@color/faint"
-            android:textSize="12sp" />
-
         <LinearLayout
             android:id="@+id/controls"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="12dp"
             android:orientation="vertical" />
 
         <!-- 글씨가 곧 상태다 — 손댄 게 있으면 '저장', 없으면 '저장됨'(누를 수 없음) -->

@@ -10,14 +10,15 @@ import android.content.Context
  *   자기 손 안의 `Values` 만 고치고(미리보기도 그걸로 그린다), `저장` 에서 한 번에 쓴다.
  *   낱개 setter 를 되살리지 말 것 — 그 순간 '저장 전'이 없어진다.
  *
- * 기본은 **내 사진 + 미터기**다. 상어 바다는 골라서 쓴다.
+ * 기본은 **쓰던 배경화면 + 미터기**다 — 사람마다 배경이 다르니 그걸 그대로 두고
+ * 미터기만 얹는다. 상어는 골라서 쓴다.
  */
 object Look {
     private const val FILE = "cooldown"
 
     // 배경 종류
-    const val PHOTO = "photo"   // 내 사진 (기본)
-    const val SEA = "sea"       // 상어 바다
+    const val PHOTO = "photo"   // 쓰던 배경화면, 또는 직접 고른 사진 (기본)
+    const val SEA = "sea"       // 상어
 
     // 미터기 모양
     const val BARS = "bars"       // 막대 두 줄
@@ -41,7 +42,7 @@ object Look {
      * @param seaX   상어 자리는 **상어 자신의 한가운데**다(물방울 판의 한가운데가 아니라).
      *               판 기준으로 잡으면 크게 키웠을 때 상어만 화면 밖으로 밀려난다.
      * @param photoX 사진 자리는 **잘려 나간 쪽을 어디까지 보여 줄지**(0~1). 상어와 따로 담는다 —
-     *               사진을 옮겨 놓고 상어 바다로 돌아왔을 때 상어까지 따라 움직이면 안 된다.
+     *               사진을 옮겨 놓고 상어로 돌아왔을 때 상어까지 따라 움직이면 안 된다.
      */
     data class Values(
         val scene: String = PHOTO,

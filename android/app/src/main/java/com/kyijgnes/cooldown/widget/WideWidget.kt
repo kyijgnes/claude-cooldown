@@ -10,5 +10,5 @@ class WideWidget : BaseWidget() {
     override val fallbackDp = Pair(250, 70)
 
     override fun render(ctx: Context, wPx: Int, hPx: Int, snap: Snapshot, now: Long): Bitmap =
-        GaugeRenderer.wide(ctx, wPx, hPx, snap, now)
+        GaugeRenderer.wide(ctx, wPx, hPx, snap, now, card = false)
 }

@@ -9,6 +9,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import com.kyijgnes.cooldown.wallpaper.WallpaperArt
 import com.kyijgnes.cooldown.work.RefreshWorker
 import com.kyijgnes.cooldown.work.ResetAlarm
 
@@ -118,14 +119,20 @@ class MainActivity : Activity() {
 
     /**
      * 기본 배경은 **쓰던 배경화면 + 미터기**다. 그러려면 우리 라이브 배경화면이 걸리기 전에
-     * 지금 배경화면을 한 장 떠 놔야 한다 — 걸린 뒤엔 '지금 배경화면'이 우리다.
-     * 못 떠 와도 그만이다(상어 바다로 내려간다).
+     * 지금 배경화면을 떠 놔야 한다 — 걸린 뒤엔 '지금 배경화면'이 우리다.
+     * 못 떠 와도 그만이다(상어로 내려간다).
+     *
+     * ★ **직접 고른 사진은 건드리지 않는다.** 떠 둔 배경화면을 쓰는 중일 때만 새 그림으로
+     *   바꿔 끼운다(주소는 그대로라 그림 캐시를 비워 줘야 새 배경이 보인다).
      */
     private fun seedWallpaper() {
-        if (Look.read(this).photo.isNotEmpty()) return
         Thread {
             val uri = WallpaperGrab.ensure(this)
-            if (uri.isNotEmpty()) Look.write(this, Look.read(this).copy(photo = uri))
+            if (uri.isEmpty()) return@Thread
+            val look = Look.read(this)
+            if (look.photo.isNotEmpty() && look.photo != uri) return@Thread   // 고른 사진
+            if (look.photo.isEmpty()) Look.write(this, look.copy(photo = uri))
+            WallpaperArt.forgetPhoto()
         }.start()
     }
 

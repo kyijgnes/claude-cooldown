@@ -10,5 +10,5 @@ class SmallWidget : BaseWidget() {
     override val fallbackDp = Pair(70, 70)
 
     override fun render(ctx: Context, wPx: Int, hPx: Int, snap: Snapshot, now: Long): Bitmap =
-        GaugeRenderer.small(ctx, minOf(wPx, hPx), snap, now)
+        GaugeRenderer.small(ctx, minOf(wPx, hPx), snap, now, card = false)
 }

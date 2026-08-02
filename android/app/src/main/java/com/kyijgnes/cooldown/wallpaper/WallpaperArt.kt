@@ -17,6 +17,7 @@ import com.kyijgnes.cooldown.Look
 import com.kyijgnes.cooldown.Palette
 import com.kyijgnes.cooldown.R
 import com.kyijgnes.cooldown.Snapshot
+import com.kyijgnes.cooldown.WallpaperGrab
 import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.min
@@ -26,7 +27,7 @@ import kotlin.math.sin
  * 배경화면 **그리기만** 한다 — 화면·수명 관리는 CooldownWallpaperService 가 맡는다.
  * (데스크탑에서 앱과 스킨을 나눈 것과 같은 결. 폰 없이 테스트로 그림을 뽑아 볼 수 있다)
  *
- * 두 겹이다: **배경**(내 사진 / 상어 바다)과 그 위에 뜨는 **미터기 판**.
+ * 두 겹이다: **배경**(쓰던 배경화면·고른 사진 / 상어)과 그 위에 뜨는 **미터기 판**.
  * 무엇을 어디에 그릴지는 `Look.Values` 로 받는다 — 이 파일은 설정을 직접 안 읽는다
  * (꾸미기 화면이 '저장 전' 값으로 미리보기를 그려야 하기 때문).
  *
@@ -101,12 +102,19 @@ object WallpaperArt {
         c.drawRect(0f, 0f, w, h, sea)
     }
 
-    /** 고른 사진을 화면에 꽉 차게. 못 읽으면 false — 부르는 쪽이 상어 바다로 내려간다. */
+    /** 고른 사진(또는 쓰던 배경화면)을 화면에 꽉 차게. 못 읽으면 false — 부르는 쪽이 상어로 내려간다. */
     private fun drawPhoto(ctx: Context, c: Canvas, w: Float, h: Float, look: Look.Values): Boolean {
-        val bmp = photoFor(ctx, look.photo) ?: return false
+        val bmp = photoFor(ctx, photoUri(ctx, look)) ?: return false
         c.drawBitmap(bmp, null, photoRect(bmp, w, h, look), Paint(Paint.FILTER_BITMAP_FLAG))
         return true
     }
+
+    /**
+     * 어떤 그림을 배경으로 쓸지 — **고른 사진이 없으면 폰에 걸려 있던 배경화면**을 쓴다.
+     * 아무것도 안 고른 사람에게 쓰던 배경 그대로 + 미터기가 보이는 게 기본이다.
+     */
+    private fun photoUri(ctx: Context, look: Look.Values): String =
+        look.photo.ifEmpty { WallpaperGrab.saved(ctx) }
 
     /** 짧은 쪽을 화면에 맞춰 꽉 채우고, 남는 쪽은 사용자가 끌어 둔 자리로 자른다. */
     private fun photoRect(bmp: Bitmap, w: Float, h: Float, look: Look.Values): RectF {
@@ -388,7 +396,7 @@ object WallpaperArt {
     /** 배경을 끈 만큼 옮긴 값 — 상어면 상어가, 사진이면 잘려 나간 쪽이 따라온다. */
     fun dragBg(ctx: Context, w: Float, h: Float, look: Look.Values, dx: Float, dy: Float): Look.Values {
         if (look.scene != Look.PHOTO) return look.withBg(look.bgX + dx / w, look.bgY + dy / h)
-        val bmp = photoFor(ctx, look.photo) ?: return look
+        val bmp = photoFor(ctx, photoUri(ctx, look)) ?: return look
         val r = photoRect(bmp, w, h, look)
         val overW = r.width() - w
         val overH = r.height() - h

@@ -29,6 +29,29 @@ object GaugeRenderer {
         typeface = face
     }
 
+    /**
+     * **판(카드) 없이 배경화면 위에 바로 얹을 때** 글자에 바탕색 후광을 두른다.
+     * 획 둘레가 글자와 반대 색으로 감싸여 어떤 배경화면 위에서도 읽힌다
+     * (배경이 무슨 그림인지 우리는 알 수 없으므로 색을 고를 수가 없다).
+     */
+    private fun Paint.halo(on: Boolean, p: Palette, radius: Float): Paint {
+        if (on) setShadowLayer(radius, 0f, 0f, (p.bg and 0xFFFFFF) or 0xE6000000.toInt())
+        return this
+    }
+
+    /**
+     * 뒷판. **홈 위젯은 반투명(`card=false`)** 이라 배경화면이 그대로 비쳐 보이고,
+     * 앱 화면은 꽉 찬 판을 쓴다.
+     *
+     * ★ 홈 위젯을 아예 투명하게 두지 않는 이유: 위젯 글자색은 폰 테마(밝게/어둡게)를
+     *   따르는데 **배경화면이 밝은지 어두운지는 알 길이 없다.** 밝은 테마 + 어두운
+     *   배경화면이면 글자가 통째로 안 보인다. 반투명 판이 그 경우를 막아 준다.
+     */
+    private fun plate(c: Canvas, r: RectF, radius: Float, p: Palette, card: Boolean) {
+        val color = if (card) p.bg else (p.bg and 0xFFFFFF) or 0xA6000000.toInt()
+        c.drawRoundRect(r, radius, radius, paint(0f, color, REGULAR))
+    }
+
     // ---------------------------------------------------------------- 조각
 
     /** 둥근 막대 게이지. 100% 가 아니면 끝을 살짝 남긴다. */
@@ -87,17 +110,14 @@ object GaugeRenderer {
         val c = Canvas(bmp)
 
         val pad = h * 0.10f
-        if (card) {
-            val radius = (h * 0.20f).coerceAtMost(48f)
-            c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), radius, radius,
-                paint(0f, p.bg, REGULAR))
-        }
+        plate(c, RectF(0f, 0f, w.toFloat(), h.toFloat()), (h * 0.20f).coerceAtMost(48f), p, card)
 
         val rows = listOf(snap.five, snap.week)
         val rh = (h - pad * 2) / rows.size
-        val labelPt = paint(rh * 0.30f, p.label, REGULAR)
-        val pctPt = paint(rh * 0.42f, p.title, MEDIUM)
-        val rightPt = paint(rh * 0.26f, p.faint, REGULAR)
+        val glow = rh * 0.13f
+        val labelPt = paint(rh * 0.30f, p.label, REGULAR).halo(!card, p, glow)
+        val pctPt = paint(rh * 0.42f, p.title, MEDIUM).halo(!card, p, glow)
+        val rightPt = paint(rh * 0.26f, p.faint, REGULAR).halo(!card, p, glow)
 
         // 칸 폭은 가장 긴 글자를 미리 재서 잡는다 — 값이 바뀌어도 게이지가 안 흔들린다
         val labelW = rows.maxOf { labelPt.measureText(it.label) } + rh * 0.30f
@@ -150,19 +170,17 @@ object GaugeRenderer {
         val c = Canvas(bmp)
         val limit = snap.worst()
 
-        if (card) {
-            val radius = s * 0.24f
-            c.drawRoundRect(RectF(0f, 0f, s.toFloat(), s.toFloat()), radius, radius,
-                paint(0f, p.bg, REGULAR))
-        }
+        plate(c, RectF(0f, 0f, s.toFloat(), s.toFloat()), s * 0.24f, p, card)
 
         val pad = s * 0.13f
         drawArc(c, RectF(pad, pad, s - pad, s - pad), limit.pct, p, s * 0.075f)
 
+        val glow = s * 0.055f
         val numPt = paint(s * 0.30f, if (limit.pct == null) p.faint else p.title, MEDIUM)
+            .halo(!card, p, glow)
         centerText(c, limit.pctText(), s / 2f, s * 0.46f, numPt)
 
-        val labelPt = paint(s * 0.14f, p.label, REGULAR)
+        val labelPt = paint(s * 0.14f, p.label, REGULAR).halo(!card, p, glow)
         centerText(c, limit.label, s / 2f, s * 0.70f, labelPt)
 
         drawStaleMark(c, s.toFloat(), pad, snap, p)
