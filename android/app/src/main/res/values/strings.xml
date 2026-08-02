@@ -5,5 +5,7 @@
     <string name="widget_wide">클로드 쿨다운 · 게이지</string>
     <string name="wallpaper_name">클로드 쿨다운</string>
     <string name="wallpaper_desc">5시간·주간 한도가 보이는 배경화면</string>
+    <!-- 위젯 고르는 화면에 이름 밑에 뜨는 한 줄. 배경화면 설명을 돌려 쓰면 위젯인데 "배경화면"이라고 적힌다 -->
+    <string name="widget_desc">5시간·주간 사용량</string>
     <string name="channel_name">사용량</string>
 </resources>

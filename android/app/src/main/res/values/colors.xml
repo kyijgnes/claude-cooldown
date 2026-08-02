@@ -14,6 +14,9 @@
     <color name="amber">#8a6100</color>
     <color name="red">#cf222e</color>
 
+    <!-- 홈 위젯 뒷판 — 반투명(65%)이라 배경화면이 비친다. GaugeRenderer.plate 와 같은 값 -->
+    <color name="widget_plate">#a6eaf2fb</color>
+
     <!-- 마스코트 액센트 — 상어 몸통색. 밝게/어둡게 양쪽에서 그대로 쓴다 -->
     <color name="coral">#7cb0dd</color>
 

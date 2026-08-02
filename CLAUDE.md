@@ -309,6 +309,15 @@
   밝은지 어두운지는 알 수가 없어서**, 밝은 테마 + 어두운 배경화면이면 글자가 통째로 사라진다.
   그래서 바탕색 판을 65% 알파로 깔고(`plate`), 글자에는 바탕색 후광(`halo`)까지 둘렀다.
   앱 화면은 그대로 꽉 찬 판(`card = true`)을 쓴다.
+- ★ **위젯 고르는 화면 그림은 따로 만든다** — `previewLayout` 에 실제 위젯 레이아웃
+  (`widget.xml`)을 걸면 **빈 칸으로 뜬다**(런타임에 그림을 넣는 빈 ImageView 라서. 실기 확인).
+  `layout/widget_preview_wide.xml`·`widget_preview_small.xml` 이 같은 모양을 보통 뷰로 흉내 낸다.
+  ★★ 이 판은 **런처가** 그리므로 **`RemoteViews` 가 아는 뷰만** 쓸 수 있다 —
+  여백용으로 `<View>` 를 넣었더니 고르는 화면에 `위젯을 로드할 수 없습니다` 가 떴다.
+  LinearLayout·FrameLayout·TextView·ImageView 로만 짤 것. 링 게이지는 각도를 박은
+  벡터(`drawable/preview_ring.xml`)다. 폰 없이 보기: `build.ps1 test` → `위젯미리보기_*.png`.
+- 위젯 설명(`android:description`)은 `widget_desc`(`5시간·주간 사용량`)다 —
+  배경화면 설명(`wallpaper_desc`)을 돌려 쓰면 위젯인데 '배경화면'이라고 적힌다.
 - 색은 `res/values/colors.xml`(밝게) + `values-night/`(어둡게) — 데스크탑 `skins/base.py`
   팔레트를 옮긴 것. 임계값 50/80 도 같다. **새 색은 두 벌 다 채울 것.**
 - **상어는 손그림이 아니라 그림 파일이다** — `drawable-nodpi/shark.png`(입 다문, 기본) ·

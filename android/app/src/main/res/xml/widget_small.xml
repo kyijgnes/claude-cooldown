@@ -5,9 +5,9 @@
     android:minHeight="70dp"
     android:targetCellWidth="1"
     android:targetCellHeight="1"
-    android:description="@string/wallpaper_desc"
+    android:description="@string/widget_desc"
     android:initialLayout="@layout/widget"
-    android:previewLayout="@layout/widget"
+    android:previewLayout="@layout/widget_preview_small"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="1800000"
     android:widgetCategory="home_screen|keyguard" />

@@ -12,6 +12,9 @@
     <color name="amber">#e3b341</color>
     <color name="red">#ff5c61</color>
 
+    <!-- 홈 위젯 뒷판 — 반투명(65%). GaugeRenderer.plate 와 같은 값 -->
+    <color name="widget_plate">#a60d1620</color>
+
     <color name="coral">#5f93c2</color>
 
     <!-- 상어 배경화면 팔레트 (깊은 바다 버전) -->

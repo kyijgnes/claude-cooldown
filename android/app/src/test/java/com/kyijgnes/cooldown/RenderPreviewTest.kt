@@ -123,6 +123,33 @@ class RenderPreviewTest {
     }
 
     /**
+     * **위젯 고르는 화면에 뜨는 그림**(`previewLayout`)을 폰 없이 본다.
+     * 실제 위젯 레이아웃은 런타임에 채우는 빈 ImageView 라 그대로 걸면 빈 칸이 된다 —
+     * 그래서 미리보기 전용 레이아웃을 따로 두고, 여기서 비어 보이지 않는지 확인한다.
+     */
+    @Test
+    @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+    fun `위젯 고르는 화면 그림을 남긴다`() {
+        for ((layout, w, h, name) in listOf(
+            Quad(R.layout.widget_preview_wide, 900, 240, "위젯미리보기_넓은"),
+            Quad(R.layout.widget_preview_small, 240, 240, "위젯미리보기_작은"),
+        )) {
+            val ctx = RuntimeEnvironment.getApplication()
+            val view = android.view.LayoutInflater.from(ctx).inflate(layout, null)
+            view.measure(
+                View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
+            )
+            view.layout(0, 0, w, h)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bmp))
+            save(bmp, "$name.png")
+        }
+    }
+
+    private data class Quad(val layout: Int, val w: Int, val h: Int, val name: String)
+
+    /**
      * 꾸미기 화면 자체도 폰 없이 본다 — 미리보기 판·선택지가 한 화면에 들어오는지.
      * 미리보기 크기가 화면 크기에서 나오므로 **진짜 폰 해상도(1080×2340)로 재야** 뜻이 있다.
      */

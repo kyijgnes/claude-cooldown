@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- **위젯 고르는 화면에만 뜨는 그림.** 실제 위젯(`widget.xml`)은 런타임에 그림 한 장을
+     받아 채우는 빈 ImageView 라, 그걸 previewLayout 으로 걸면 고르는 화면에서 **빈 칸**이
+     된다(실제로 그랬다). 그래서 같은 모양을 보통 뷰로 흉내 낸 판을 따로 둔다.
+
+     ★ 값은 예시(37% / 62%)로 박아 둔다 — 고르는 화면은 데이터를 안 물려 준다.
+     ★ 색은 실제 위젯과 같은 리소스를 써서 밝게/어둡게가 저절로 따라온다.
+     ★ 게이지는 '바탕 위에 채움' 두 겹이 아니라 **가중치로 나눈 두 칸**이다
+       (FrameLayout 으로는 비율을 못 준다).
+     ★★ **`RemoteViews` 가 아는 뷰만 쓸 수 있다** — 이 판은 우리 앱이 아니라 **런처가**
+       그린다. 여백 채우기로 `<View>`·`<Space>` 를 썼더니 고르는 화면에 위젯이 아예
+       `위젯을 로드할 수 없습니다` 로 떴다(실기 확인). LinearLayout·FrameLayout·TextView·
+       ImageView 정도만 쓸 것. -->
+
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_plate"
+    android:orientation="vertical"
+    android:paddingHorizontal="14dp"
+    android:paddingVertical="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="5시간"
+            android:textColor="@color/label"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="37%"
+            android:textColor="@color/title"
+            android:textSize="15sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="6dp"
+            android:layout_marginHorizontal="10dp"
+            android:layout_weight="1"
+            android:background="@drawable/preview_bar_track"
+            android:orientation="horizontal"
+            android:weightSum="100">
+
+            <ImageView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="37"
+                android:background="@drawable/preview_bar_green" />
+
+            <ImageView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="63"
+                android:importantForAccessibility="no" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="내일 01:47 초기화"
+            android:textColor="@color/faint"
+            android:textSize="9sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="주간"
+            android:textColor="@color/label"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="62%"
+            android:textColor="@color/title"
+            android:textSize="15sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="6dp"
+            android:layout_marginHorizontal="10dp"
+            android:layout_weight="1"
+            android:background="@drawable/preview_bar_track"
+            android:orientation="horizontal"
+            android:weightSum="100">
+
+            <ImageView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="62"
+                android:background="@drawable/preview_bar_amber" />
+
+            <ImageView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="38"
+                android:importantForAccessibility="no" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="8/6 11:00 초기화"
+            android:textColor="@color/faint"
+            android:textSize="9sp" />
+    </LinearLayout>
+</LinearLayout>
