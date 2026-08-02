@@ -1,5 +1,6 @@
 package com.kyijgnes.cooldown.wallpaper
 
+import android.app.KeyguardManager
 import android.app.WallpaperColors
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -111,6 +112,7 @@ class CooldownWallpaperService : WallpaperService() {
                 val now = System.currentTimeMillis()
                 WallpaperArt.render(
                     ctx, Canvas(bmp), Store.snapshot(ctx).settled(now), now, Look.read(ctx),
+                    null, locked(),
                 )   // 색만 재는 자리라 클로디는 안 그린다(상태가 두 배로 흐른다)
                 WallpaperColors.fromBitmap(bmp)
             } catch (e: Exception) {
@@ -118,7 +120,12 @@ class CooldownWallpaperService : WallpaperService() {
             }
         }
 
+        /** 잠금화면인가 — 상어가 입을 다물지 벌릴지가 여기서 갈린다. */
+        private fun locked(): Boolean =
+            getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true
+
         private fun drawFrame() {
+            val locked = locked()
             var canvas: Canvas? = null
             try {
                 canvas = surfaceHolder.lockCanvas()
@@ -128,7 +135,8 @@ class CooldownWallpaperService : WallpaperService() {
                     lastW = canvas.width.toFloat()
                     lastH = canvas.height.toFloat()
                     WallpaperArt.render(
-                        ctx, canvas, Store.snapshot(ctx).settled(now), now, Look.read(ctx), mascot,
+                        ctx, canvas, Store.snapshot(ctx).settled(now), now, Look.read(ctx),
+                        mascot, locked,
                     )
                 }
             } catch (e: Exception) {

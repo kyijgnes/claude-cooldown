@@ -24,6 +24,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.kyijgnes.cooldown.wallpaper.CooldownWallpaperService
+import com.kyijgnes.cooldown.wallpaper.SharkPack
 import com.kyijgnes.cooldown.wallpaper.WallpaperArt
 
 /**
@@ -115,7 +116,7 @@ class CustomizeActivity : Activity() {
     private fun apply() {
         // ★ **보여 줄 배경이 아예 없는 채로 걸지 않는다.** 그대로 걸면 쓰던 배경화면이
         //   밋밋한 바탕색으로 바뀌어 버린다 — 먼저 쓰던 배경화면을 가져오게 한다.
-        if (draft.photo.isEmpty() && WallpaperGrab.saved(this).isEmpty()) {
+        if (draft.scene != Look.SHARK && draft.photo.isEmpty() && WallpaperGrab.saved(this).isEmpty()) {
             takeWallpaper()
             return
         }
@@ -237,8 +238,7 @@ class CustomizeActivity : Activity() {
         controls.removeAllViews()
         syncSave()
 
-        // 배경은 사진 한 갈래다 — 폰에서 떠 온 배경을 쓰는 중이면 버튼이 `사진 고르기`,
-        // 직접 고른 사진을 쓰는 중이면 `다른 사진` + `쓰던 배경으로`. 설명 문구는 두지 않는다.
+        // 배경 = 쓰던 배경화면/고른 사진, 그리고 **상어 앱이 깔려 있으면 상어**도.
         // ★ **사진은 사용자가 고를 때만 바뀐다** — 우리가 임의로 바꾸지 않는다.
         val grabbed = WallpaperGrab.saved(this)
         val ownWallpaper = grabbed.isNotEmpty() && (draft.photo.isEmpty() || draft.photo == grabbed)
@@ -250,13 +250,26 @@ class CustomizeActivity : Activity() {
         }
 
         section("배경")
-        // 아직 못 떠 왔으면 그것부터 — 버튼 이름이 곧 하는 일이다(권한 화면으로 간다)
-        if (grabbed.isEmpty()) button("쓰던 배경화면 가져오기") { takeWallpaper() }
-        button(if (draft.photo.isEmpty() || ownWallpaper) "사진 고르기" else "다른 사진") { pickPhoto() }
-        if (!ownWallpaper && grabbed.isNotEmpty()) {
-            button("쓰던 배경으로") {
-                WallpaperArt.forgetPhoto()
-                change(draft.copy(photo = grabbed, photoX = 0.5f, photoY = 0.5f))
+        // 상어는 **상어 앱이 깔려 있을 때만** 뜬다 — 그림을 그 앱에서 읽어 오기 때문
+        val shark = SharkPack.installed(this)
+        if (shark) {
+            chips(listOf("쓰던 배경" to Look.PHOTO, "상어" to Look.SHARK), draft.scene) { pick ->
+                change(draft.copy(scene = pick))
+            }
+        }
+        if (draft.scene == Look.SHARK && shark) {
+            slider("상어 크기", draft.seaSize, Look.ART_MIN, Look.ART_MAX) {
+                change(draft.copy(seaSize = it.coerceIn(Look.ART_MIN, Look.ART_MAX)), rebuild = false)
+            }
+        } else {
+            // 아직 못 떠 왔으면 그것부터 — 버튼 이름이 곧 하는 일이다(권한 화면으로 간다)
+            if (grabbed.isEmpty()) button("쓰던 배경화면 가져오기") { takeWallpaper() }
+            button(if (draft.photo.isEmpty() || ownWallpaper) "사진 고르기" else "다른 사진") { pickPhoto() }
+            if (!ownWallpaper && grabbed.isNotEmpty()) {
+                button("쓰던 배경으로") {
+                    WallpaperArt.forgetPhoto()
+                    change(draft.copy(photo = grabbed, photoX = 0.5f, photoY = 0.5f))
+                }
             }
         }
 

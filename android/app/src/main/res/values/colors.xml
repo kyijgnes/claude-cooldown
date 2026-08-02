@@ -23,4 +23,7 @@
     <!-- 그림이 없을 때 쓰는 밋밋한 바탕 (밝게는 단색) -->
     <color name="sea_top">#bbd8f3</color>
     <color name="sea_bottom">#bbd8f3</color>
+    <color name="shark_tint">#ffffff</color>
+    <color name="bubble">#ffffff</color>
+    <color name="shark_shadow">#6e97bfdd</color>
 </resources>

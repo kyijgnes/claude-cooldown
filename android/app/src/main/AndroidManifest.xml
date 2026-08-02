@@ -17,6 +17,15 @@
     <!-- 배경화면 '해제' 로 쓰던 배경화면을 도로 걸기 위한 것 (설치할 때 자동으로 받는다) -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
 
+    <!-- 상어 앱(비공개)이 가진 그림을 읽기 위한 것. **같은 키로 서명된 앱만** 받는 권한이라
+         그 앱이 없으면 아무 일도 안 일어난다(상어 칸이 아예 안 뜬다). -->
+    <uses-permission android:name="com.kyijgnes.sharkwallpaper.READ_ART" />
+
+    <!-- 안드로이드 11+ 는 어떤 앱이 깔려 있는지 물어보려면 여기 적어야 보인다 -->
+    <queries>
+        <provider android:authorities="com.kyijgnes.sharkwallpaper.art" />
+    </queries>
+
     <!-- 라이브 배경화면을 쓸 수 있는 기기에서만 후보로 뜨게 (필수는 아님) -->
     <uses-feature
         android:name="android.software.live_wallpaper"

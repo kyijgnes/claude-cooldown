@@ -20,4 +20,7 @@
     <!-- 그림이 없을 때 쓰는 밋밋한 바탕 (어둡게는 위아래로 깊어진다) -->
     <color name="sea_top">#12283d</color>
     <color name="sea_bottom">#0a1826</color>
+    <color name="shark_tint">#7d93ad</color>
+    <color name="bubble">#bcd7f0</color>
+    <color name="shark_shadow">#5c040a12</color>
 </resources>
