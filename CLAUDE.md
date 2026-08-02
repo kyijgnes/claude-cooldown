@@ -633,6 +633,11 @@
 
 ## 하지 말 것
 
+- ★★ **릴리스 노트를 쓰지 말 것.** 릴리스에는 **제목(태그)과 받을 파일(exe·apk)만** 둔다 —
+  본문은 **비운다.** 변경 내용을 적지 말고, `gh release create/edit` 의 `--notes`·`-n`·
+  `--notes-file`·`--generate-notes` 를 쓰지 말 것. 워크플로도 마찬가지
+  (`.github/workflows/android.yml` 에 `body: ""` · `generate_release_notes: false` 로 박아 뒀다).
+  받는 사람이 볼 것은 파일이지 설명이 아니다. 설명이 필요하면 README 한 곳에만.
 - `.credentials.json` 내용이나 accessToken 을 서버로 보내지 말 것. 퍼센트만 전송.
 - **`android/keystore/` · `android/keystore.properties` 를 커밋하지 말 것.** 서명 키와 비밀번호다.
   `.gitignore` 에 있지만 `git add -f` 로 뚫지 말 것.
