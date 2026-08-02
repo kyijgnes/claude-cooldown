@@ -45,20 +45,14 @@ object WallpaperArt {
      */
     fun render(
         ctx: Context, c: Canvas, snap: Snapshot, now: Long,
-        look: Look.Values = Look.read(ctx), mascot: Mascot? = null, locked: Boolean = true,
+        look: Look.Values = Look.read(ctx), mascot: Mascot? = null,
     ) {
         val p = Palette(ctx)
         val w = c.width.toFloat()
         val h = c.height.toFloat()
 
-        // 배경 — 상어(별도 앱의 그림) → 사진 → 그것도 없으면 밋밋한 바다색
-        val shark = look.scene == Look.SHARK
-        if (shark) drawSea(c, w, h, p)
-        val drawn = when {
-            shark -> SharkPack.draw(ctx, c, w, h, now, locked, p, look.seaSize, look.seaX, look.seaY)
-            else -> drawPhoto(ctx, c, w, h, look)
-        }
-        if (!drawn && !shark) drawSea(c, w, h, p)
+        // 배경 — 사진(쓰던 배경화면·고른 사진) → 없으면 밋밋한 바탕색
+        if (!drawPhoto(ctx, c, w, h, look)) drawSea(c, w, h, p)
 
         drawMeter(ctx, c, w, h, snap, now, p, look)
 
@@ -91,9 +85,8 @@ object WallpaperArt {
         c.drawRect(0f, 0f, w, h, sea)
     }
 
-    /** 고른 사진(또는 쓰던 배경화면)을 화면에 꽉 차게. 못 읽으면 false — 부르는 쪽이 상어로 내려간다. */
+    /** 고른 사진(또는 쓰던 배경화면)을 화면에 꽉 차게. 못 읽으면 false — 부르는 쪽이 기본 바탕으로 내려간다. */
     private fun drawPhoto(ctx: Context, c: Canvas, w: Float, h: Float, look: Look.Values): Boolean {
-        if (look.scene == Look.SHARK) return false
         val bmp = photoFor(ctx, photoUri(ctx, look)) ?: return false
         c.drawBitmap(bmp, null, photoRect(bmp, w, h, look), Paint(Paint.FILTER_BITMAP_FLAG))
         return true
@@ -265,9 +258,8 @@ object WallpaperArt {
         return look.withMeterPos((r.centerX() + dx) / w, (r.centerY() + dy) / h)
     }
 
-    /** 배경을 끈 만큼 옮긴 값 — 상어면 상어가, 사진이면 잘려 나간 쪽이 따라온다. */
+    /** 배경을 끈 만큼 옮긴 값 — 사진에서 잘려 나간 쪽이 따라온다. */
     fun dragBg(ctx: Context, w: Float, h: Float, look: Look.Values, dx: Float, dy: Float): Look.Values {
-        if (look.scene == Look.SHARK) return look.withBg(look.bgX + dx / w, look.bgY + dy / h)
         val bmp = photoFor(ctx, photoUri(ctx, look)) ?: return look
         val r = photoRect(bmp, w, h, look)
         val overW = r.width() - w
@@ -325,7 +317,7 @@ object WallpaperArt {
         }
         ctx.contentResolver.openInputStream(target).use { BitmapFactory.decodeStream(it, null, opts) }
     } catch (e: Exception) {
-        null   // 지운 사진·권한 만료 — 상어 바다로 내려간다
+        null   // 지운 사진·권한 만료 — 기본 바탕으로 내려간다
     } catch (e: OutOfMemoryError) {
         null   // 배경화면이 통째로 죽느니 바다를 보여 준다
     }
