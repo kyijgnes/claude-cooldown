@@ -14,6 +14,9 @@
          한 장 떠 오는 것 말고는 아무 파일도 건드리지 않는다. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- 배경화면 '해제' 로 쓰던 배경화면을 도로 걸기 위한 것 (설치할 때 자동으로 받는다) -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
     <!-- 라이브 배경화면을 쓸 수 있는 기기에서만 후보로 뜨게 (필수는 아님) -->
     <uses-feature
         android:name="android.software.live_wallpaper"

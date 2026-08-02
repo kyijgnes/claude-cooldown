@@ -15,7 +15,7 @@
     <!-- 홈 위젯 뒷판 — 반투명(65%). GaugeRenderer.plate 와 같은 값 -->
     <color name="widget_plate">#a60d1620</color>
 
-    <color name="coral">#5f93c2</color>
+    <color name="coral">#d97757</color>
 
     <!-- 그림이 없을 때 쓰는 밋밋한 바탕 (어둡게는 위아래로 깊어진다) -->
     <color name="sea_top">#12283d</color>

@@ -44,7 +44,7 @@ class RenderPreviewTest {
         look: Look.Values = Look.DEFAULT, at: Long = now,
     ) {
         val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
-        WallpaperArt.render(ctx, Canvas(bmp), snap(37f, 62f), at, look)
+        WallpaperArt.render(ctx, Canvas(bmp), snap(37f, 62f), at, look, com.kyijgnes.cooldown.wallpaper.Mascot())
         save(bmp, "$name.png")
     }
 
@@ -75,8 +75,9 @@ class RenderPreviewTest {
         save(GaugeRenderer.statusIcon(100f), "상태바_100.png")
         save(GaugeRenderer.statusIcon(null), "상태바_값없음.png")
 
-        // 라이브 배경화면 (FHD+ 세로)
+        // 라이브 배경화면 (FHD+ 세로) — 클로디가 있는 판과 없는 판
         wallpaper(ctx, "배경화면")
+        wallpaper(ctx, "배경화면_클로디없음", look = Look.DEFAULT.copy(mascot = false))
 
         // 꾸미기 — 고를 수 있는 것들을 한 장씩 (CustomizeActivity 의 선택지와 같은 순서)
         wallpaper(ctx, "꾸미기_링", look = Look.DEFAULT.copy(meter = Look.RINGS))

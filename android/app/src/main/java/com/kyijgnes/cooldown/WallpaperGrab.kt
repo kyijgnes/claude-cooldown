@@ -22,6 +22,19 @@ object WallpaperGrab {
     private const val NAME = "phone_wallpaper.png"
     private const val TAG = "cooldown-wallpaper"
 
+    /** 떠 놓은 그림. 되돌리기(해제)가 이걸 다시 배경화면으로 건다. 없으면 null. */
+    fun bitmap(ctx: Context): android.graphics.Bitmap? {
+        val f = File(ctx.filesDir, NAME)
+        if (!f.exists() || f.length() == 0L) return null
+        return try {
+            android.graphics.BitmapFactory.decodeFile(f.absolutePath)
+        } catch (e: Exception) {
+            null
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+    }
+
     /** 떠 놓은 파일의 주소. 아직 없으면 빈 문자열. */
     fun saved(ctx: Context): String {
         val f = File(ctx.filesDir, NAME)

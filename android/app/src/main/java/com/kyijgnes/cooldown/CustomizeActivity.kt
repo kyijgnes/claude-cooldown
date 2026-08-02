@@ -47,12 +47,15 @@ class CustomizeActivity : Activity() {
     private var saved = Look.DEFAULT
 
     private var frame: Bitmap? = null
+    private val mascot = com.kyijgnes.cooldown.wallpaper.Mascot()
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = Runnable { paint() }
 
     private var lastX = 0f
     private var lastY = 0f
     private var movingMeter = false
+    private var movingMascot = false
+    private var moved = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,17 +101,16 @@ class CustomizeActivity : Activity() {
         paint()
     }
 
-    /**
-     * 저장 버튼 **글씨가 곧 상태**다.
-     * ★ 아직 배경화면으로 안 걸었으면 손댄 게 없어도 눌러야 한다 — `저장됨`으로 잠가 두면
-     *   기본 모양이 마음에 든 사람은 **배경화면을 걸 길이 없다**(실제로 막혔던 자리).
-     */
+    /** 저장 버튼 **글씨가 곧 상태**다 — 손댄 게 있으면 `저장`, 없으면 `저장됨`(못 누름). */
     private fun syncSave() {
         val dirty = draft != saved
-        val hung = WallpaperManager.getInstance(this).wallpaperInfo?.packageName == packageName
-        save.text = if (!hung) "배경화면으로 걸기" else if (dirty) "저장" else "저장됨"
-        save.isEnabled = !hung || dirty
+        save.text = if (dirty) "저장" else "저장됨"
+        save.isEnabled = dirty
     }
+
+    /** 지금 우리 배경화면이 걸려 있나. */
+    private fun hung(): Boolean =
+        WallpaperManager.getInstance(this).wallpaperInfo?.packageName == packageName
 
     private fun apply() {
         // ★ **보여 줄 배경이 아예 없는 채로 걸지 않는다.** 그대로 걸면 쓰던 배경화면이
@@ -121,10 +123,26 @@ class CustomizeActivity : Activity() {
         saved = draft
         syncSave()
         // 아직 배경화면으로 안 걸었으면 고르는 화면을 띄운다. 이미 걸려 있으면 그대로 반영된다.
-        if (WallpaperManager.getInstance(this).wallpaperInfo?.packageName == packageName) {
+        if (hung()) {
             Toast.makeText(this, "배경화면에 반영됐어요", Toast.LENGTH_SHORT).show()
         } else {
             pickWallpaper()
+        }
+    }
+
+    /**
+     * 해제 — **떠 둔 '쓰던 배경화면'을 다시 걸어 준다.**
+     * 라이브 배경화면을 '끄는' 길은 안드로이드에 없어서, 원래 쓰던 그림을 정적 배경으로
+     * 도로 거는 게 가장 가까운 되돌리기다. 떠 둔 게 없으면 시스템 기본으로 돌린다.
+     */
+    private fun unset() {
+        val wm = WallpaperManager.getInstance(this)
+        val saved = WallpaperGrab.bitmap(this)
+        try {
+            if (saved != null) wm.setBitmap(saved) else wm.clear()
+            Toast.makeText(this, "쓰던 배경화면으로 되돌렸어요", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "되돌리지 못했어요", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -160,13 +178,13 @@ class CustomizeActivity : Activity() {
     private fun paint() {
         val bmp = frame ?: return
         val now = System.currentTimeMillis()
-        WallpaperArt.render(this, Canvas(bmp), Store.snapshot(this).settled(now), now, draft)
+        WallpaperArt.render(this, Canvas(bmp), Store.snapshot(this).settled(now), now, draft, mascot)
         preview.invalidate()
         handler.removeCallbacks(ticker)
         handler.postDelayed(ticker, 60L)   // 배경화면과 같은 박자
     }
 
-    /** 미터기를 짚으면 미터기가, 그 밖을 짚으면 배경이 따라온다. */
+    /** 클로디를 짚으면 클로디가, 미터기를 짚으면 미터기가, 그 밖을 짚으면 배경이 따라온다. */
     private fun drag(ev: MotionEvent): Boolean {
         val bmp = frame ?: return false
         if (preview.width == 0) return false
@@ -179,21 +197,30 @@ class CustomizeActivity : Activity() {
             MotionEvent.ACTION_DOWN -> {
                 // 세로로 끌면 스크롤뷰가 채 가는 걸 막는다
                 preview.parent?.requestDisallowInterceptTouchEvent(true)
-                movingMeter = WallpaperArt.hitsMeter(w, h, draft, x, y)
+                movingMascot = WallpaperArt.hitsMascot(w, h, draft, mascot, x, y)
+                movingMeter = !movingMascot && WallpaperArt.hitsMeter(w, h, draft, x, y)
+                moved = false
             }
 
             MotionEvent.ACTION_MOVE -> {
                 val dx = x - lastX
                 val dy = y - lastY
+                if (dx * dx + dy * dy > 1f) moved = true
                 change(
-                    if (movingMeter) WallpaperArt.dragMeter(w, h, draft, dx, dy)
-                    else WallpaperArt.dragBg(this, w, h, draft, dx, dy),
+                    when {
+                        movingMascot -> draft.withMascotPos(x / w, y / h)
+                        movingMeter -> WallpaperArt.dragMeter(w, h, draft, dx, dy)
+                        else -> WallpaperArt.dragBg(this, w, h, draft, dx, dy)
+                    },
                     rebuild = false,
                 )
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // 끌지 않고 콕 눌렀으면 여기서도 클로디가 반응한다 (배경화면과 같게)
+                if (!moved && movingMascot) mascot.poke()
                 preview.parent?.requestDisallowInterceptTouchEvent(false)
+            }
         }
         lastX = x
         lastY = y
@@ -212,6 +239,12 @@ class CustomizeActivity : Activity() {
         val grabbed = WallpaperGrab.saved(this)
         val ownWallpaper = grabbed.isNotEmpty() && (draft.photo.isEmpty() || draft.photo == grabbed)
 
+        // 걸기/해제는 **토글 하나**다 — 켜면 배경화면이 되고, 끄면 쓰던 배경화면으로 되돌린다.
+        toggle("배경화면으로 쓰기", hung()) { on ->
+            if (on) apply() else unset()
+            buildControls()
+        }
+
         section("배경")
         // 아직 못 떠 왔으면 그것부터 — 버튼 이름이 곧 하는 일이다(권한 화면으로 간다)
         if (grabbed.isEmpty()) button("쓰던 배경화면 가져오기") { takeWallpaper() }
@@ -225,22 +258,17 @@ class CustomizeActivity : Activity() {
 
         section("미터기")
         chips(
-            listOf(
-                "막대" to Look.BARS, "링" to Look.RINGS,
-                "숫자만" to Look.NUMBERS, "없음" to Look.NONE,
-            ),
+            listOf("막대" to Look.BARS, "링" to Look.RINGS, "숫자만" to Look.NUMBERS),
             draft.meter,
         ) { pick -> change(draft.copy(meter = pick)) }
 
-        if (draft.meter != Look.NONE) {
-            slider("미터기 크기", draft.meterSize, Look.METER_MIN, Look.METER_MAX) {
-                change(
-                    draft.copy(meterSize = it.coerceIn(Look.METER_MIN, Look.METER_MAX)),
-                    rebuild = false,
-                )
-            }
-            toggle("글씨 뒤 판", draft.plateOn) { change(draft.withPlate(it), rebuild = false) }
+        slider("미터기 크기", draft.meterSize, Look.METER_MIN, Look.METER_MAX) {
+            change(draft.copy(meterSize = it.coerceIn(Look.METER_MIN, Look.METER_MAX)), rebuild = false)
         }
+        toggle("글씨 뒤 판", draft.plateOn) { change(draft.withPlate(it), rebuild = false) }
+
+        section("클로디")
+        toggle("배경화면에 클로디", draft.mascot) { change(draft.copy(mascot = it)) }
     }
 
     private fun section(title: String) {

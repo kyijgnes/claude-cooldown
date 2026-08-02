@@ -38,10 +38,14 @@ object WallpaperArt {
     // ── 미터기 판 (모든 값이 판 너비 u 의 비율. 크기를 키워도 구도가 안 무너진다) ──
     private const val BLOCK_W = 0.82f        // 판 너비 ÷ 화면 너비 (크기 1.0 일 때)
 
-    /** @param look 지금 그릴 값 한 벌. 꾸미기 화면은 **저장 전 값**을 넘겨 미리보기를 그린다. */
+    /**
+     * @param look   지금 그릴 값 한 벌. 꾸미기 화면은 **저장 전 값**을 넘겨 미리보기를 그린다.
+     * @param mascot 클로디를 그릴 상태 뭉치. 상태를 들고 있으므로 **그리는 쪽이 하나씩 갖고**
+     *               넘겨 준다(이 파일은 상태를 안 갖는다). null 이면 안 그린다.
+     */
     fun render(
         ctx: Context, c: Canvas, snap: Snapshot, now: Long,
-        look: Look.Values = Look.read(ctx),
+        look: Look.Values = Look.read(ctx), mascot: Mascot? = null,
     ) {
         val p = Palette(ctx)
         val w = c.width.toFloat()
@@ -50,10 +54,22 @@ object WallpaperArt {
         // 배경으로 쓸 그림이 없으면(안 골랐고 떠 온 것도 없으면) **밋밋한 바다색**으로 둔다
         if (!drawPhoto(ctx, c, w, h, look)) drawSea(c, w, h, p)
 
+        if (look.mascot && mascot != null) {
+            mascot.step()
+            mascot.draw(c, look.mascotX * w, look.mascotY * h, mascotCell(w), p.coral, p.bg)
+        }
+
         drawMeter(ctx, c, w, h, snap, now, p, look)
     }
 
     // ---------------------------------------------------------------- 배경
+
+    /** 클로디 도트 한 칸(px). 화면 너비를 기준으로 잡아 어느 폰에서나 같은 비율로 보인다. */
+    fun mascotCell(w: Float): Float = w / 62f
+
+    /** 누른 자리가 클로디 위인가 — 배경화면 터치와 꾸미기 화면 끌기가 같은 판정을 쓴다. */
+    fun hitsMascot(w: Float, h: Float, look: Look.Values, mascot: Mascot, x: Float, y: Float) =
+        look.mascot && mascot.hits(look.mascotX * w, look.mascotY * h, mascotCell(w), x, y)
 
     /** 배경으로 쓸 그림이 없을 때의 밋밋한 바탕. 밝게는 단색, 어둡게는 위아래로 깊어진다. */
     private fun drawSea(c: Canvas, w: Float, h: Float, p: Palette) {

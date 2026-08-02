@@ -27,6 +27,29 @@ class CooldownWallpaperService : WallpaperService() {
         private val runner = Runnable { drawFrame() }
         private var showing = false
 
+        /** 클로디 — 이 엔진 하나가 상태를 들고 있다(튀는 속도·표정). */
+        private val mascot = Mascot()
+        private var lastW = 0f
+        private var lastH = 0f
+
+        override fun onCreate(holder: SurfaceHolder?) {
+            super.onCreate(holder)
+            // ★ 이걸 켜야 런처가 홈 화면 터치를 흘려 준다 — 클로디를 누를 수 있게 된다.
+            //   아이콘·위젯 위를 누르면 그쪽이 먹으므로 우리에게는 안 온다.
+            setTouchEventsEnabled(true)
+        }
+
+        /** 빈 곳을 눌렀을 때만 온다 — 클로디 위면 펄쩍. */
+        override fun onTouchEvent(event: android.view.MotionEvent) {
+            if (event.action != android.view.MotionEvent.ACTION_DOWN) return
+            if (lastW <= 0f) return
+            val look = Look.read(this@CooldownWallpaperService)
+            if (WallpaperArt.hitsMascot(lastW, lastH, look, mascot, event.x, event.y)) {
+                mascot.poke()
+                if (!showing) drawFrame()
+            }
+        }
+
         override fun onVisibilityChanged(visible: Boolean) {
             showing = visible
             if (visible) drawFrame() else handler.removeCallbacks(runner)
@@ -62,7 +85,7 @@ class CooldownWallpaperService : WallpaperService() {
                 val now = System.currentTimeMillis()
                 WallpaperArt.render(
                     ctx, Canvas(bmp), Store.snapshot(ctx).settled(now), now, Look.read(ctx),
-                )
+                )   // 색만 재는 자리라 클로디는 안 그린다(상태가 두 배로 흐른다)
                 WallpaperColors.fromBitmap(bmp)
             } catch (e: Exception) {
                 null
@@ -76,8 +99,10 @@ class CooldownWallpaperService : WallpaperService() {
                 if (canvas != null) {
                     val ctx = this@CooldownWallpaperService
                     val now = System.currentTimeMillis()
+                    lastW = canvas.width.toFloat()
+                    lastH = canvas.height.toFloat()
                     WallpaperArt.render(
-                        ctx, canvas, Store.snapshot(ctx).settled(now), now, Look.read(ctx),
+                        ctx, canvas, Store.snapshot(ctx).settled(now), now, Look.read(ctx), mascot,
                     )
                 }
             } catch (e: Exception) {

@@ -20,7 +20,7 @@ object Look {
     const val BARS = "bars"       // 막대 두 줄
     const val RINGS = "rings"     // 링 둘
     const val NUMBERS = "numbers" // 숫자만
-    const val NONE = "none"       // 안 보임
+    const val NONE = "none"       // 안 보임 — 고르는 칸에서는 뺐다(배경화면에 미터기가 없을 이유가 없다)
 
     // 미터기는 화면 너비를 넘을 수 없다(넘으면 글자가 잘린다) — 기본 0.82 × 1.15 ≒ 화면의 94%
     const val METER_MIN = 0.5f
@@ -35,6 +35,9 @@ object Look {
      */
     data class Values(
         val photo: String = "",
+        val mascot: Boolean = true,     // 배경화면에 사는 클로디 (눌러서 놀 수 있다)
+        val mascotX: Float = 0.5f,
+        val mascotY: Float = 0.42f,
         val meter: String = BARS,
         val meterX: Float = 0.5f,
         val meterY: Float = 0.689f,     // 꾸미기 전 화면과 같은 자리 (1080×2340 에서 잰 값)
@@ -55,6 +58,9 @@ object Look {
         fun withMeterPos(x: Float, y: Float) =
             copy(meterX = x.coerceIn(0f, 1f), meterY = y.coerceIn(0f, 1f))
 
+        fun withMascotPos(x: Float, y: Float) =
+            copy(mascotX = x.coerceIn(0f, 1f), mascotY = y.coerceIn(0f, 1f))
+
         fun withPlate(on: Boolean) = copy(plate = if (on) 1 else 0)
     }
 
@@ -69,7 +75,13 @@ object Look {
         val d = DEFAULT
         return Values(
             photo = p.getString("look_photo", d.photo) ?: d.photo,
-            meter = p.getString("look_meter", d.meter) ?: d.meter,
+            mascot = p.getBoolean("look_mascot", d.mascot),
+            mascotX = p.getFloat("look_mascot_x", d.mascotX),
+            mascotY = p.getFloat("look_mascot_y", d.mascotY),
+            // '없음' 은 고르는 칸에서 뺐다 — 예전에 그걸로 저장해 둔 사람은 막대로 올린다
+            meter = (p.getString("look_meter", d.meter) ?: d.meter).let {
+                if (it == NONE) BARS else it
+            },
             meterX = p.getFloat("look_meter_x", d.meterX),
             meterY = p.getFloat("look_meter_y", d.meterY),
             meterSize = p.getFloat("look_meter_size", d.meterSize),
@@ -82,6 +94,9 @@ object Look {
     fun write(ctx: Context, v: Values) {
         prefs(ctx).edit()
             .putString("look_photo", v.photo)
+            .putBoolean("look_mascot", v.mascot)
+            .putFloat("look_mascot_x", v.mascotX)
+            .putFloat("look_mascot_y", v.mascotY)
             .putString("look_meter", v.meter)
             .putFloat("look_meter_x", v.meterX)
             .putFloat("look_meter_y", v.meterY)
