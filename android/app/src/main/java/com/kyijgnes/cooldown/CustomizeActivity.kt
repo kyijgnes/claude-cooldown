@@ -6,9 +6,13 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -75,6 +79,8 @@ class CustomizeActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 권한 화면에서 돌아왔을 수 있다 — 아직 못 떠 왔고 이제 읽을 수 있으면 그때 떠 온다
+        if (WallpaperGrab.saved(this).isEmpty() && canReadWallpaper()) takeWallpaper()
         paint()
     }
 
@@ -105,6 +111,12 @@ class CustomizeActivity : Activity() {
     }
 
     private fun apply() {
+        // ★ **보여 줄 배경이 아예 없는 채로 걸지 않는다.** 그대로 걸면 쓰던 배경화면이
+        //   밋밋한 바탕색으로 바뀌어 버린다 — 먼저 쓰던 배경화면을 가져오게 한다.
+        if (draft.photo.isEmpty() && WallpaperGrab.saved(this).isEmpty()) {
+            takeWallpaper()
+            return
+        }
         Look.write(this, draft)
         saved = draft
         syncSave()
@@ -196,11 +208,13 @@ class CustomizeActivity : Activity() {
 
         // 배경은 사진 한 갈래다 — 폰에서 떠 온 배경을 쓰는 중이면 버튼이 `사진 고르기`,
         // 직접 고른 사진을 쓰는 중이면 `다른 사진` + `쓰던 배경으로`. 설명 문구는 두지 않는다.
-        // (안드로이드 13 부터는 배경화면을 못 떠 오는 폰이 많아 `쓰던 배경` 이 없을 수 있다)
+        // ★ **사진은 사용자가 고를 때만 바뀐다** — 우리가 임의로 바꾸지 않는다.
         val grabbed = WallpaperGrab.saved(this)
         val ownWallpaper = grabbed.isNotEmpty() && (draft.photo.isEmpty() || draft.photo == grabbed)
 
         section("배경")
+        // 아직 못 떠 왔으면 그것부터 — 버튼 이름이 곧 하는 일이다(권한 화면으로 간다)
+        if (grabbed.isEmpty()) button("쓰던 배경화면 가져오기") { takeWallpaper() }
         button(if (draft.photo.isEmpty() || ownWallpaper) "사진 고르기" else "다른 사진") { pickPhoto() }
         if (!ownWallpaper && grabbed.isNotEmpty()) {
             button("쓰던 배경으로") {
@@ -298,6 +312,53 @@ class CustomizeActivity : Activity() {
     ).apply { topMargin = dp(top) }
 
     private fun dp(v: Int) = Math.round(v * resources.displayMetrics.density)
+
+    // ---------------------------------------------------------------- 쓰던 배경화면 가져오기
+
+    /**
+     * 폰에 걸려 있는 배경화면을 한 장 떠 와 배경으로 쓴다.
+     *
+     * ★ **안드로이드 11 부터는 '모든 파일 접근' 이 있어야 읽힌다** — 없으면
+     * `WallpaperManager.getDrawable()` 이 SecurityException 으로 막힌다(13 실기 확인).
+     * 그래서 권한이 없으면 **시스템 설정 화면으로 보내고**, 돌아왔을 때 `onResume` 이
+     * 다시 떠 온다. 우리가 하는 일은 배경화면 한 장을 뜨는 것뿐이다.
+     */
+    private fun takeWallpaper() {
+        if (!canReadWallpaper()) {
+            askAllFiles()
+            return
+        }
+        val uri = WallpaperGrab.ensure(this)
+        if (uri.isEmpty()) {
+            Toast.makeText(this, "배경화면을 못 가져왔어요", Toast.LENGTH_SHORT).show()
+            return
+        }
+        WallpaperArt.forgetPhoto()
+        change(draft.copy(photo = uri, photoX = 0.5f, photoY = 0.5f))
+    }
+
+    /** ★ `isExternalStorageManager()` 는 저장소가 없는 환경(테스트·일부 기기)에서 던진다 — 감싼다. */
+    private fun canReadWallpaper(): Boolean = try {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun askAllFiles() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            Uri.parse("package:$packageName"),
+        )
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            } catch (e2: Exception) {
+                Toast.makeText(this, "권한 화면을 열 수 없어요", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- 사진 고르기
 

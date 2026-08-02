@@ -6,6 +6,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- ★ **쓰던 배경화면을 그대로 두고 미터기만 얹기 위한 권한.**
+         안드로이드 13 부터 `WallpaperManager.getDrawable()` 이 이것 없이는
+         SecurityException 으로 막힌다(실기 확인). **없어도 앱은 그냥 돈다** —
+         그 경우 배경은 사진을 직접 고르거나 밋밋한 바탕색이다.
+         사용자가 옵션에서 눌러야 켜지고(시스템 설정 화면), 우리는 배경화면을
+         한 장 떠 오는 것 말고는 아무 파일도 건드리지 않는다. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <!-- 라이브 배경화면을 쓸 수 있는 기기에서만 후보로 뜨게 (필수는 아님) -->
     <uses-feature
         android:name="android.software.live_wallpaper"
