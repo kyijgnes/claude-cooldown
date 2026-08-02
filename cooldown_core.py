@@ -161,6 +161,7 @@ def parse(raw: dict) -> Usage:
 # ---------------------------------------------------------------- 속도 분석
 
 WEEK_SPAN = timedelta(days=7)
+FIVE_SPAN = timedelta(hours=5)  # 5시간 창 길이 (정확히 5시간)
 DAY_PP = 100 / 7  # 하루치 사용량(%p). 판정을 '며칠 앞섰나' 로 잡는 기준이다.
 PROJECT_AFTER = 0.15  # 창이 이만큼(약 하루) 흐른 뒤부터 '이 속도면' 을 셈한다
 
@@ -250,6 +251,30 @@ def pace(usage: Usage, now: datetime | None = None) -> Pace | None:
     return Pace(used, due, frac, left_sec, projected, runout, verdict, level)
 
 
+def five_due(usage: Usage, now: datetime | None = None) -> float | None:
+    """5시간 창이 흐른 비율(0~100). 5시간 게이지의 '지금쯤 여기까지' 눈금 자리다.
+
+    주간의 pace() 와 달리 **판정(여유/빠름)은 내지 않는다** — 5시간 창은 첫 메시지에
+    열려 앞쪽에 몰아 쓰는 게 정상이라 '고르게 썼나' 판정은 뜻이 없다. 다만 창이 얼마나
+    흘렀는지 보여 주는 기준선은, 채운 양과 견주면 '이대로면 초기화 전에 바닥나겠다' 를
+    한눈에 보게 해 준다.
+
+    창이 없거나(초기화 시각 없음), 이미 풀렸으면(과거) None 을 돌려준다 — 눈금을 숨긴다.
+    """
+    five = usage.five
+    if five.pct is None or five.resets_at is None:
+        return None
+    now = now or datetime.now(timezone.utc)
+    end = five.resets_at
+    if end.tzinfo is None:  # 시간대가 빠진 값이 오면 UTC 로 본다 (빼기가 터진다)
+        end = end.replace(tzinfo=timezone.utc)
+    span = FIVE_SPAN.total_seconds()
+    left = (end - now).total_seconds()
+    if left <= 0 or left > span:  # 이미 풀렸거나 창 길이를 벗어난 값 — 눈금이 뜻이 없다
+        return None
+    return max(0.0, min(100.0, (span - left) / span * 100))
+
+
 # ---------------------------------------------------------------- 조회
 
 
@@ -304,7 +329,7 @@ if __name__ == "__main__":
     print(json.dumps(_raw, ensure_ascii=False, indent=2))
     _p = pace(parse(_raw))
     if _p is not None:
-        _line = f"주간 {_p.used:.0f}% · 지금쯤 {_p.due:.0f}% · {_p.verdict}"
+        _line = f"주간 {_p.used:.0f}% · 적정선 {_p.due:.0f}% · {_p.verdict}"
         if _p.projected is not None:
             _line += f" · 이 속도면 {_p.projected:.0f}%"
         if _p.runout is not None:

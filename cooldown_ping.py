@@ -46,6 +46,8 @@ GRACE_MIN = 5  # 앵커 시각을 이 분(分)만큼 지나쳐도 그 앵커로 
 MIN_GAP_MIN = 301  # 두 시각 사이 최소 간격(분) = 5시간 1분. 5시간 창이 확실히 지난 뒤 다시 시작.
 MAX_TIMES = 4  # 하루 최대 시각 수. 5시간 1분 간격이면 24시간에 4개까지만 들어간다(5×301>1440).
 
+FIVE_WINDOW = timedelta(hours=5)  # 5시간 창 길이 — 놓침 판정에서 '창 안인가'를 볼 때 쓴다
+
 DEFAULTS = {
     "enabled": False,
     "times": list(DEFAULT_TIMES),
@@ -53,6 +55,8 @@ DEFAULTS = {
     "model": DEFAULT_MODEL,
     "last_ping": None,   # ISO(로컬, naive). 같은 앵커에 두 번 쏘지 않게 하는 표시.
     "last_result": "",   # 마지막 전송 결과 (화면 표시용)
+    "last_anchor": None, # ISO(로컬). 앱이 떠서 '처리한'(핑·건너뜀·놓침확인) 가장 최근 앵커.
+    "last_missed": None, # ISO(로컬). 컴퓨터 꺼짐 등으로 놓친 앵커 (위젯에 표시, 정렬되면 지움).
 }
 
 
@@ -162,6 +166,75 @@ def predict_next(
     """다음에 핑이 (시도)될 시각. 화면에 '다음 핑 10:00' 으로 보여 주기 위한 것."""
     floor = resets_at_local if (resets_at_local and resets_at_local > now) else now
     return _first_anchor_ge(floor, times)
+
+
+# ---------------------------------------------------------------- 놓친 앵커 판정
+# 컴퓨터가 꺼져 있던 등으로 앱이 떠 있지 않은 동안 앵커 시각이 다 지나가 버리면
+# 그 앵커는 핑도 못 쏘고 '처리함'(last_anchor) 기록도 못 남긴다 — 그게 '놓침' 이다.
+# 앱이 떠 있었으면 그 앵커는 핑을 쏘거나(창 비었으면) 창이 활성이라 건너뛰며,
+# 어느 쪽이든 위젯이 last_anchor 에 기록해 둔다.
+
+
+def anchor_in_grace(
+    now: datetime, times: list[dtime], grace_min: int = GRACE_MIN
+) -> datetime | None:
+    """지금이 어떤 앵커의 여유(grace) 구간 안이면 그 앵커, 아니면 None.
+
+    should_ping_now 과 달리 창 상태·last_ping 과 무관하다 — 앱이 이 앵커를 '지금
+    처리 중'(그 자리에 떠 있음)인지만 본다. 이 구간에 떠 있었으면 놓친 게 아니다.
+    """
+    grace = timedelta(minutes=grace_min)
+    for t in times:
+        anchor = datetime.combine(now.date(), t)
+        if anchor <= now <= anchor + grace:
+            return anchor
+    return None
+
+
+def last_due_anchor(
+    now: datetime, times: list[dtime], grace_min: int = GRACE_MIN
+) -> datetime | None:
+    """now 기준, 여유(grace)까지 완전히 지나간 가장 최근 앵커. 없으면 None.
+    자정을 넘겨 어제 마지막 앵커가 가장 최근일 수 있어 어제까지 본다."""
+    if not times:
+        return None
+    grace = timedelta(minutes=grace_min)
+    best: datetime | None = None
+    for day in (now.date(), now.date() - timedelta(days=1)):
+        for t in times:
+            anchor = datetime.combine(day, t)
+            if anchor + grace < now and (best is None or anchor > best):
+                best = anchor
+    return best
+
+
+def missed_since(
+    now: datetime,
+    times: list[dtime],
+    resets_at_local: datetime | None,
+    last_ping: datetime | None,
+    last_anchor: datetime | None,
+    grace_min: int = GRACE_MIN,
+) -> datetime | None:
+    """지나쳐 '놓친' 가장 최근 앵커. 없으면 None.
+
+    - last_anchor 이하면 앱이 떠서 이미 처리(또는 놓침 확인)한 앵커다.
+    - last_ping 이 그 앵커 즈음/이후면 이미 쐈다.
+    - 그 앵커가 지금 활성인 5시간 창 안에 들어 있으면 의도적 건너뜀이라 놓친 게 아니다
+      (창이 그 앵커를 이미 덮고 있으니 경계는 어차피 안 밀린다).
+    """
+    anchor = last_due_anchor(now, times, grace_min)
+    if anchor is None:
+        return None
+    if last_anchor is not None and last_anchor >= anchor:
+        return None
+    if last_ping is not None and last_ping >= anchor:
+        return None
+    if resets_at_local is not None and resets_at_local > now:
+        start = resets_at_local - FIVE_WINDOW
+        if start <= anchor <= resets_at_local:
+            return None
+    return anchor
 
 
 # ---------------------------------------------------------------- 전송

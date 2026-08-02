@@ -12,7 +12,7 @@ import math
 import tkinter as tk
 import tkinter.font as tkfont
 
-from cooldown_core import Usage, pace
+from cooldown_core import Usage, five_due, pace
 
 from .base import KR, NUM, P, Skin, scoped_text, tone
 
@@ -270,7 +270,7 @@ class ArcSkin(Skin):
     def show(self, usage: Usage, stamp: str) -> None:
         self._ok_stamp = stamp  # 값이 언제 것인지 — 오류 띠에서도 이걸 쓴다
         p = pace(usage)
-        self.five.set(usage.five.pct, usage.five.left)
+        self.five.set(usage.five.pct, usage.five.left, five_due(usage))
         self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
         self._error(None, stamp)
         self._foot(stamp, usage)
@@ -282,6 +282,14 @@ class ArcSkin(Skin):
             self._foot(stamp, None)
             self._ok_stamp = ""
         self._error(text, stamp)
+
+    def notice(self, text: str) -> None:
+        # 값은 멀쩡한데 알릴 것(자동 시작 놓침)을 꼬리말 오른쪽(모델별 자리)에 호박색으로.
+        # _foot() 가 그 자리를 채운 직후 앱이 부른다 — 빈 문자열이면 그대로 둔다.
+        if not text:
+            return
+        self.c.itemconfigure(self.scoped, text=text, fill=P.amber)
+        self.c.itemconfigure(self.dot, state="hidden")
 
     # -------------------------------------------------- 꼬리말 두 얼굴
     def _foot(self, stamp: str, usage: Usage | None) -> None:

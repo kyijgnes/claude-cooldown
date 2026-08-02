@@ -502,12 +502,16 @@ class App:
         self.last_manual = 0.0
         self._dragging = False
         self._menu_open = False
+        self._panels: list[tk.Toplevel] = []  # 열려 있는 팝업들 (한 번에 하나만 둔다)
 
         # 자동 핑(모닝 스타터) 상태 — _build_menu 가 참조하므로 그 전에 잡아 둔다
         self.ping_cfg = cooldown_ping.load_cfg()
         self.ping_out: queue.Queue = queue.Queue()
         self._ping_busy = False
         self._last_ping_dt = cooldown_ping._parse_iso(self.ping_cfg.get("last_ping"))
+        # 앱이 떠서 처리한 가장 최근 앵커 / 컴퓨터 꺼짐 등으로 놓친 앵커 (자동 시작)
+        self._last_anchor_dt = cooldown_ping._parse_iso(self.ping_cfg.get("last_anchor"))
+        self._missed_dt = cooldown_ping._parse_iso(self.ping_cfg.get("last_missed"))
 
         # 폰으로 보내기 — 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다
         self.push_cfg = cooldown_push.load_cfg()
@@ -566,6 +570,7 @@ class App:
             self._bind_drag(child)
 
     def switch_skin(self, key: str) -> None:
+        self._close_panels()  # 디자인을 바꾸면 옛 팝업(옛 색·자리)이 떠돌지 않게 닫는다
         if key == self.skin.key:
             # 이미 이 디자인이다 — 슬림 바를 다시 고르면 작업표시줄로 되붙인다.
             # (자유 위치로 떼어 낸 걸 되돌리는 유일한 길. 붙이기 토글은 없앴다.)
@@ -597,6 +602,7 @@ class App:
         picked = set_palette(self.state["theme"])
         if picked == self.applied_theme and not force:
             return
+        self._close_panels()  # 밝기를 바꾸면 옛 색 팝업이 떠돌지 않게 닫는다
         self.applied_theme = picked
         self.root.configure(bg=P.bg)
         self._build_body()
@@ -628,6 +634,7 @@ class App:
                 keep_values=self.last_usage is not None,
                 stamp=self.last_error_stamp,
             )
+        self._apply_notice()
 
     # -------------------------------------------------- 메뉴
     def _build_menu(self) -> None:
@@ -742,6 +749,7 @@ class App:
 
     # -------------------------------------------------- 드래그
     def _press(self, e):
+        self._close_panels()  # 위젯을 누르면(새로고침·드래그) 떠 있던 팝업을 닫는다
         self._dx = e.x_root - self.root.winfo_x()
         self._dy = e.y_root - self.root.winfo_y()
         self._from = (e.x_root, e.y_root)
@@ -1012,6 +1020,7 @@ class App:
         try:
             if self.last_usage is not None and self.last_error is None:
                 self.skin.show(self.last_usage, self._stamp(self.last_usage))
+                self._apply_notice()
         except Exception:  # noqa: BLE001
             pass
         finally:
@@ -1046,11 +1055,36 @@ class App:
                 f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}"
             )
 
+    def _notice_text(self) -> str:
+        """위젯에 얹을 알림 문구 (값은 멀쩡할 때). 지금은 '자동 시작 놓침' 하나.
+        슬림 바처럼 자리가 좁은 스킨이 뒤를 자르고도 시각이 남게 시각을 앞세운다."""
+        if not self.ping_cfg.get("enabled") or self._missed_dt is None:
+            return ""
+        return f"{self._missed_dt:%H:%M} 자동 시작 놓침"
+
+    def _apply_notice(self) -> None:
+        """스킨에 알림 문구를 얹는다. 오류가 떠 있으면(자리가 겹친다) 얹지 않는다."""
+        try:
+            self.skin.notice("" if self.last_error is not None else self._notice_text())
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _redraw(self) -> None:
+        """마지막 값으로 화면을 다시 그리고 알림을 다시 얹는다.
+        알림이 사라질 때 스킨의 그 자리를 정상값으로 되돌리려면 show() 를 한 번 태워야 한다."""
+        try:
+            if self.last_usage is not None and self.last_error is None:
+                self.skin.show(self.last_usage, self._stamp(self.last_usage))
+            self._apply_notice()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _show(self, usage: Usage):
         self.last_usage = usage
         self.last_error = None
         self._clear_busy()
         self.skin.show(usage, self._stamp(usage))
+        self._apply_notice()
         self._reassert_dock()
         export(usage)
         self._start_push(usage)
@@ -1079,8 +1113,10 @@ class App:
         # 좁은 스킨(슬림 바)에는 눈금만 서므로, 숫자는 여기서도 읽을 수 있게 한다
         p = pace(usage)
         if p is not None:
-            parts.append(f"이번 주 지금쯤 {p.due:.0f}%  ·  {p.verdict}")
+            parts.append(f"이번 주 적정선 {p.due:.0f}%  ·  {p.verdict}")
         if self.ping_cfg.get("enabled"):
+            if self._missed_dt is not None:
+                parts.append(f"자동 시작 놓침 {self._missed_dt:%H:%M} (컴퓨터 꺼짐 등)")
             times = cooldown_ping.parse_times(self.ping_cfg["times"])
             nxt = cooldown_ping.predict_next(datetime.now(), times, self._five_resets_local())
             parts.append(f"다음 시작 {nxt:%H:%M}")
@@ -1120,20 +1156,63 @@ class App:
             cfg = self.ping_cfg
             if (
                 cfg.get("enabled")
-                and not self._ping_busy
                 and self.last_usage is not None  # 창 상태를 모르면 함부로 쏘지 않는다
             ):
                 now = datetime.now()
                 times = cooldown_ping.parse_times(cfg["times"])
-                if cooldown_ping.should_ping_now(
-                    now, times, self._five_resets_local(), self._last_ping_dt
+                resets_local = self._five_resets_local()
+                # 이 앵커의 여유 구간에 앱이 떠 있으면 '처리 중'으로 기록 — 놓침에서 제외.
+                # (핑을 쏘든, 창이 활성이라 건너뛰든, 떠 있었다는 사실만으로 놓침이 아니다)
+                in_grace = cooldown_ping.anchor_in_grace(now, times)
+                if in_grace is not None:
+                    self._note_anchor_handled(in_grace)
+                if not self._ping_busy and cooldown_ping.should_ping_now(
+                    now, times, resets_local, self._last_ping_dt
                 ):
                     self._start_ping(anchor_now=now)
+                # 컴퓨터가 꺼져 있던 등으로 앵커를 놓쳤으면 위젯·트레이에 표시
+                self._detect_missed(now, times, resets_local)
         except Exception:  # noqa: BLE001
             pass
         finally:
             if self.alive:
                 self.root.after(PING_TICK * 1000, self._ping_tick)
+
+    def _note_anchor_handled(self, anchor: datetime) -> None:
+        """앱이 떠서 이 앵커를 처리했다고 기록한다 (놓침 판정에서 제외)."""
+        if self._last_anchor_dt is not None and anchor <= self._last_anchor_dt:
+            return
+        self._last_anchor_dt = anchor
+        self.ping_cfg["last_anchor"] = anchor.isoformat()
+        cooldown_ping.save_cfg(self.ping_cfg)
+
+    def _detect_missed(self, now: datetime, times, resets_local: datetime | None) -> None:
+        """컴퓨터 꺼짐 등으로 놓친 앵커가 있으면 붙잡아 위젯에 표시하고 한 번 알린다."""
+        anchor = cooldown_ping.missed_since(
+            now, times, resets_local, self._last_ping_dt, self._last_anchor_dt
+        )
+        if anchor is None:
+            return
+        # 이 기능을 켜고 처음 도는 순간(핑·처리 기록이 아예 없음)엔 놓친 걸로 치지 않는다 —
+        # 지금 이후부터 지켜보도록 기준점만 잡는다.
+        if self._last_ping_dt is None and self._last_anchor_dt is None:
+            self._note_anchor_handled(anchor)
+            return
+        if self._missed_dt is not None and anchor <= self._missed_dt:
+            return  # 이미 붙잡아 알린 놓침
+        self._missed_dt = anchor
+        # 알린 앵커는 '처리함'으로 올려, 다음(더 최근) 놓침만 새로 잡히게 한다
+        self._last_anchor_dt = anchor
+        self.ping_cfg["last_missed"] = anchor.isoformat()
+        self.ping_cfg["last_anchor"] = anchor.isoformat()
+        cooldown_ping.save_cfg(self.ping_cfg)
+        self._apply_notice()
+        try:
+            self.tray.notify(
+                f"{anchor:%H:%M} 자동 시작을 놓쳤어요 (컴퓨터 꺼짐 등)", "클로드 쿨다운"
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _start_ping(self, anchor_now: datetime | None = None, manual: bool = False):
         """핑 전송을 백그라운드 스레드에서 시작한다. Tk 스레드를 막지 않게."""
@@ -1159,8 +1238,13 @@ class App:
         if ok and not manual:
             self.ping_cfg["last_ping"] = when.isoformat()
             self._last_ping_dt = when
+        if ok and self._missed_dt is not None:
+            # 핑이 나갔으니 창이 그 앵커에 다시 정렬됐다 — 놓침 표시를 지운다
+            self._missed_dt = None
+            self.ping_cfg["last_missed"] = None
         cooldown_ping.save_cfg(self.ping_cfg)
         if ok:
+            self._redraw()  # 놓침 표시가 있었으면 곧바로 지운다
             self.poller.refresh_now()  # 창이 열렸으니 위젯 숫자를 곧바로 갱신
         else:
             try:
@@ -1171,8 +1255,21 @@ class App:
 
     def toggle_ping(self):
         self.ping_cfg["enabled"] = not self.ping_cfg.get("enabled")
+        if self.ping_cfg["enabled"]:
+            # 켠 순간 이전에 지나간 앵커를 놓친 걸로 잘못 잡지 않게 기준점을 지금에 맞춘다
+            now = datetime.now()
+            times = cooldown_ping.parse_times(self.ping_cfg["times"])
+            base = cooldown_ping.last_due_anchor(now, times)
+            if base is not None:
+                self._last_anchor_dt = base
+                self.ping_cfg["last_anchor"] = base.isoformat()
+        else:
+            # 껐으면 놓침 표시도 지운다 (더는 지킬 게 없다)
+            self._missed_dt = None
+            self.ping_cfg["last_missed"] = None
         cooldown_ping.save_cfg(self.ping_cfg)
         self.var_ping.set(bool(self.ping_cfg["enabled"]))
+        self._redraw()
 
     def send_ping_now(self):
         """지금 한 번 쏜다 (테스트/즉시 창 열기). 앵커 정렬과 무관."""
@@ -1206,7 +1303,7 @@ class App:
     def open_phone_link(self):
         """폰 연결 — 서버 주소를 넣고, 폰 앱이 찍을 QR 을 본다."""
         try:
-            top, body = self._open_panel("폰 연결")
+            top, body = self._open_panel("폰 연결", click_away=False)
             wrap = tk.Frame(body, bg=P.bg)
             wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(4, PANEL_PAD))
             width = 300
@@ -1342,36 +1439,41 @@ class App:
                 font=(KR, 16, "bold"),
             ).pack(anchor="w")
 
-            # 위젯 게이지와 같은 그림 — 채운 색이 눈금을 앞질렀으면 빨리 쓰는 중
+            # 판정을 한 줄로 풀어 준다 — 적정선(고르게 쓸 때)보다 얼마나 앞섰나/뒤졌나.
+            tk.Label(
+                wrap, text=self._gap_sentence(p), bg=P.bg, fg=P.sub, font=(KR, 10),
+            ).pack(anchor="w", pady=(3, 0))
+
+            # 채운 색 = 지금까지 쓴 양, 눈금 = 적정선. 색이 눈금을 앞질렀으면 빨리 쓰는 중.
             bar = tk.Canvas(
                 wrap, width=inner, height=10, bg=P.bg, highlightthickness=0, bd=0
             )
-            bar.pack(fill="x", pady=(10, 14))
+            bar.pack(fill="x", pady=(12, 12))
             bar.create_rectangle(0, 0, inner, 10, fill=P.track, width=0)
             bar.create_rectangle(0, 0, inner * p.used / 100, 10, fill=tone(p.used), width=0)
             x = mark_x(p.due, inner)
             bar.create_rectangle(x, 0, x + MARK_W, 10, fill=P.title, width=0)
 
-            self._pair(wrap, "지금쯤", f"{p.due:.0f}%", P.sub)
-            self._pair(wrap, "지금", f"{p.used:.0f}%", tone(p.used))
+            self._pair(wrap, "지금까지 사용", f"{p.used:.0f}%", tone(p.used))
+            self._pair(wrap, "적정선 (고르게 쓸 때)", f"{p.due:.0f}%", P.sub)
 
             tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(10, 8))
 
+            # 이대로 계속 쓰면 초기화 시점에 몇 %가 되는가 (지금 속도를 창 끝까지 늘린 값).
             if p.projected is not None:
                 self._pair(
-                    wrap, "이 속도면 주 끝", f"{min(999, p.projected):.0f}%",
+                    wrap, "이대로 계속 쓰면",
+                    f"초기화 때 {min(999, p.projected):.0f}%",
                     pace_color(p.level),
                 )
+            # 초기화까지 남은 예산을 남은 날로 나눈 값 — 하루에 이만큼씩 쓰면 딱 맞는다.
             per = p.per_day
             if per is not None:
-                self._pair(wrap, f"남은 {int(p.days_left)}일 · 하루", f"{per:.0f}%", P.sub)
+                self._pair(wrap, "하루 이만큼까지 OK", f"{per:.0f}%", P.sub)
             else:
-                hours = int(p.left_sec // 3600)
-                self._pair(
-                    wrap, f"남은 {hours}시간", f"{max(0.0, 100 - p.used):.0f}%", P.sub
-                )
+                self._pair(wrap, "남은 양", f"{max(0.0, 100 - p.used):.0f}%", P.sub)
             if p.runout is not None:
-                self._pair(wrap, "다 쓰는 때", self._when_text(p.runout), P.red)
+                self._pair(wrap, "이대로면 다 쓰는 때", self._when_text(p.runout), P.red)
             reset = self.last_usage.week.resets_at
             if reset is not None:
                 self._pair(wrap, "초기화", self._when_text(reset), P.sub)
@@ -1379,6 +1481,18 @@ class App:
             self._finalize_panel(top, W)
         except Exception:  # noqa: BLE001
             pass
+
+    @staticmethod
+    def _gap_sentence(p) -> str:
+        """판정을 한 줄로 — 적정선(고르게 쓸 때)보다 얼마나 앞섰나/뒤졌나."""
+        if p.used >= 99.5:
+            return "이번 주 한도를 거의 다 썼어요"
+        d = p.over  # 지금까지 사용 − 적정선
+        if d <= -1:
+            return f"고르게 쓸 때보다 {abs(d):.0f}%p 덜 썼어요"
+        if d >= 1:
+            return f"고르게 쓸 때보다 {d:.0f}%p 더 썼어요"
+        return "고르게 쓰는 속도와 거의 같아요"
 
     @staticmethod
     def _pair(parent: tk.Misc, label: str, value: str, color: str) -> None:
@@ -1402,13 +1516,23 @@ class App:
     # -------------------------------------------------- 위젯과 같은 결의 팝업
     # 팝업도 본체 위젯과 똑같이: 테두리 없는 둥근 창 + 왼쪽 액센트 바 + 볼드 제목,
     # 드래그로 이동, ✕·Esc 로 닫기. OS 창틀을 쓰지 않아 카드 스킨과 한 몸처럼 보인다.
-    def _open_panel(self, title: str):
-        """(top, body) 를 돌려준다. body 에 내용을 채운 뒤 _finalize_panel(top, w) 호출."""
+    def _open_panel(self, title: str, click_away: bool = True):
+        """(top, body) 를 돌려준다. body 에 내용을 채운 뒤 _finalize_panel(top, w) 호출.
+
+        새 팝업을 열면 먼저 떠 있던 팝업은 닫는다(한 번에 하나). `click_away` 가 참이면
+        팝업 밖(위젯·바탕화면·다른 앱)을 누르면 저절로 닫힌다 — 읽기 전용 팝업용.
+        편집 팝업(시각 설정·폰 연결)은 타이핑 중 사라지지 않게 False 로 연다."""
+        self._close_panels()
         top = tk.Toplevel(self.root)
         top.withdraw()
         top.overrideredirect(True)
         top.configure(bg=P.bg)
         top.attributes("-topmost", True)
+        top._click_away = click_away  # _finalize 가 이 값을 보고 포커스를 잡는다
+        self._panels.append(top)
+        top.bind("<Destroy>", lambda e, t=top: self._forget_panel(t) if e.widget is t else None)
+        if click_away:
+            top.bind("<FocusOut>", lambda _e, t=top: self._panel_focus_out(t))
 
         head = tk.Frame(top, bg=P.bg)
         head.pack(fill="x")
@@ -1462,6 +1586,45 @@ class App:
                 top.grab_set()
             except tk.TclError:
                 pass
+        elif getattr(top, "_click_away", False):
+            # 포커스를 쥐어야 '밖을 누르면 포커스가 빠져나가 닫힌다'가 동작한다
+            try:
+                top.focus_force()
+            except tk.TclError:
+                pass
+
+    def _close_panels(self) -> None:
+        """열려 있는 팝업을 모두 닫는다 (디자인·밝기 바꾸거나 위젯을 누를 때)."""
+        for top in list(self._panels):
+            try:
+                top.destroy()
+            except tk.TclError:
+                pass
+        self._panels.clear()
+
+    def _forget_panel(self, top: tk.Toplevel) -> None:
+        if top in self._panels:
+            self._panels.remove(top)
+
+    def _panel_focus_out(self, top: tk.Toplevel) -> None:
+        """팝업이 포커스를 잃으면(밖을 누름) 닫는다. 포커스가 팝업 안에 그대로 있으면 둔다.
+        포커스가 옮겨가 자리 잡을 틈을 주려 조금 뒤에 확인한다."""
+        def check():
+            try:
+                if not top.winfo_exists():
+                    return
+                foc = top.focus_displayof()
+            except (KeyError, tk.TclError):
+                foc = None
+            if foc is None or foc.winfo_toplevel() is not top:
+                try:
+                    top.destroy()
+                except tk.TclError:
+                    pass
+        try:
+            top.after(120, check)
+        except tk.TclError:
+            pass
 
     def _refit_panel(self, top: tk.Toplevel, width: int) -> None:
         """내용이 바뀌어(경고문 표시·행 추가/삭제) 높이가 달라지면 창을 다시 잰다.
@@ -1514,58 +1677,52 @@ class App:
         return when.strftime("%m/%d ") + hm
 
     def open_ping_log(self):
-        """실행 기록 — 로그 원문 대신 성공/실패 점과 사람이 읽는 시각으로 보여 준다."""
+        """실행 기록 — 성공은 점+시각만(글자 없이), 실패만 이유를 붙여 짧게 보여 준다.
+        '실행됨'을 줄마다 반복하면 영수증처럼 늘어져 보여, 성공 줄에서는 뺀다."""
         try:
             entries = cooldown_ping.read_log_entries(40)
             top, body = self._open_panel("실행 기록")
             wrap = tk.Frame(body, bg=P.bg)
-            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(4, PANEL_PAD))
+            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
 
             if not entries:
                 tk.Label(
-                    wrap,
-                    text="아직 실행된 적이 없어요.",
-                    bg=P.bg,
-                    fg=P.faint,
-                    font=(KR, 9),
+                    wrap, text="아직 실행된 적이 없어요.", bg=P.bg, fg=P.faint, font=(KR, 9)
                 ).pack(anchor="w", pady=16)
-            else:
-                shown = list(reversed(entries))[:14]
-                for when, ok, detail in shown:
-                    r = tk.Frame(wrap, bg=P.bg)
-                    r.pack(fill="x", pady=3)
+                self._finalize_panel(top, 300)
+                return
+
+            shown = list(reversed(entries))[:8]  # 최근 8번만 (그 위는 접는다)
+            fails = sum(1 for _w, ok, _d in shown if not ok)
+            summary = f"최근 {len(shown)}번" + (
+                f" · 실패 {fails}" if fails else " · 모두 실행됨"
+            )
+            tk.Label(
+                wrap, text=summary, bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w"
+            ).pack(fill="x", pady=(0, 7))
+
+            for when, ok, detail in shown:
+                r = tk.Frame(wrap, bg=P.bg)
+                r.pack(fill="x", pady=2)
+                tk.Label(
+                    r, text="●", bg=P.bg, fg=(P.green if ok else P.red), font=(KR, 7)
+                ).pack(side="left", padx=(0, 9))
+                tk.Label(
+                    r, text=self._friendly_time(when), bg=P.bg,
+                    fg=(P.sub if ok else P.title), font=(KR, 9), anchor="w",
+                ).pack(side="left")
+                # 성공은 시각만으로 충분하다 — 실패일 때만 이유를 붙인다
+                if not ok:
                     tk.Label(
-                        r,
-                        text="●",
-                        bg=P.bg,
-                        fg=(P.green if ok else P.red),
-                        font=(KR, 8),
-                    ).pack(side="left", padx=(0, 9))
-                    tk.Label(
-                        r,
-                        text=self._friendly_time(when),
-                        bg=P.bg,
-                        fg=P.title,
-                        font=(KR, 9),
-                        width=11,
-                        anchor="w",
+                        r, text="  " + cooldown_ping.friendly_error(detail),
+                        bg=P.bg, fg=P.red, font=(KR, 9), anchor="w",
                     ).pack(side="left")
-                    tk.Label(
-                        r,
-                        text="실행됨" if ok else cooldown_ping.friendly_error(detail),
-                        bg=P.bg,
-                        fg=(P.sub if ok else P.red),
-                        font=(KR, 9),
-                        anchor="w",
-                    ).pack(side="left")
-                if len(entries) > 14:
-                    tk.Label(
-                        wrap,
-                        text="· 최근 14개만 표시",
-                        bg=P.bg,
-                        fg=P.faint,
-                        font=(KR, 8),
-                    ).pack(anchor="w", pady=(8, 0))
+
+            if len(entries) > len(shown):
+                tk.Label(
+                    wrap, text=f"이전 {len(entries) - len(shown)}번 더",
+                    bg=P.bg, fg=P.faint, font=(KR, 8),
+                ).pack(anchor="w", pady=(7, 0))
             self._finalize_panel(top, 300)
         except Exception:  # noqa: BLE001
             pass
@@ -1575,7 +1732,7 @@ class App:
         시각들은 5시간 1분 이상 벌어져 있어야 저장된다."""
         W = 300
         try:
-            top, body = self._open_panel("모닝 스타터 · 시각")
+            top, body = self._open_panel("모닝 스타터 · 시각", click_away=False)
             tk.Label(
                 body,
                 text="이 시각마다 5시간 자동 시작",

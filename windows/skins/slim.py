@@ -22,7 +22,7 @@ import random
 import tkinter as tk
 from tkinter import font as tkfont
 
-from cooldown_core import Usage, pace
+from cooldown_core import Usage, five_due, pace
 
 from .base import (
     KR,
@@ -579,7 +579,7 @@ class SlimSkin(Skin):
     def show(self, usage: Usage, stamp: str) -> None:
         self._paint(P.bg, tone(worst(usage)))
         p = pace(usage)
-        self.five.set(usage.five.pct, usage.five.left)
+        self.five.set(usage.five.pct, usage.five.left, five_due(usage))
         self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
 
         text = scoped_text(usage, 1)
@@ -598,3 +598,14 @@ class SlimSkin(Skin):
             self.five.set(None, "")
             self.week.set(None, "")
             self.c.itemconfigure(self.stamp, text=stamp)
+
+    def notice(self, text: str) -> None:
+        # 값은 멀쩡한데 알릴 것(자동 시작 놓침)을 오른쪽 윗자리(모델별 자리)에 호박색으로.
+        # show() 가 그 자리에 모델별을 채운 직후 앱이 부른다 — 빈 문자열이면 그대로 둔다.
+        # 자리가 좁아 시각을 앞세운 문구를 _clip(뒤를 자름)으로 넣어 시각이 남게 한다.
+        if not text:
+            return
+        self.c.itemconfigure(
+            self.model, text=_clip(text, self.f_small, self.right_w), fill=P.amber
+        )
+        self.c.itemconfigure(self.msg, text="")

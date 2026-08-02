@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
-from cooldown_core import Pace, Usage, pace
+from cooldown_core import Pace, Usage, five_due, pace
 
 from .base import KR, MARK_W, NUM, P, Skin, mark_x, pace_color, scoped_text, tone
 
@@ -54,13 +54,20 @@ class Section:
         )
         self.bar.pack(fill="x")
 
-    def set(self, pct: float | None, left: str, p: Pace | None = None) -> None:
+    def set(
+        self,
+        pct: float | None,
+        left: str,
+        p: Pace | None = None,
+        due: float | None = None,
+    ) -> None:
+        # p(주간 속도)는 '지금쯤/판정' 글자 + 눈금에 쓰고, due(5시간)는 눈금에만 쓴다.
         color = tone(pct)
         self.value.config(text="--" if pct is None else f"{pct:.0f}%", fg=color)
         self.left.config(text=left, fg=P.sub if pct is not None else P.faint)
 
         if self.due is not None:
-            self.due.config(text="" if p is None else f"지금쯤 {p.due:.0f}%")
+            self.due.config(text="" if p is None else f"적정선 {p.due:.0f}%")
             self.verdict.config(
                 text="" if p is None else p.verdict,
                 fg=P.faint if p is None else pace_color(p.level),
@@ -76,8 +83,9 @@ class Section:
         self.bar.create_rectangle(0, y0, width, y1, fill=P.track, width=0)
         if pct is not None:
             self.bar.create_rectangle(0, y0, width * pct / 100, y1, fill=color, width=0)
-        if p is not None:
-            x = mark_x(p.due, width)
+        mark_due = p.due if p is not None else due
+        if mark_due is not None:
+            x = mark_x(mark_due, width)
             self.bar.create_rectangle(x, 0, x + MARK_W, BAR_BOX, fill=P.title, width=0)
 
 
@@ -136,7 +144,7 @@ class CardSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._head_normal()
-        self.five.set(usage.five.pct, usage.five.left)
+        self.five.set(usage.five.pct, usage.five.left, due=five_due(usage))
         self.week.set(usage.week.pct, usage.week.left, pace(usage))
         self.stamp.config(text=f"{stamp} 기준")
 
@@ -154,3 +162,10 @@ class CardSkin(Skin):
             self.foot_label.config(text="")
             self.foot_value.config(text="")
         self.note.config(text="")
+
+    def notice(self, text: str) -> None:
+        # 값은 멀쩡한데 알릴 것(자동 시작 놓침)을 꼬리말 오른쪽에 호박색으로. show()/
+        # show_error() 가 note 를 비운 직후 앱이 부른다 — 빈 문자열이면 그대로 둔다.
+        if not text:
+            return
+        self.note.config(text=text, fg=P.amber)

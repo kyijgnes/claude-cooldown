@@ -9,7 +9,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import font as tkfont
 
-from cooldown_core import Usage, pace
+from cooldown_core import Usage, five_due, pace
 
 from .base import KR, MARK_W, NUM, P, Skin, mark_x, scoped_text, tone, worst
 
@@ -175,7 +175,7 @@ class TableSkin(Skin):
     def show(self, usage: Usage, stamp: str) -> None:
         self._head_normal(worst(usage))
         p = pace(usage)
-        self.five.set(usage.five.pct, usage.five.left)
+        self.five.set(usage.five.pct, usage.five.left, five_due(usage))
         self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
         self.stamp.config(text=f"{stamp} 기준")
 
@@ -199,3 +199,11 @@ class TableSkin(Skin):
             self.week.set(None, "")
             self.model.clear()
             self.model_rule.configure(bg=P.bg)
+
+    def notice(self, text: str) -> None:
+        # 값은 멀쩡한데 알릴 것(자동 시작 놓침)을 머리말 제목 자리에 호박색으로.
+        # show() 가 _head_normal 로 제목을 정상으로 둔 직후 앱이 부른다 — 빈 문자열이면
+        # 그대로 둔다(정상 제목 유지). 오류(빨강)일 땐 앱이 이걸 부르지 않는다.
+        if not text:
+            return
+        self.title.configure(text=text, fg=P.amber)
