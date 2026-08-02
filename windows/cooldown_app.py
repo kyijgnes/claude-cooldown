@@ -412,28 +412,44 @@ def taskbar_slot(width: int, height: int) -> tuple[int, int] | None:
         return None
 
 
+def gil_held(lib: str):
+    """호출하는 동안 GIL 을 놓지 않는 DLL 핸들 (창을 만지는 Win32 호출 전용).
+
+    ★ 창을 건드리는 Win32 함수(SetWindowPos·EndMenu·DwmSetWindowAttribute…)는
+    **부르는 그 자리에서** 창 프로시저로 메시지를 보내고, Tk 는 그 안에서 밀려
+    있던 after 콜백을 실행한다. 그런데 `ctypes.windll` 과 pywin32 는 호출하는
+    동안 GIL 을 놓으므로, 그 콜백이 **파이썬 스레드 상태가 없는 채로** 들어와
+    `Fatal Python error: PyEval_RestoreThread` 로 앱이 통째로 죽는다
+    (2026-08-03 02:43 실제 크래시 — 예외 0xC0000409, 로그에 아무 흔적도 안 남는다).
+    `PyDLL` 은 GIL 을 안 놓으므로 그 콜백이 정상적으로 돈다.
+    """
+    dll = _GIL_DLL.get(lib)
+    if dll is None:
+        import ctypes
+
+        dll = _GIL_DLL[lib] = ctypes.PyDLL(lib)
+    return dll
+
+
+_GIL_DLL: dict = {}
+
+
 def raise_above_taskbar(root: tk.Tk) -> None:
     """항상 위 창들 중에서도 맨 앞으로 올린다.
 
     작업표시줄도 '항상 위' 라서, 그냥 topmost 로 두면 작업표시줄이 위에 와서
     붙여 놓은 위젯이 가려진다. 작업표시줄은 조작할 때마다 스스로를 올리므로
     붙어 있는 동안은 주기적으로 다시 올려야 한다.
+
+    ★ 올리는 일은 **Tk 를 통해서** 한다 (`win32gui.SetWindowPos` 로 직접 부르지 말 것).
+    pywin32 는 부르는 동안 GIL 을 놓는데, 그 사이 Tk 가 밀린 after 콜백을 실행하다
+    앱이 통째로 죽는다 (`gil_held` 주석 참고 — 실제로 났던 크래시다). Tk 의 raise 는
+    Tcl 안에서 같은 SetWindowPos 를 부르므로 그 문제가 없다.
+    작업표시줄을 이기는 효과는 win32 방식과 같은 것으로 확인했다.
     """
     try:
-        import win32con
-        import win32gui
-
-        hwnd = win32gui.GetParent(root.winfo_id()) or root.winfo_id()
-        win32gui.SetWindowPos(
-            hwnd,
-            win32con.HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-        )
-    except Exception:  # noqa: BLE001
+        root.lift()
+    except tk.TclError:
         pass
 
 
@@ -465,9 +481,8 @@ def dismiss_menus() -> None:
     주인 창을 감추면 메뉴만 화면에 덩그러니 남으므로 직접 끝내 준다.
     """
     try:
-        import ctypes
-
-        ctypes.windll.user32.EndMenu()
+        # 메뉴를 끝내면 그 자리에서 창 프로시저가 돈다 — GIL 을 쥔 채로 부른다
+        gil_held("user32").EndMenu()
     except Exception:  # noqa: BLE001
         pass
 
@@ -475,12 +490,13 @@ def dismiss_menus() -> None:
 def round_corners(root: tk.Tk) -> None:
     """윈도우 11 둥근 모서리. 안 되는 환경이면 조용히 넘어간다."""
     try:
-        import ctypes
         from ctypes import byref, c_int
 
         root.update_idletasks()
-        hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, byref(c_int(2)), 4)
+        # 모서리를 바꾸면 비클라이언트 영역이 다시 그려진다 — GIL 을 쥔 채로 부른다
+        user32 = gil_held("user32")
+        hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
+        gil_held("dwmapi").DwmSetWindowAttribute(hwnd, 33, byref(c_int(2)), 4)
     except Exception:  # noqa: BLE001
         pass
 

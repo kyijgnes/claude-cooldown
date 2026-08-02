@@ -78,6 +78,7 @@ MAX_LEFT = ("4시간 59분 후", "23시간 59분 후")
 MAX_STAMP = "23:59 기준"
 MAX_SCOPED = "Claude Opus 99%"
 MAX_ERROR = "재로그인 필요"
+MAX_NOTICE = "23:59 자동 시작 놓침"  # notice() 가 같은 자리에 쓴다 — 폭 계산에 꼭 넣을 것
 
 
 # ---------------------------------------------------------------- 마스코트 도트 그림
@@ -229,7 +230,10 @@ class Cell:
 class SlimSkin(Skin):
     key = "slim"
     name = "슬림 바 (작업표시줄용)"
-    width = 480
+    # 오른쪽 칸이 MAX_NOTICE('23:59 자동 시작 놓침', 104px)까지 자르지 않고 담는 폭.
+    # 두 한도 칸이 먼저 제 몫을 가져가므로(need_cell×2 = 324px) 이보다 좁히면
+    # 오른쪽 칸부터 깎여 모델명·오류·알림이 … 로 잘린다. 줄이려면 MGAP 부터 줄일 것.
+    width = 520
     dockable = True
 
     def build(self, parent: tk.Misc) -> None:
@@ -270,6 +274,7 @@ class SlimSkin(Skin):
         need_right = max(
             self.f_small.measure(MAX_STAMP),
             self.f_small.measure(MAX_SCOPED),
+            self.f_small.measure(MAX_NOTICE),
             self.f_msg.measure(MAX_ERROR),
         )
         # 가로: [띠] 5시간칸 |GAP| 주간칸 |MGAP(마스코트)| 오른쪽칸.
