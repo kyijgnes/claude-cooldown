@@ -56,7 +56,7 @@ object WallpaperArt {
 
         if (look.mascot && mascot != null) {
             mascot.step()
-            mascot.draw(c, look.mascotX * w, look.mascotY * h, mascotCell(w), p.coral, p.bg)
+            mascot.draw(c, look.mascotX * w, look.mascotY * h, mascotCell(w), p.coral, p.bg, p.amber)
         }
 
         drawMeter(ctx, c, w, h, snap, now, p, look)

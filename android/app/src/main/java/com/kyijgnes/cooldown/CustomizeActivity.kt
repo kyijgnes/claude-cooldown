@@ -200,12 +200,16 @@ class CustomizeActivity : Activity() {
                 movingMascot = WallpaperArt.hitsMascot(w, h, draft, mascot, x, y)
                 movingMeter = !movingMascot && WallpaperArt.hitsMeter(w, h, draft, x, y)
                 moved = false
+                if (movingMascot) mascot.press()   // 누른 채로 있으면 기를 모은다
             }
 
             MotionEvent.ACTION_MOVE -> {
                 val dx = x - lastX
                 val dy = y - lastY
-                if (dx * dx + dy * dy > 1f) moved = true
+                if (dx * dx + dy * dy > 1f) {
+                    if (!moved && movingMascot) mascot.cancel()   // 끌기로 바뀌었다 — 기는 물린다
+                    moved = true
+                }
                 change(
                     when {
                         movingMascot -> draft.withMascotPos(x / w, y / h)
@@ -217,8 +221,8 @@ class CustomizeActivity : Activity() {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // 끌지 않고 콕 눌렀으면 여기서도 클로디가 반응한다 (배경화면과 같게)
-                if (!moved && movingMascot) mascot.poke()
+                // 끌지 않았으면 여기서도 배경화면과 똑같이 논다 (콕 / 기 모아 뛰기)
+                if (movingMascot) if (moved) mascot.cancel() else mascot.release()
                 preview.parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
@@ -266,9 +270,7 @@ class CustomizeActivity : Activity() {
             change(draft.copy(meterSize = it.coerceIn(Look.METER_MIN, Look.METER_MAX)), rebuild = false)
         }
         toggle("글씨 뒤 판", draft.plateOn) { change(draft.withPlate(it), rebuild = false) }
-
-        section("클로디")
-        toggle("배경화면에 클로디", draft.mascot) { change(draft.copy(mascot = it)) }
+        toggle("클로디", draft.mascot) { change(draft.copy(mascot = it)) }
     }
 
     private fun section(title: String) {

@@ -22,7 +22,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "windows"))
 sys.path.insert(0, ROOT)
 
-from skins.slim import ARM, EYES, HEAD, LEGS, MASCOT_COLOR  # noqa: E402
+from skins.slim import ARM, EYES, HEAD, LEGS, LEGS_WIDE, MASCOT_COLOR  # noqa: E402
 
 OUT = os.path.join(ROOT, "android", "app", "src", "main", "res", "drawable", "ic_claudi.xml")
 OUT_KT = os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "kyijgnes",
@@ -132,7 +132,7 @@ def write_kotlin() -> None:
         "        %d to intArrayOf(%s)," % (k, kt_cells(v)) for k, v in sorted(ARM.items())
     )
     kt = KT_TEMPLATE.format(
-        head=kt_rows(HEAD), legs=kt_rows(LEGS), arms=arms, eyes=eyes,
+        head=kt_rows(HEAD), legs=kt_rows(LEGS), legs_wide=kt_rows(LEGS_WIDE), arms=arms, eyes=eyes,
         last_head=len(HEAD) - 1, leg_row=len(HEAD), foot_row=len(HEAD) + 1,
     )
     with open(OUT_KT, "w", encoding="utf-8") as f:
@@ -157,6 +157,11 @@ object MascotSprite {{
 
     val LEGS = arrayOf(
         {legs},
+    )
+
+    /** 기절했을 때 — 다리가 벌어져 주저앉는다. */
+    val LEGS_WIDE = arrayOf(
+        {legs_wide},
     )
 
     /** 팔 한 칸의 자리 — **왼팔 기준**, 오른팔은 `8 - col` 로 뒤집어 쓴다. -1 번쩍 / 0 옆 / 1 늘어뜨림 */

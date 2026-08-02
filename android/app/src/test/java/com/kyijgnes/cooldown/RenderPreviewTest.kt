@@ -75,7 +75,7 @@ class RenderPreviewTest {
         save(GaugeRenderer.statusIcon(100f), "상태바_100.png")
         save(GaugeRenderer.statusIcon(null), "상태바_값없음.png")
 
-        // 라이브 배경화면 (FHD+ 세로) — 클로디가 있는 판과 없는 판
+        // 라이브 배경화면 (FHD+ 세로) — 클로디가 있는 판과 없는 판 (클로디는 눌러서 논다)
         wallpaper(ctx, "배경화면")
         wallpaper(ctx, "배경화면_클로디없음", look = Look.DEFAULT.copy(mascot = false))
 

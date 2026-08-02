@@ -39,20 +39,45 @@ class CooldownWallpaperService : WallpaperService() {
             setTouchEventsEnabled(true)
         }
 
-        /** 빈 곳을 눌렀을 때만 온다 — 클로디 위면 펄쩍. */
+        /** 클로디를 짚고 있는 중인가 — 누른 채로 기를 모으다가 떼면 뛴다. */
+        private var holding = false
+
+        /**
+         * 빈 곳을 눌렀을 때만 온다(아이콘·위젯 위는 그쪽이 먹는다).
+         * **누르면 기를 모으고 떼면 뛴다** — 짧게 누르면 그냥 콕 찌른 것이다.
+         * ★ 런처가 길게 누르기를 자기 메뉴로 채 가면 UP 이 안 올 수 있어, 그때는
+         *   `onVisibilityChanged(false)` 에서 물린다(아래).
+         */
         override fun onTouchEvent(event: android.view.MotionEvent) {
-            if (event.action != android.view.MotionEvent.ACTION_DOWN) return
             if (lastW <= 0f) return
-            val look = Look.read(this@CooldownWallpaperService)
-            if (WallpaperArt.hitsMascot(lastW, lastH, look, mascot, event.x, event.y)) {
-                mascot.poke()
-                if (!showing) drawFrame()
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    val look = Look.read(this@CooldownWallpaperService)
+                    holding = WallpaperArt.hitsMascot(lastW, lastH, look, mascot, event.x, event.y)
+                    if (holding) mascot.press()
+                }
+
+                android.view.MotionEvent.ACTION_UP -> if (holding) {
+                    holding = false
+                    mascot.release()
+                    if (!showing) drawFrame()
+                }
+
+                android.view.MotionEvent.ACTION_CANCEL -> if (holding) {
+                    holding = false
+                    mascot.cancel()
+                }
             }
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             showing = visible
-            if (visible) drawFrame() else handler.removeCallbacks(runner)
+            if (visible) {
+                drawFrame()
+            } else {
+                if (holding) { holding = false; mascot.cancel() }   // 런처 메뉴가 채 갔다
+                handler.removeCallbacks(runner)
+            }
         }
 
         override fun onSurfaceChanged(h: SurfaceHolder?, format: Int, w: Int, height: Int) {
