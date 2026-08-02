@@ -181,7 +181,7 @@ class CustomizeActivity : Activity() {
         WallpaperArt.render(this, Canvas(bmp), Store.snapshot(this).settled(now), now, draft, mascot)
         preview.invalidate()
         handler.removeCallbacks(ticker)
-        handler.postDelayed(ticker, 60L)   // 배경화면과 같은 박자
+        handler.postDelayed(ticker, 33L)   // 배경화면과 같은 박자(30fps)
     }
 
     /** 클로디를 짚으면 클로디가, 미터기를 짚으면 미터기가, 그 밖을 짚으면 배경이 따라온다. */

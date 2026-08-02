@@ -148,7 +148,11 @@ class CooldownWallpaperService : WallpaperService() {
     }
 
     private companion object {
-        /** 한 프레임 (약 16fps). 마스코트가 부드러운 선에서 배터리를 가장 덜 쓰는 값. */
-        const val FRAME_MS = 60L
+        /**
+         * 한 프레임 (약 30fps). 16fps 로는 **클로디가 튀는 게 느릿느릿 보였다** —
+         * 물리는 프레임마다 도므로 프레임이 빠를수록 같은 높이를 더 빨리 오간다.
+         * **보일 때만 돈다**(`onVisibilityChanged`)라 홈 화면을 보고 있을 때만 쓴다.
+         */
+        const val FRAME_MS = 33L
     }
 }

@@ -27,6 +27,8 @@ import kotlin.math.sin
  */
 class Mascot {
 
+    // ★ **프레임은 30fps 다**(`CooldownWallpaperService.FRAME_MS`). 16fps 로는 튀는 게
+    //   느릿느릿 보였다 — 아래 '프레임 수'로 적은 값은 전부 30fps 기준이다.
     private var t = 0
     // ★ **용수철은 픽셀이 아니라 '칸' 단위로 센다.** 폰은 도트가 크고 화면도 커서
     //   픽셀로 잡으면 데스크탑과 같은 값이 제자리 꿈틀거림밖에 안 된다.
@@ -39,7 +41,7 @@ class Mascot {
 
     private var surprise = 0
     private var blink = 0
-    private var nextBlink = 60
+    private var nextBlink = 120
 
     private var charging = false
     private var charge = 0f    // 0~1
@@ -83,8 +85,8 @@ class Mascot {
         if (blink > 0) {
             blink--
         } else if (--nextBlink <= 0) {
-            blink = 3
-            nextBlink = 60 + (t % 90)   // 규칙적이지 않게 (난수 없이도 흩어진다)
+            blink = 5
+            nextBlink = 120 + (t % 180)   // 규칙적이지 않게 (난수 없이도 흩어진다)
         }
         stepSparks()
     }
@@ -93,7 +95,7 @@ class Mascot {
         var i = 0
         while (i < sparks.size) {
             val s = sparks[i]
-            s[1] += s[2]; s[2] += 0.06f; s[3] -= 1f
+            s[1] += s[2] * 0.5f; s[2] += 0.03f; s[3] -= 1f
             if (s[3] <= 0f) sparks.removeAt(i) else i++
         }
     }
@@ -158,7 +160,7 @@ class Mascot {
     private fun burst() {
         for (k in 0 until 7) {
             val a = k * 0.9f
-            sparks.add(floatArrayOf(sin(a) * 14f, -abs(sin(a * 1.7f)) * 10f, -1.4f - k * 0.1f, 22f))
+            sparks.add(floatArrayOf(sin(a) * 14f, -abs(sin(a * 1.7f)) * 10f, -1.4f - k * 0.1f, 44f))
         }
     }
 
@@ -179,7 +181,7 @@ class Mascot {
 
         if (faint > 0) {
             drawSprite(c, cx, cy + 2f, u * FAINT_SCALE, u * FAINT_SCALE,
-                sin(t * 0.2f) * 0.20f, "faint", 1, MascotSprite.LEGS_WIDE, body, hole)
+                sin(t * 0.1f) * 0.20f, "faint", 1, MascotSprite.LEGS_WIDE, body, hole)
             drawDizzy(c, cx, cy - MascotSprite.ROWS / 2f * u * FAINT_SCALE - u, u, star)
             drawSparks(c, cx, cy, u, body)
             return
@@ -187,14 +189,14 @@ class Mascot {
 
         // 기 모으는 중에는 쭈그리고 부르르 떤다 — 모을수록 더 눌리고 더 떤다
         val squat = if (charging) charge else 0f
-        val shake = if (charging) sin(t * 1.6f) * 0.10f * charge else 0f
+        val shake = if (charging) sin(t * 0.8f) * 0.10f * charge else 0f
 
-        val breathe = 1f + 0.045f * sin(t * 0.09f)
+        val breathe = 1f + 0.045f * sin(t * 0.045f)
         val stretch = (-yoff * 0.055f).coerceIn(-0.20f, 0.34f)   // 뜰수록 늘고 눌릴수록 납작
         val sx = breathe * (1f - stretch * 0.6f + squat * 0.22f)
         val sy = breathe * (1f + stretch - squat * 0.30f)
 
-        val y = cy + (yoff + sin(t * 0.12f) * 0.10f + squat * 0.9f) * u
+        val y = cy + (yoff + sin(t * 0.06f) * 0.10f + squat * 0.9f) * u
         val speed = abs(vy) + abs(yoff)
         val expr = when {
             charging -> "grin"
@@ -264,7 +266,7 @@ class Mascot {
     private fun drawDizzy(c: Canvas, cx: Float, top: Float, u: Float, color: Int) {
         val p = Paint().apply { this.color = color }
         for (k in 0 until 3) {
-            val a = t * 0.35f + k * 2.09f
+            val a = t * 0.18f + k * 2.09f
             val x = cx + sin(a) * u * 3.4f
             val y = top + sin(a + 1.57f) * u * 1.1f
             plus(c, x, y, u * 0.5f, p)
@@ -274,7 +276,7 @@ class Mascot {
     /** 뿜은 반짝이 — 도트 십자가 떠오르며 사그라든다. */
     private fun drawSparks(c: Canvas, cx: Float, cy: Float, u: Float, p: Paint) {
         for (s in sparks) {
-            val k = u * 0.45f * (s[3] / 22f)
+            val k = u * 0.45f * (s[3] / 44f)
             if (k < 0.6f) continue
             plus(c, cx + s[0] * u * 0.25f, cy + s[1] * u * 0.25f, k, p)
         }
@@ -286,23 +288,23 @@ class Mascot {
     }
 
     private companion object {
-        const val SPRING_K = 0.20f
-        const val SPRING_DAMP = 0.14f
-        const val SPIN = 0.16f
+        const val SPRING_K = 0.13f
+        const val SPRING_DAMP = 0.10f
+        const val SPIN = 0.10f
 
         const val LIFT = 7.0f            // 최대한 뜨는 높이 (칸) — 몸이 10칸이니 거의 한 몸 반
-        const val JUMP = 2.4f            // 콕 찔렀을 때 (칸/프레임)
-        const val CHARGE_JUMP = 3.4f     // 기를 꽉 모았을 때 더해지는 힘
-        const val CHARGE_FRAMES = 45f    // 약 2.8초면 가득 (16fps)
-        const val CHARGE_MIN = 6         // 이보다 짧게 누르면 그냥 콕
+        const val JUMP = 2.7f            // 콕 찔렀을 때 (칸/프레임)
+        const val CHARGE_JUMP = 3.6f     // 기를 꽉 모았을 때 더해지는 힘
+        const val CHARGE_FRAMES = 80f    // 약 2.7초면 가득 (30fps)
+        const val CHARGE_MIN = 10        // 이보다 짧게 누르면 그냥 콕
 
-        const val SURPRISE_FRAMES = 12
-        const val CLICK_DECAY = 0.035f
-        const val COMBO_FRAMES = 12      // 약 0.75초 안에 다시 찌르면 이어진다 (16fps)
+        const val SURPRISE_FRAMES = 20
+        const val CLICK_DECAY = 0.018f
+        const val COMBO_FRAMES = 22      // 약 0.75초 안에 다시 찌르면 이어진다 (30fps)
         const val COMBO_MAX = 5
-        const val COMBO_JUMP = 0.7f      // 콤보 한 번마다 더 높이
+        const val COMBO_JUMP = 0.8f      // 콤보 한 번마다 더 높이
         const val FAINT_AT = 12f         // 콕 여섯 번쯤
-        const val FAINT_FRAMES = 44      // 약 2.7초
+        const val FAINT_FRAMES = 80      // 약 2.7초
         const val FAINT_SCALE = 1.3f
     }
 }
