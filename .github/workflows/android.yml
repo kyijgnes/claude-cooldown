@@ -53,7 +53,9 @@ jobs:
         id: apk
         run: |
           src=android/app/build/outputs/apk/release/app-release.apk
-          out="클로드쿨다운-${GITHUB_REF_NAME:-dev}.apk"
+          # ★ 이름은 ASCII 로. 한글로 지으면 GitHub 이 릴리스 자산 이름에서 통째로 깎아내
+          #   '-v0.3.apk' 같은 게 붙는다 (v0.3 에서 실제로 그랬다).
+          out="claude-cooldown-${GITHUB_REF_NAME:-dev}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 

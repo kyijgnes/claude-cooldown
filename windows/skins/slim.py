@@ -418,14 +418,7 @@ class SlimSkin(Skin):
         sway = math.sin(t * 0.05) * 0.22 + self._roff + tilt + wig
         speed = abs(self._vy) + abs(self._yoff)                   # 출렁이는 중이면 신났다
 
-        for k in range(8):  # 별빛 살 — 길고 짧은 걸 번갈아 (가로·세로 따로 늘려 기지개 표현)
-            ang = math.pi * 2 * k / 8 - math.pi / 2 + sway
-            rr = (MASCOT_R if k % 2 == 0 else MASCOT_R * 0.72)
-            rr *= 1 + 0.10 * math.sin(t * 0.2 + k)               # 살짝 반짝
-            c.create_line(
-                cx, cy, cx + math.cos(ang) * rr * sxk, cy + math.sin(ang) * rr * syk,
-                fill=MASCOT_COLOR, width=2, capstyle="round", tags="mascot",
-            )
+        self._rays(c, cx, cy, sway, t, sxk, syk)
         brx = MASCOT_R * 0.62 * sxk  # 통통한 몸통
         bry = MASCOT_R * 0.62 * syk
         c.create_oval(cx - brx, cy - bry, cx + brx, cy + bry, fill=MASCOT_COLOR, width=0, tags="mascot")
@@ -441,7 +434,9 @@ class SlimSkin(Skin):
                           width=1.3, capstyle="round", tags="mascot")
 
         # 눈 — 바탕색으로 파낸다. 콕 찔리면 O O, 출렁이면 ∧∧, 깜빡이면 —, 굴리면 옆으로.
-        er, ex, ey = 1.1, 2.1, cy - 1.4 * syk
+        # ★ 눈은 반짝임 점보다 확실히 커야 한다 — 비슷하면 이 크기에선 둘 다 '+' 로 뭉개져
+        #   얼굴이 아니라 반짝임이 셋 있는 것처럼 보인다.
+        er, ex, ey = 1.5, 2.4, cy - 1.4 * syk
         exL, exR = cx - ex + eye_dx, cx + ex + eye_dx
         if self._surprise > 0:  # O O — 직접 찔려 놀란 동그란 눈
             wr = 1.9
@@ -460,6 +455,44 @@ class SlimSkin(Skin):
             for ecx in (exL, exR):
                 c.create_oval(ecx - er, ey - er, ecx + er, ey + er, fill=bg, width=0, tags="mascot")
 
+        self._mouth(c, cx, cy, syk, bg, grin=speed > 1.2, surprised=self._surprise > 0)
+
+    def _rays(self, c: tk.Canvas, cx: float, cy: float, sway: float,
+              t: float, sxk: float, syk: float, s: float = 1.0) -> None:
+        """별빛 — **상하좌우 넷만 살**이고 대각선 넷은 떠 있는 점이다(폰 아이콘과 같은 결).
+
+        예전엔 여덟 살을 길고 짧게 번갈아 뻗었는데, 이 크기에서 눈에 들어오는 건
+        상하좌우 넷뿐이라 짧은 살은 팔다리처럼만 보였다. 점으로 바꾸니 반짝임이 산다.
+        """
+        for k in range(4):
+            ang = math.pi / 2 * k - math.pi / 2 + sway
+            rr = MASCOT_R * s * (1 + 0.10 * math.sin(t * 0.2 + k))   # 살짝 반짝
+            c.create_line(
+                cx, cy, cx + math.cos(ang) * rr * sxk, cy + math.sin(ang) * rr * syk,
+                fill=MASCOT_COLOR, width=2, capstyle="round", tags="mascot",
+            )
+        for k in range(4):
+            ang = math.pi / 2 * k - math.pi / 4 + sway
+            dd = MASCOT_R * 1.02 * s * (1 + 0.10 * math.sin(t * 0.2 + k + 2))
+            px = cx + math.cos(ang) * dd * sxk
+            py = cy + math.sin(ang) * dd * syk
+            r = 0.95 * s
+            c.create_oval(px - r, py - r, px + r, py + r,
+                          fill=MASCOT_COLOR, width=0, tags="mascot")
+
+    def _mouth(self, c: tk.Canvas, cx: float, cy: float, syk: float, bg: str,
+               grin: bool, surprised: bool) -> None:
+        """작은 웃는 입. 놀라면 동그랗게, 신나면 크게 벌린다. 눈과 달리 굴리지 않는다."""
+        my = cy + 1.6 * syk
+        if surprised:
+            r = 1.0
+            c.create_oval(cx - r, my - r, cx + r, my + r, fill=bg, width=0, tags="mascot")
+            return
+        w, h = (2.2, 1.9) if grin else (1.9, 1.4)
+        c.create_arc(cx - w, my - h, cx + w, my + h,
+                     start=205, extent=130, style="arc",
+                     outline=bg, width=1.3, tags="mascot")
+
     def _draw_faint(self, c: tk.Canvas, cx: int, bg: str) -> None:
         """기절 — 크게 부풀려 늘어지고, 또렷한 X_X 눈에, 별 세 개가 머리 위를 돈다.
         작아서 눈이 안 보이던 걸 FAINT_SCALE 로 키워 X 를 확실히 보이게 한다."""
@@ -467,13 +500,7 @@ class SlimSkin(Skin):
         s = FAINT_SCALE
         cy = self.h / 2 + 2.0 + math.sin(t * 0.25) * 0.6  # 살짝 처져 흐느적
         tilt = math.sin(t * 0.2) * 0.5                    # 어질어질 크게 흔들
-        for k in range(8):
-            ang = math.pi * 2 * k / 8 - math.pi / 2 + tilt
-            rr = (MASCOT_R if k % 2 == 0 else MASCOT_R * 0.72) * s
-            c.create_line(
-                cx, cy, cx + math.cos(ang) * rr, cy + math.sin(ang) * rr,
-                fill=MASCOT_COLOR, width=2, capstyle="round", tags="mascot",
-            )
+        self._rays(c, cx, cy, tilt, t, 1.0, 1.0, s)
         br = MASCOT_R * 0.62 * s
         c.create_oval(cx - br, cy - br, cx + br, cy + br, fill=MASCOT_COLOR, width=0, tags="mascot")
         # X_X 눈 — 바탕색 십자, 큼직하고 도톰하게
