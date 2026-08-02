@@ -44,7 +44,6 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.options).setOnClickListener { openOptions() }
 
         takePairFrom(intent)
-        seedWallpaper()
         RefreshWorker.schedule(this)
         ResetAlarm.schedule(this)
     }
@@ -58,6 +57,9 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // ★ **켤 때마다** 쓰던 배경화면을 다시 뜬다. onCreate 에서만 하면 앱이 뒤에 살아
+        //   있을 때 배경을 바꿔도 안 따라온다(실제로 옛 그림이 남았다).
+        seedWallpaper()
         showValues()
         if (!Store.paired(this)) {
             if (!sentToPair) {

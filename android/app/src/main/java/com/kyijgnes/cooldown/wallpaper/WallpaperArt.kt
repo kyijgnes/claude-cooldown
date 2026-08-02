@@ -285,11 +285,27 @@ object WallpaperArt {
      */
     private fun photoFor(ctx: Context, uri: String): Bitmap? {
         if (uri.isEmpty()) return null
-        if (uri == photoKey && photo != null) return photo
+        // ★★ **주소만으로 캐시하면 안 된다.** 쓰던 배경화면은 늘 같은 파일 이름
+        //   (`phone_wallpaper.png`)에 덮어써서, 배경을 바꿔도 주소가 그대로다 —
+        //   그러면 **배경화면 그리는 프로세스가 옛 그림을 계속 쓴다**(실제로 그랬다).
+        //   파일이 마지막으로 바뀐 때를 키에 섞어 내용이 바뀌면 다시 읽게 한다.
+        val key = "$uri|${stampOf(uri)}"
+        if (key == photoKey && photo != null) return photo
         val dm = ctx.resources.displayMetrics
-        photoKey = uri
+        photoKey = key
         photo = decodePhoto(ctx, uri, dm.widthPixels, dm.heightPixels)
         return photo
+    }
+
+    /** 파일이면 마지막으로 바뀐 때. 고른 사진(content://)은 주소가 바뀌니 0 이면 된다. */
+    private fun stampOf(uri: String): Long = try {
+        if (uri.startsWith("file://")) {
+            java.io.File(android.net.Uri.parse(uri).path ?: "").lastModified()
+        } else {
+            0L
+        }
+    } catch (e: Exception) {
+        0L
     }
 
     private fun decodePhoto(ctx: Context, uri: String, w: Int, h: Int): Bitmap? = try {

@@ -262,8 +262,11 @@ class CustomizeActivity : Activity() {
                 change(draft.copy(seaSize = it.coerceIn(Look.ART_MIN, Look.ART_MAX)), rebuild = false)
             }
         } else {
-            // 아직 못 떠 왔으면 그것부터 — 버튼 이름이 곧 하는 일이다(권한 화면으로 간다)
-            if (grabbed.isEmpty()) button("쓰던 배경화면 가져오기") { takeWallpaper() }
+            // 버튼 이름이 곧 하는 일이다 — 아직 못 떠 왔으면 가져오기(권한 화면으로 간다),
+            // 이미 있으면 **지금 배경화면으로 갱신**(바꾼 배경을 손으로 따라가게 하는 손잡이)
+            button(if (grabbed.isEmpty()) "쓰던 배경화면 가져오기" else "지금 배경화면으로 갱신") {
+                takeWallpaper()
+            }
             button(if (draft.photo.isEmpty() || ownWallpaper) "사진 고르기" else "다른 사진") { pickPhoto() }
             if (!ownWallpaper && grabbed.isNotEmpty()) {
                 button("쓰던 배경으로") {
@@ -371,6 +374,7 @@ class CustomizeActivity : Activity() {
             askAllFiles()
             return
         }
+        // 이미 떠 둔 게 있어도 **다시 뜬다** — 바꾼 배경을 따라가라고 누르는 버튼이다
         val uri = WallpaperGrab.ensure(this)
         if (uri.isEmpty()) {
             Toast.makeText(this, "배경화면을 못 가져왔어요", Toast.LENGTH_SHORT).show()
