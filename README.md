@@ -6,8 +6,8 @@
 
 **[👉 최신 버전 받기 (Releases)](https://github.com/kyijgnes/claude-cooldown/releases/latest)**
 
-- 💻 **컴퓨터 (Windows)** — `claude-cooldown-v0.9.exe` (더블클릭)
-- 📱 **폰 (안드로이드)** — `claude-cooldown-v0.9.apk` (설치)
+- 💻 **컴퓨터 (Windows)** — `claude-cooldown-*.exe` (더블클릭)
+- 📱 **폰 (안드로이드)** — `claude-cooldown-*.apk` (설치)
 
 > **Claude Code 에 로그인돼 있어야** 사용량이 보입니다.
 

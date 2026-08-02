@@ -10,10 +10,19 @@ import android.content.Context
  *   자기 손 안의 `Values` 만 고치고(미리보기도 그걸로 그린다), `저장` 에서 한 번에 쓴다.
  *   낱개 setter 를 되살리지 말 것 — 그 순간 '저장 전'이 없어진다.
  *
- * 배경은 **쓰던 배경화면(떠 온 것)·고른 사진**이다. 보여 줄 게 없으면 밋밋한 바탕색.
+ * 배경은 **쓰던 배경화면(떠 온 것)·고른 사진**이 기본이고, **상어 앱이 깔려 있으면 상어**도
+ * 고를 수 있다(그림은 그 앱에서 읽어 온다 — `SharkPack`). 보여 줄 게 없으면 밋밋한 바탕색.
  */
 object Look {
     private const val FILE = "cooldown"
+
+    // 배경 종류 — 상어는 **상어 앱이 깔려 있을 때만** 고를 수 있다(그림을 거기서 읽어 온다)
+    const val PHOTO = "photo"   // 쓰던 배경화면, 또는 직접 고른 사진 (기본)
+    const val SHARK = "shark"   // 상어 바다 (com.kyijgnes.sharkwallpaper 필요)
+
+    // 상어는 잘릴 게 없으니 크기를 넉넉히
+    const val ART_MIN = 0.5f
+    const val ART_MAX = 1.7f
 
     // 미터기 모양
     const val BARS = "bars"       // 막대 두 줄
@@ -33,7 +42,11 @@ object Look {
      * @param photoX 사진 자리는 **잘려 나간 쪽을 어디까지 보여 줄지**(0~1).
      */
     data class Values(
+        val scene: String = PHOTO,
         val photo: String = "",
+        val seaX: Float = 0.5118f,      // 상어 자리는 **상어 자신의 한가운데**다
+        val seaY: Float = 0.4566f,
+        val seaSize: Float = 1f,
         val mascot: Boolean = true,     // 배경화면에 사는 클로디 (눌러서 놀 수 있다)
         // 기본 자리는 **미터기 판 안쪽 오른쪽 위** — 제목 줄 옆이 비어 있다
         val mascotX: Float = 0.80f,
@@ -47,13 +60,18 @@ object Look {
         val photoY: Float = 0.5f,
     ) {
         /** 안 정했으면 **켠 것으로 본다** — 사진 위 글씨는 판 없이는 못 읽는다. */
-        val plateOn: Boolean get() = if (plate == UNSET) true else plate == 1
+        val plateOn: Boolean get() = if (plate == UNSET) scene != SHARK else plate == 1
 
-        val bgX: Float get() = photoX
-        val bgY: Float get() = photoY
+        val bgX: Float get() = if (scene == SHARK) seaX else photoX
+        val bgY: Float get() = if (scene == SHARK) seaY else photoY
 
-        fun withBg(x: Float, y: Float) =
-            copy(photoX = x.coerceIn(0f, 1f), photoY = y.coerceIn(0f, 1f))
+        /** ★ 사진 자리와 상어 자리는 **따로 담는다** — 사진을 옮겨 놓고 상어로 돌아왔을 때
+         *  상어까지 따라 움직이면 안 된다. */
+        fun withBg(x: Float, y: Float): Values {
+            val cx = x.coerceIn(0f, 1f)
+            val cy = y.coerceIn(0f, 1f)
+            return if (scene == SHARK) copy(seaX = cx, seaY = cy) else copy(photoX = cx, photoY = cy)
+        }
 
         fun withMeterPos(x: Float, y: Float) =
             copy(meterX = x.coerceIn(0f, 1f), meterY = y.coerceIn(0f, 1f))
@@ -74,7 +92,11 @@ object Look {
         val p = prefs(ctx)
         val d = DEFAULT
         return Values(
+            scene = p.getString("look_scene", d.scene) ?: d.scene,
             photo = p.getString("look_photo", d.photo) ?: d.photo,
+            seaX = p.getFloat("look_art_x", d.seaX),
+            seaY = p.getFloat("look_art_y", d.seaY),
+            seaSize = p.getFloat("look_art_size", d.seaSize),
             mascot = p.getBoolean("look_mascot", d.mascot),
             // 클로디 첫 자리가 화면 한가운데였는데 **미터기 판 안쪽**으로 옮겼다 —
             // 옛 자리 그대로인 사람은 새 자리로 올린다(직접 옮긴 사람 것은 안 건드린다).
@@ -99,7 +121,11 @@ object Look {
 
     fun write(ctx: Context, v: Values) {
         prefs(ctx).edit()
+            .putString("look_scene", v.scene)
             .putString("look_photo", v.photo)
+            .putFloat("look_art_x", v.seaX)
+            .putFloat("look_art_y", v.seaY)
+            .putFloat("look_art_size", v.seaSize)
             .putBoolean("look_mascot", v.mascot)
             .putFloat("look_mascot_x", v.mascotX)
             .putFloat("look_mascot_y", v.mascotY)

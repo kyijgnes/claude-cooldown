@@ -25,6 +25,11 @@ class Palette(ctx: Context) {
     val seaTop = ctx.getColor(R.color.sea_top)
     val seaBottom = ctx.getColor(R.color.sea_bottom)
 
+    // 상어 테마 색 — 그림은 별도 앱(SharkPack)에서 읽어 오고 색만 우리가 갖는다
+    val sharkTint = ctx.getColor(R.color.shark_tint)
+    val bubble = ctx.getColor(R.color.bubble)
+    val sharkShadow = ctx.getColor(R.color.shark_shadow)
+
     /** 여유 초록 / 보통 노랑 / 임박 빨강. 값을 모르면 흐린 색. */
     fun tone(pct: Float?): Int = when {
         pct == null -> faint
