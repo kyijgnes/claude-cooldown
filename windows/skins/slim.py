@@ -46,7 +46,7 @@ ACC = 4  # 왼쪽 상태 띠 (한도 색)
 PAD_L = ACC + 12  # 내용 시작 (띠 뒤)
 PAD_R = 14
 MGAP = 46  # 주간 칸 ↔ 오른쪽 사이의 넓힌 틈 — 여기 가운데에 마스코트를 앉힌다
-MASCOT_R = 10   # 별빛 반지름 (px) — 기본 크기
+MASCOT_U = 2    # 도트 한 칸 (px). 팔까지 가로 11칸(22px) · 세로 8칸(16px)
 MASCOT_COLOR = "#d97757"  # 클로드 코랄 — 밝게/어둡게 양쪽에서 그대로 쓴다
 FRAME_MS = 45  # 애니메이션 한 프레임 (약 22fps — 물리가 부드럽게 이어지게)
 # 눌림 반응은 용수철처럼 — 누를 때마다 위로 튀는 '속도'를 더한다. 연타하면 힘이
@@ -61,7 +61,7 @@ CLICK_DECAY = 0.12    # 눌림 누적이 프레임마다 이만큼 식는다
 FAINT_FRAMES = 60     # 기절 지속 (약 2.7초)
 FAINT_SCALE = 1.35    # 기절 땐 크게 부풀려 X_X 눈이 또렷이 보이게
 SURPRISE_FRAMES = 7   # 직접 찔렸을 때 눈이 동그래지는 프레임 수
-HIT_R = 13            # 이 반경 안을 누르면 '직접 찌름'으로 본다 (px)
+HIT_R = 15            # 이 반경 안을 누르면 '직접 찌름'으로 본다 (px — 도트 그림 크기에 맞춤)
 GAP = 16  # 칸 사이
 SEG_GAP = 2  # 눈금 사이
 MARK_OUT = 2  # '지금쯤' 눈금이 게이지 위아래로 삐져나오는 길이
@@ -78,6 +78,57 @@ MAX_LEFT = ("4시간 59분 후", "23시간 59분 후")
 MAX_STAMP = "23:59 기준"
 MAX_SCOPED = "Claude Opus 99%"
 MAX_ERROR = "재로그인 필요"
+
+
+# ---------------------------------------------------------------- 마스코트 도트 그림
+# 클로디는 **도트(픽셀) 그림**이다. 한 칸이 MASCOT_U px 인 격자에 네모만 찍어 그리므로
+# 20~30px 에서도 획이 뭉개지지 않는다. 좌표는 전부 '몇 번째 칸'(col, row)이고,
+# 실제 픽셀 변환은 `_sprite` 한 곳에서만 한다.
+#
+#   col: 0..8 이 머리(가로 9칸), 그 밖 -1 / 9 가 팔이 뻗는 자리
+#   row: 0..5 가 머리, 6·7 이 다리와 발
+#
+# **몸통도 입도 없다** — 큰 머리에 짧은 팔 둘·다리 둘만 붙은 친구.
+# 표정은 **눈으로만** 낸다(옛 클로디도 눈이 얼굴의 거의 전부였다).
+#
+# ★ 머리는 **9칸**이라야 한다. 7칸으로 줄이면 눈 구멍 둘이 살을 다 먹어 머리가
+#   가로로 갈라져 보인다(게 집게처럼). 눈 옆·사이에 살이 남아야 얼굴로 읽힌다.
+# ★ 팔은 **눈 아래**에서 나간다. 눈 높이에 걸치면 수염처럼 보인다.
+HEAD = (
+    "..#####..",   # 0 머리 위 (모서리 깎음)
+    ".#######.",   # 1
+    "#########",   # 2 눈
+    "#########",   # 3 눈
+    "#########",   # 4 팔이 여기서 옆으로
+    ".#######.",   # 5 턱
+)
+LEGS = ("..#...#..", ".##...##.")       # 평소 — 다리 둘에 발
+LEGS_WIDE = (".#.....#.", "##.....##")  # 기절 — 다리가 벌어져 주저앉는다
+
+# 팔은 **한 칸**이다(짧게). **왼팔 기준**이고 오른팔은 좌우로 뒤집어 쓴다(`8 - col`).
+# -1 번쩍 / 0 옆으로 / 1 축 늘어뜨림
+# ★ 팔 칸은 **그 줄의 머리 끝에 닿아야** 한다. 안 그러면 한 칸 떨어져 떠 보인다
+#   (줄마다 머리 폭이 달라서 팔이 내려갈수록 안쪽 칸으로 붙는다).
+ARM = {
+    -1: ((-1, 3),),
+    0: ((-1, 4),),
+    1: ((0, 5),),
+}
+
+# 눈은 바탕색으로 파낸 칸이다 (오류 시 붉은 바탕에서도 얼굴이 남는다).
+EYES = {
+    "idle": ((2, 2), (3, 2), (2, 3), (3, 3), (5, 2), (6, 2), (5, 3), (6, 3)),
+    "blink": ((2, 3), (3, 3), (5, 3), (6, 3)),                     # — —
+    # 눈웃음은 **넓고 낮은 띠**(가늘게 뜬 눈)다. ∧ 모양을 칸으로 찍으면 이 크기에선
+    # 떨어진 점 셋으로 보여 얼굴이 아니라 얼룩이 된다.
+    "grin": ((1, 3), (2, 3), (3, 3), (5, 3), (6, 3), (7, 3)),
+    "surprise": ((1, 2), (2, 2), (3, 2), (1, 3), (2, 3), (3, 3),   # 크게 뜬 눈
+                 (5, 2), (6, 2), (7, 2), (5, 3), (6, 3), (7, 3)),
+    "faint": ((1, 2), (3, 2), (2, 3), (1, 4), (3, 4),              # X_X
+              (5, 2), (7, 2), (6, 3), (5, 4), (7, 4)),
+}
+
+SPRITE_H = (len(HEAD) + len(LEGS)) * MASCOT_U   # 도트 그림 전체 높이 (px)
 
 
 def _clip(text: str, font: tkfont.Font, maxw: int) -> str:
@@ -242,7 +293,7 @@ class SlimSkin(Skin):
 
         # 마스코트는 그 구분선과 오른쪽 칸 사이 빈 틈 가운데에 앉는다
         self.mascot_cx = (week_end + 7 + right_x0) // 2
-        self._start_mascot()  # 코랄 별빛 마스코트 — 통통 튀고 눌리면 폴짝
+        self._start_mascot()  # 코랄 도트 마스코트 — 통통 튀고 눌리면 폴짝
 
         # 오른쪽 윗자리 — 평소엔 모델별, 오류일 땐 상태 문구. 같은 자리를 나눠 쓴다.
         self.model = self.c.create_text(
@@ -259,9 +310,9 @@ class SlimSkin(Skin):
         self.five.set(None, "")
         self.week.set(None, "")
 
-    # -------------------------------------------------- 마스코트 '클로디' (클로드 별빛)
-    # 슬림 바에 사는 코랄색 별빛 캐릭터. 통통 튀고, 누르면 반응하고, 너무 많이
-    # 누르면 기절한다. 이름은 '클로디'(Claudi — 클로드의 작은 별).
+    # -------------------------------------------------- 마스코트 '클로디' (도트 캐릭터)
+    # 슬림 바에 사는 코랄색 도트 친구 — 몸통 없이 큰 머리에 팔 둘·다리 둘.
+    # 통통 튀고, 이따금 손을 흔들고, 누르면 팔을 번쩍 들고 놀라고, 많이 누르면 기절한다.
     def _start_mascot(self) -> None:
         """마스코트 애니메이션을 켠다. build 가 다시 불려도(테마 전환 등) 세대(gen)
         토큰으로 옛 루프를 은퇴시켜 두 루프가 겹치지 않게 한다."""
@@ -274,7 +325,8 @@ class SlimSkin(Skin):
         self._spin_dir = 1            # 누를 때 도는 방향 (번갈아)
         # 심심할 때 하는 잔동작들 — 한 번에 하나씩, 사이사이 쉰다
         self._blink = self._look = self._tilt = self._stretch = self._wiggle = 0
-        self._look_dir = self._tilt_dir = 1
+        self._wave = 0                # 손 흔들기 남은 프레임
+        self._look_dir = self._tilt_dir = self._wave_dir = 1
         self._sparks: list[list[float]] = []   # 뿜은 반짝이 [x, y, vy, life]
         self._next_gesture = random.randint(20, 60)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
@@ -331,7 +383,9 @@ class SlimSkin(Skin):
             return
         self._vy += -SPRING_K * self._yoff
         self._vy *= 1 - SPRING_DAMP
-        self._yoff = max(-14.0, min(9.0, self._yoff + self._vy))  # 화면 밖으로 안 튀게
+        # 창 밖으로 안 튀게 — 도트 그림 높이를 빼고 남는 만큼만 올라간다
+        lift = max(4.0, (self.h - SPRITE_H) / 2 - 1)
+        self._yoff = max(-lift, min(lift * 0.65, self._yoff + self._vy))
         self._vr += -SPRING_K * self._roff
         self._vr *= 1 - SPRING_DAMP
         self._roff += self._vr
@@ -342,18 +396,19 @@ class SlimSkin(Skin):
 
     # -------------------------------------------------- 심심할 때 하는 잔동작
     def _idle_step(self) -> None:
-        """쉬는 동안 이따금 딴짓을 시킨다 — 눈 굴리기·고개 갸웃·기지개·부르르·
-        반짝이 뿜기·가끔 폴짝. 한 번에 하나씩만, 반응(눌림)으로 출렁일 땐 쉰다."""
+        """쉬는 동안 이따금 딴짓을 시킨다 — 손 흔들기·눈 굴리기·고개 갸웃·기지개·
+        부르르·반짝이 뿜기·가끔 폴짝. 한 번에 하나씩만, 반응(눌림)으로 출렁일 땐 쉰다."""
         # 뿜은 반짝이 갱신 (위로 떠오르며 사그라든다)
         if self._sparks:
             for s in self._sparks:
                 s[1] += s[2]; s[2] += 0.015; s[3] -= 1  # y+=vy, 서서히 처지고, 수명--
             self._sparks = [s for s in self._sparks if s[3] > 0]
-        for key in ("_blink", "_look", "_tilt", "_stretch", "_wiggle"):
+        for key in ("_blink", "_look", "_tilt", "_stretch", "_wiggle", "_wave"):
             v = getattr(self, key)
             if v > 0:
                 setattr(self, key, v - 1)
-        busy = self._blink or self._look or self._tilt or self._stretch or self._wiggle
+        busy = (self._blink or self._look or self._tilt or self._stretch
+                or self._wiggle or self._wave)
         moving = abs(self._vy) + abs(self._yoff) > 0.8
         self._next_gesture -= 1
         if self._next_gesture <= 0 and not busy and not moving:
@@ -362,10 +417,13 @@ class SlimSkin(Skin):
 
     def _begin_gesture(self) -> None:
         g = random.choice(
-            ("blink", "blink", "look", "tilt", "stretch", "wiggle", "sparkle", "hop")
+            ("blink", "blink", "wave", "wave", "look", "tilt",
+             "stretch", "wiggle", "sparkle", "hop")
         )
         if g == "blink":
             self._blink = 3
+        elif g == "wave":  # 손 흔들기 — 한 팔을 네 프레임마다 올렸다 내린다
+            self._wave = 24; self._wave_dir = random.choice((-1, 1))
         elif g == "look":
             self._look = 26; self._look_dir = random.choice((-1, 1))
         elif g == "tilt":
@@ -376,36 +434,36 @@ class SlimSkin(Skin):
             self._wiggle = 16
         elif g == "sparkle":
             self._sparks.append(
-                [self.mascot_cx + random.uniform(-3, 3), self.h / 2 - MASCOT_R, -0.55, 16]
+                [self.mascot_cx + random.uniform(-3, 3),
+                 self.h / 2 - 4.5 * MASCOT_U, -0.55, 16]
             )
         elif g == "hop":
             self._vy -= JUMP_IMPULSE * 0.7  # 혼자 살짝 폴짝
 
     def _draw_mascot(self) -> None:
         """매 프레임 지우고 다시 그린다. 평소엔 숨쉬듯 잔잔히 + 이따금 잔동작,
-        누르면 출렁이며 눈웃음/놀람, 기절하면 X_X + 별이 뱅뱅."""
+        누르면 팔을 번쩍 들고 출렁이며 눈웃음/놀람, 기절하면 X_X + 별이 뱅뱅."""
         c = self.c
         c.delete("mascot")
-        bg = c.cget("bg")
         if self._faint > 0:
-            self._draw_faint(c, self.mascot_cx, bg)
+            self._draw_faint(c, self.mascot_cx, c.cget("bg"))
             return
         t = self._t
-        cx = self.mascot_cx
 
         # --- 잔동작에서 오는 보정값들 ---
-        eye_dx = 0.0
-        if self._look:  # 눈(과 고개)을 한쪽으로 굴렸다 돌아온다
+        eye_dx = 0  # 눈 굴리기는 **칸 단위**로 옮긴다 (도트가 흐려지지 않게)
+        if self._look:
             pr = 1 - self._look / 26
-            eye_dx = self._look_dir * 2.3 * math.sin(pr * math.pi)
+            eye_dx = self._look_dir if math.sin(pr * math.pi) > 0.5 else 0
         tilt = 0.0
         if self._tilt:  # 고개 갸웃 — 기울였다 돌아온다
             pr = 1 - self._tilt / 34
             tilt = self._tilt_dir * 0.42 * math.sin(pr * math.pi)
         sxk = syk = 1.0
-        if self._stretch:  # 기지개 — 위로 쭉 늘었다 준다
-            e = math.sin((1 - self._stretch / 22) * math.pi)
-            syk = 1 + 0.24 * e; sxk = 1 - 0.13 * e
+        stretch = 0.0
+        if self._stretch:  # 기지개 — 위로 쭉 늘었다 준다 (팔도 번쩍)
+            stretch = math.sin((1 - self._stretch / 22) * math.pi)
+            syk = 1 + 0.24 * stretch; sxk = 1 - 0.10 * stretch
         wig = 0.0
         if self._wiggle:  # 부르르 — 빠르게 좌우로 떨었다 잦아든다
             wig = 0.5 * (self._wiggle / 16) * math.sin(self._wiggle * 1.7)
@@ -415,110 +473,102 @@ class SlimSkin(Skin):
         sxk *= spring_scale * breathe
         syk *= spring_scale * breathe
         cy = self.h / 2 + math.sin(t * 0.12) * 1.1 + self._yoff   # 잔잔한 통통 + 용수철
-        sway = math.sin(t * 0.05) * 0.22 + self._roff + tilt + wig
+        lean = math.sin(t * 0.05) * 0.10 + self._roff + tilt + wig
         speed = abs(self._vy) + abs(self._yoff)                   # 출렁이는 중이면 신났다
 
-        self._rays(c, cx, cy, sway, t, sxk, syk)
-        brx = MASCOT_R * 0.62 * sxk  # 통통한 몸통
-        bry = MASCOT_R * 0.62 * syk
-        c.create_oval(cx - brx, cy - bry, cx + brx, cy + bry, fill=MASCOT_COLOR, width=0, tags="mascot")
-
-        # 뿜은 반짝이 (몸에서 떠오르며 작아진다)
-        for s in self._sparks:
-            r = 1.7 * (s[3] / 16)
-            if r < 0.4:
-                continue
-            c.create_line(s[0] - r, s[1], s[0] + r, s[1], fill=MASCOT_COLOR,
-                          width=1.3, capstyle="round", tags="mascot")
-            c.create_line(s[0], s[1] - r, s[0], s[1] + r, fill=MASCOT_COLOR,
-                          width=1.3, capstyle="round", tags="mascot")
-
-        # 눈 — 바탕색으로 파낸다. 콕 찔리면 O O, 출렁이면 ∧∧, 깜빡이면 —, 굴리면 옆으로.
-        # ★ 눈은 반짝임 점보다 확실히 커야 한다 — 비슷하면 이 크기에선 둘 다 '+' 로 뭉개져
-        #   얼굴이 아니라 반짝임이 셋 있는 것처럼 보인다.
-        er, ex, ey = 1.5, 2.4, cy - 1.4 * syk
-        exL, exR = cx - ex + eye_dx, cx + ex + eye_dx
-        if self._surprise > 0:  # O O — 직접 찔려 놀란 동그란 눈
-            wr = 1.9
-            for ecx in (exL, exR):
-                c.create_oval(ecx - wr, ey - wr, ecx + wr, ey + wr, fill=bg, width=0, tags="mascot")
-        elif speed > 1.2:  # ∧∧ 눈웃음 — 위로 볼록한 짧은 호
-            for ecx in (exL, exR):
-                c.create_arc(ecx - er - 0.4, ey - 0.2, ecx + er + 0.4, ey + er + 1.4,
-                             start=20, extent=140, style="arc",
-                             outline=bg, width=1.5, tags="mascot")
-        elif self._blink > 0:  # — — 깜빡
-            for ecx in (exL, exR):
-                c.create_line(ecx - er, ey, ecx + er, ey,
-                              fill=bg, width=1.7, capstyle="round", tags="mascot")
+        # 표정과 팔 — 콕 찔리면 놀라 만세, 출렁이면 눈웃음, 기지개도 만세
+        if self._surprise > 0:
+            expr, arms = "surprise", (-1, -1)
+        elif speed > 1.2:
+            expr, arms = "grin", (-1, -1)
+        elif self._blink > 0:
+            expr, arms = "blink", (0, 0)
+        elif stretch > 0.5:
+            expr, arms = "idle", (-1, -1)
+        elif self._wave:  # 손 흔들기 — 한 팔만 번쩍, 그 팔이 오르내린다
+            up = (self._wave // 4) % 2 == 0
+            expr = "grin"
+            arms = (-1 if up else 0, 0) if self._wave_dir < 0 else (0, -1 if up else 0)
         else:
-            for ecx in (exL, exR):
-                c.create_oval(ecx - er, ey - er, ecx + er, ey + er, fill=bg, width=0, tags="mascot")
+            expr, arms = "idle", (0, 0)
 
-        self._mouth(c, cx, cy, syk, bg, grin=speed > 1.2, surprised=self._surprise > 0)
+        self._sprite(expr, arms, LEGS, self.mascot_cx, cy,
+                     MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx)
+        self._draw_sparks(c)
 
-    def _rays(self, c: tk.Canvas, cx: float, cy: float, sway: float,
-              t: float, sxk: float, syk: float, s: float = 1.0) -> None:
-        """별빛 — **상하좌우 넷만 살**이고 대각선 넷은 떠 있는 점이다(폰 아이콘과 같은 결).
+    def _sprite(self, expr: str, arms: tuple[int, int], legs: tuple[str, ...],
+                cx: float, cy: float, ux: float, uy: float,
+                lean: float = 0.0, eye_dx: int = 0) -> None:
+        """도트 그림 한 장. 칸 경계를 같은 식으로 계산하므로 확대·기울임에도 틈이 안 생긴다.
 
-        예전엔 여덟 살을 길고 짧게 번갈아 뻗었는데, 이 크기에서 눈에 들어오는 건
-        상하좌우 넷뿐이라 짧은 살은 팔다리처럼만 보였다. 점으로 바꾸니 반짝임이 산다.
+        `lean` 은 기울임 — 위쪽 줄일수록 옆으로 더 미는 **계단식**이라 도트 결이 유지된다
+        (도형을 돌리면 이 크기에서 획이 뭉개진다).
         """
-        for k in range(4):
-            ang = math.pi / 2 * k - math.pi / 2 + sway
-            rr = MASCOT_R * s * (1 + 0.10 * math.sin(t * 0.2 + k))   # 살짝 반짝
-            c.create_line(
-                cx, cy, cx + math.cos(ang) * rr * sxk, cy + math.sin(ang) * rr * syk,
-                fill=MASCOT_COLOR, width=2, capstyle="round", tags="mascot",
-            )
-        for k in range(4):
-            ang = math.pi / 2 * k - math.pi / 4 + sway
-            dd = MASCOT_R * 1.02 * s * (1 + 0.10 * math.sin(t * 0.2 + k + 2))
-            px = cx + math.cos(ang) * dd * sxk
-            py = cy + math.sin(ang) * dd * syk
-            r = 0.95 * s
-            c.create_oval(px - r, py - r, px + r, py + r,
-                          fill=MASCOT_COLOR, width=0, tags="mascot")
+        c = self.c
+        bg = c.cget("bg")
+        mid = (len(HEAD) + len(legs)) / 2
+        x0 = cx - 4.5 * ux   # 머리 9칸의 왼쪽
+        y0 = cy - mid * uy   # 머리 7줄 + 다리 2줄의 맨 위
 
-    def _mouth(self, c: tk.Canvas, cx: float, cy: float, syk: float, bg: str,
-               grin: bool, surprised: bool) -> None:
-        """작은 웃는 입. 놀라면 동그랗게, 신나면 크게 벌린다. 눈과 달리 굴리지 않는다."""
-        my = cy + 1.6 * syk
-        if surprised:
-            r = 1.0
-            c.create_oval(cx - r, my - r, cx + r, my + r, fill=bg, width=0, tags="mascot")
-            return
-        w, h = (2.2, 1.9) if grin else (1.9, 1.4)
-        c.create_arc(cx - w, my - h, cx + w, my + h,
-                     start=205, extent=130, style="arc",
-                     outline=bg, width=1.3, tags="mascot")
+        def cell(col: float, row: float, color: str, span: int = 1) -> None:
+            x = x0 + col * ux + lean * (mid - row) * uy
+            y = y0 + row * uy
+            c.create_rectangle(x, y, x + span * ux, y + uy,
+                               fill=color, width=0, tags="mascot")
+
+        def paint(lines: tuple[str, ...], top: int) -> None:
+            """줄마다 이어진 칸을 **한 덩이로** 그린다 — 매 프레임 도형 수를 3분의 1로.
+            경계 식이 낱칸과 같으므로 그림은 한 픽셀도 안 달라진다."""
+            for r, line in enumerate(lines):
+                col = 0
+                while col < len(line):
+                    if line[col] != "#":
+                        col += 1
+                        continue
+                    run = 1
+                    while col + run < len(line) and line[col + run] == "#":
+                        run += 1
+                    cell(col, top + r, MASCOT_COLOR, run)
+                    col += run
+
+        for col, row in ARM[arms[0]]:            # 왼팔
+            cell(col, row, MASCOT_COLOR)
+        for col, row in ARM[arms[1]]:            # 오른팔 — 좌우 뒤집기
+            cell(8 - col, row, MASCOT_COLOR)
+        paint(HEAD, 0)
+        paint(legs, len(HEAD))
+        for col, row in EYES[expr]:
+            cell(col + eye_dx, row, bg)
+
+    def _draw_sparks(self, c: tk.Canvas) -> None:
+        """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
+        for sx, sy, _vy, life in self._sparks:
+            u = MASCOT_U * 0.6 * (life / 16)
+            if u < 0.7:
+                continue
+            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
+                x, y = sx + dx * u, sy + dy * u
+                c.create_rectangle(x - u / 2, y - u / 2, x + u / 2, y + u / 2,
+                                   fill=MASCOT_COLOR, width=0, tags="mascot")
 
     def _draw_faint(self, c: tk.Canvas, cx: int, bg: str) -> None:
-        """기절 — 크게 부풀려 늘어지고, 또렷한 X_X 눈에, 별 세 개가 머리 위를 돈다.
+        """기절 — 크게 부풀려 주저앉고(다리가 벌어진다), X_X 눈에 팔은 축 늘어진다.
         작아서 눈이 안 보이던 걸 FAINT_SCALE 로 키워 X 를 확실히 보이게 한다."""
         t = self._t
-        s = FAINT_SCALE
+        u = MASCOT_U * FAINT_SCALE
         cy = self.h / 2 + 2.0 + math.sin(t * 0.25) * 0.6  # 살짝 처져 흐느적
-        tilt = math.sin(t * 0.2) * 0.5                    # 어질어질 크게 흔들
-        self._rays(c, cx, cy, tilt, t, 1.0, 1.0, s)
-        br = MASCOT_R * 0.62 * s
-        c.create_oval(cx - br, cy - br, cx + br, cy + br, fill=MASCOT_COLOR, width=0, tags="mascot")
-        # X_X 눈 — 바탕색 십자, 큼직하고 도톰하게
-        ex, ey, es = 2.7, cy - 1.4, 2.0
-        for sx in (-ex, ex):
-            c.create_line(cx + sx - es, ey - es, cx + sx + es, ey + es,
-                          fill=bg, width=2.0, capstyle="round", tags="mascot")
-            c.create_line(cx + sx - es, ey + es, cx + sx + es, ey - es,
-                          fill=bg, width=2.0, capstyle="round", tags="mascot")
-        # 어질어질 별 세 개가 머리 위를 돈다
-        oy = cy - MASCOT_R * s - 3
+        lean = math.sin(t * 0.2) * 0.20                   # 어질어질 크게 흔들
+        self._sprite("faint", (1, 1), LEGS_WIDE, cx, cy, u, u, lean)
+        # 어질어질 별 세 개가 머리 위를 돈다 (역시 도트 십자)
+        oy = cy - 4.6 * u
         for i in range(3):
             a = t * 0.35 + i * (math.pi * 2 / 3)
-            sx = cx + math.cos(a) * 7.0
-            sy = oy + math.sin(a) * 2.2
-            r = 2.1
-            c.create_line(sx - r, sy, sx + r, sy, fill=P.amber, width=1.4, capstyle="round", tags="mascot")
-            c.create_line(sx, sy - r, sx, sy + r, fill=P.amber, width=1.4, capstyle="round", tags="mascot")
+            sx = cx + math.cos(a) * 8.0
+            sy = oy + math.sin(a) * 2.4
+            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
+                x, y = sx + dx * 2.0, sy + dy * 2.0
+                c.create_rectangle(x - 1, y - 1, x + 1, y + 1,
+                                   fill=P.amber, width=0, tags="mascot")
 
     # -------------------------------------------------- 바탕 두 얼굴
     def _paint(self, bg: str, accent: str) -> None:
