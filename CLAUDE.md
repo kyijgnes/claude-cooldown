@@ -638,6 +638,12 @@
   `--notes-file`·`--generate-notes` 를 쓰지 말 것. 워크플로도 마찬가지
   (`.github/workflows/android.yml` 에 `body: ""` · `generate_release_notes: false` 로 박아 뒀다).
   받는 사람이 볼 것은 파일이지 설명이 아니다. 설명이 필요하면 README 한 곳에만.
+  - ★★ **태그는 반드시 `git tag -a v0.N -m ""`(annotated·빈 메시지)로 만들 것.**
+    그냥 `git tag v0.N`(lightweight)로 만들면 **본문이 비어 있어도 GitHub 이 그 자리에
+    커밋 메시지를 통째로 띄운다** — 실제로 v0.10 에서 커밋 메시지가 `Co-Authored-By` 까지
+    릴리스 페이지에 노출됐다(본문에 공백을 넣어도 안 없어진다. 태그를 annotated 로
+    바꿔야 그 블록이 사라진다). 확인: `git cat-file -t $(git rev-parse v0.N)` 가 `tag` 여야 한다
+    (`commit` 이면 lightweight).
 - `.credentials.json` 내용이나 accessToken 을 서버로 보내지 말 것. 퍼센트만 전송.
 - **`android/keystore/` · `android/keystore.properties` 를 커밋하지 말 것.** 서명 키와 비밀번호다.
   `.gitignore` 에 있지만 `git add -f` 로 뚫지 말 것.
