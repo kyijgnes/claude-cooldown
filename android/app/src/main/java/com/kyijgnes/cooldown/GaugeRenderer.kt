@@ -174,8 +174,8 @@ object GaugeRenderer {
     private val BOLD = Typeface.create("sans-serif-condensed", Typeface.BOLD)
 
     /**
-     * 상태바·잠금화면·**AOD** 에 뜨는 작은 아이콘 — **클로디 별빛에 감싸인 숫자.**
-     * 앱 아이콘(클로디)과 같은 결이라 상태바에서도 우리 것인 줄 바로 안다.
+     * 상태바·잠금화면·**AOD** 에 뜨는 작은 아이콘 — **네모 점 넷에 감싸인 숫자.**
+     * 앱 아이콘(도트 마스코트 클로디)과 같은 결이라 상태바에서도 우리 것인 줄 바로 안다.
      *
      * 시스템이 **알파를 마스크로 써서 한 가지 색으로 물들이므로** 흰색 + 투명 배경으로
      * 그린다. 색을 넣어도 무시된다.
@@ -191,18 +191,18 @@ object GaugeRenderer {
         val text = pct?.let { Math.round(it).toString() } ?: "–"
         val mid = s / 2f
 
-        // 클로디의 반짝임 — **네 모서리에 점**으로만 놓는다.
+        // 클로디의 도트 결 — **네 모서리에 네모 점**으로만 놓는다(마스코트가 도트 그림이라
+        // 동그라미가 아니라 네모다).
         // ★ 살(대각선 짧은 선)로 그리면 24dp 에서 숫자 획과 섞여 `)17(` 처럼 읽힌다.
         //   점은 획으로 안 보여서 숫자를 안 건드린다. 가로·세로 살은 애초에 못 넣는다 —
         //   그 자리를 숫자가 다 쓰고, 숫자를 줄이면 그게 더 안 보인다.
         val spark = paint(0f, Color.WHITE, BOLD)
+        val half = s * 0.068f
         for (k in 0..3) {
             val a = Math.PI / 4 + k * Math.PI / 2
-            c.drawCircle(
-                mid + Math.cos(a).toFloat() * s * 0.60f,
-                mid + Math.sin(a).toFloat() * s * 0.60f,
-                s * 0.072f, spark,
-            )
+            val dx = mid + Math.cos(a).toFloat() * s * 0.60f
+            val dy = mid + Math.sin(a).toFloat() * s * 0.60f
+            c.drawRect(dx - half, dy - half, dx + half, dy + half, spark)
         }
 
         val pt = paint(s.toFloat(), Color.WHITE, BOLD)
