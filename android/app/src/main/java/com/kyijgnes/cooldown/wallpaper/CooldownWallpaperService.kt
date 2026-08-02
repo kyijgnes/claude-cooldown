@@ -73,6 +73,7 @@ class CooldownWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             showing = visible
             if (visible) {
+                mascot.rest()          // 오래 안 보다 왔다 — 지친 건 잊는다
                 drawFrame()
             } else {
                 if (holding) { holding = false; mascot.cancel() }   // 런처 메뉴가 채 갔다

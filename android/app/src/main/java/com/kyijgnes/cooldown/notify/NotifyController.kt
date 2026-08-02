@@ -60,6 +60,8 @@ object NotifyController {
 
         val b = Notification.Builder(ctx, CHANNEL)
             .setSmallIcon(Icon.createWithBitmap(GaugeRenderer.statusIcon(five.pct)))
+            // 상태바에는 숫자만 들어가지만, **알림을 내리면 여기 클로디가 보인다**
+            .setLargeIcon(Icon.createWithBitmap(GaugeRenderer.mascotIcon(ctx)))
             .setContentTitle("5시간 ${five.pctText()}   주간 ${week.pctText()}")
             .setContentText(bodyText(snap, now))
             .setContentIntent(open)

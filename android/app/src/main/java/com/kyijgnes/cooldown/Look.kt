@@ -36,8 +36,9 @@ object Look {
     data class Values(
         val photo: String = "",
         val mascot: Boolean = true,     // 배경화면에 사는 클로디 (눌러서 놀 수 있다)
-        val mascotX: Float = 0.5f,
-        val mascotY: Float = 0.42f,
+        // 기본 자리는 **미터기 판 안쪽 오른쪽 위** — 제목 줄 옆이 비어 있다
+        val mascotX: Float = 0.80f,
+        val mascotY: Float = 0.612f,
         val meter: String = BARS,
         val meterX: Float = 0.5f,
         val meterY: Float = 0.689f,     // 꾸미기 전 화면과 같은 자리 (1080×2340 에서 잰 값)
@@ -76,8 +77,10 @@ object Look {
         return Values(
             photo = p.getString("look_photo", d.photo) ?: d.photo,
             mascot = p.getBoolean("look_mascot", d.mascot),
-            mascotX = p.getFloat("look_mascot_x", d.mascotX),
-            mascotY = p.getFloat("look_mascot_y", d.mascotY),
+            // 클로디 첫 자리가 화면 한가운데였는데 **미터기 판 안쪽**으로 옮겼다 —
+            // 옛 자리 그대로인 사람은 새 자리로 올린다(직접 옮긴 사람 것은 안 건드린다).
+            mascotX = p.getFloat("look_mascot_x", d.mascotX).let { if (isOldSpot(p)) d.mascotX else it },
+            mascotY = p.getFloat("look_mascot_y", d.mascotY).let { if (isOldSpot(p)) d.mascotY else it },
             // '없음' 은 고르는 칸에서 뺐다 — 예전에 그걸로 저장해 둔 사람은 막대로 올린다
             meter = (p.getString("look_meter", d.meter) ?: d.meter).let {
                 if (it == NONE) BARS else it
@@ -90,6 +93,10 @@ object Look {
             photoY = p.getFloat("look_photo_y", d.photoY),
         )
     }
+
+    /** 클로디를 처음 넣었을 때의 자리(화면 한가운데) 그대로인가. */
+    private fun isOldSpot(p: android.content.SharedPreferences): Boolean =
+        p.getFloat("look_mascot_x", 0.5f) == 0.5f && p.getFloat("look_mascot_y", 0.42f) == 0.42f
 
     fun write(ctx: Context, v: Values) {
         prefs(ctx).edit()

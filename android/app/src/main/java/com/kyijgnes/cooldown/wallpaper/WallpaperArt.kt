@@ -54,18 +54,19 @@ object WallpaperArt {
         // 배경으로 쓸 그림이 없으면(안 골랐고 떠 온 것도 없으면) **밋밋한 바다색**으로 둔다
         if (!drawPhoto(ctx, c, w, h, look)) drawSea(c, w, h, p)
 
+        drawMeter(ctx, c, w, h, snap, now, p, look)
+
+        // ★ 클로디는 **미터기 판 위에** 그린다 — 판 안쪽에 앉혀 두므로 뒤로 가면 가려진다
         if (look.mascot && mascot != null) {
             mascot.step()
             mascot.draw(c, look.mascotX * w, look.mascotY * h, mascotCell(w), p.coral, p.bg, p.amber)
         }
-
-        drawMeter(ctx, c, w, h, snap, now, p, look)
     }
 
     // ---------------------------------------------------------------- 배경
 
-    /** 클로디 도트 한 칸(px). 화면 너비를 기준으로 잡아 어느 폰에서나 같은 비율로 보인다. */
-    fun mascotCell(w: Float): Float = w / 62f
+    /** 클로디 도트 한 칸(px). 화면 너비 기준이라 어느 폰에서나 같은 비율로 보인다. */
+    fun mascotCell(w: Float): Float = w / 95f
 
     /** 누른 자리가 클로디 위인가 — 배경화면 터치와 꾸미기 화면 끌기가 같은 판정을 쓴다. */
     fun hitsMascot(w: Float, h: Float, look: Look.Values, mascot: Mascot, x: Float, y: Float) =

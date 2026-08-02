@@ -17,7 +17,10 @@ import kotlin.math.sin
  *  - **콕 찌르기** — 펄쩍 뛰고 눈이 커진다. 뛰는 동안 몸이 늘었다 눌린다(스쿼시·스트레치).
  *  - **길게 누르기** — 쭈그려 앉아 부르르 떨며 **기를 모은다.** 떼면 모은 만큼 높이 뛴다
  *    (꽉 채우면 반짝이를 흩뿌리며 붕 뜬다).
- *  - **연타** — 지치다가 **기절**한다(X_X + 별이 뱅뱅). 잠깐 못 논다.
+ *    ★ **홈 화면에서는 런처가 길게 누르기를 자기 메뉴로 채 간다** — 그래서 이건 꾸미기
+ *      화면(미리보기)에서만 제대로 된다. 홈에서는 아래 '연타 콤보'가 그 자리를 맡는다.
+ *  - **연타** — 빠르게 이어 찌르면 **콤보**가 쌓여 점점 높이 뛰고(반짝이도 터진다),
+ *    그러다 지치면 **기절**한다(X_X + 별이 뱅뱅). 잠깐 못 논다.
  *
  * ★ **터치는 배경화면이 직접 받는다** — 런처가 흘려 준 좌표가 클로디 위면 반응.
  *   아이콘·위젯 위를 누르면 그쪽이 먹으므로 우리에게는 안 온다.
@@ -25,7 +28,10 @@ import kotlin.math.sin
 class Mascot {
 
     private var t = 0
-    private var yoff = 0f      // 위아래 용수철
+    // ★ **용수철은 픽셀이 아니라 '칸' 단위로 센다.** 폰은 도트가 크고 화면도 커서
+    //   픽셀로 잡으면 데스크탑과 같은 값이 제자리 꿈틀거림밖에 안 된다.
+    //   칸으로 세면 어느 화면에서나 **몸 높이의 몇 배**로 똑같이 튄다.
+    private var yoff = 0f      // 위아래 용수철 (칸)
     private var vy = 0f
     private var lean = 0f      // 좌우 기울임(계단식 밀기)
     private var vLean = 0f
@@ -41,6 +47,8 @@ class Mascot {
 
     private var clicks = 0f    // 콕 누적 — 식으면서 준다
     private var faint = 0
+    private var lastPoke = -999
+    private var combo = 0      // 빠르게 이어 찌른 횟수 — 뛰는 힘이 커진다
 
     /** 반짝이 [x, y, vy, 남은 수명] — 기를 다 모아 뛸 때 흩뿌린다. */
     private val sparks = ArrayList<FloatArray>()
@@ -64,7 +72,7 @@ class Mascot {
 
         vy += -SPRING_K * yoff
         vy *= 1f - SPRING_DAMP
-        yoff = (yoff + vy).coerceIn(-26f, 9f)
+        yoff = (yoff + vy).coerceIn(-LIFT, LIFT * 0.55f)
 
         vLean += -SPRING_K * lean
         vLean *= 1f - SPRING_DAMP
@@ -105,7 +113,13 @@ class Mascot {
     fun release() {
         if (faint > 0) { charging = false; charge = 0f; return }
         val held = charging && heldFrames >= CHARGE_MIN
-        val power = if (held) JUMP + charge * CHARGE_JUMP else JUMP
+        // 빠르게 이어 찌르면 콤보 — 홈 화면에서는 길게 누르기를 런처가 채 가므로 이쪽으로 논다
+        combo = if (!held && t - lastPoke <= COMBO_FRAMES) (combo + 1).coerceAtMost(COMBO_MAX) else 0
+        lastPoke = t
+        val power = when {
+            held -> JUMP + charge * CHARGE_JUMP
+            else -> JUMP + combo * COMBO_JUMP
+        }
         charging = false
 
         vy -= power
@@ -113,7 +127,7 @@ class Mascot {
         spinDir = -spinDir
         surprise = SURPRISE_FRAMES
 
-        if (held && charge > 0.6f) burst()          // 꽉 채웠다 — 반짝이를 흩뿌린다
+        if ((held && charge > 0.6f) || combo >= 3) burst()   // 꽉 채웠거나 콤보가 붙었다
         clicks += if (held) 1f else 2f              // 콕콕 찌르는 쪽이 더 지친다
         if (clicks >= FAINT_AT) {
             faint = FAINT_FRAMES
@@ -130,6 +144,17 @@ class Mascot {
         charge = 0f
     }
 
+    /**
+     * 한동안 안 보이다가 다시 보일 때 — **지친 걸 잊는다.**
+     * 그리는 동안에만 시간이 흐르므로, 안 그러면 어제 찌른 게 남아 오늘 한 번에 기절한다.
+     */
+    fun rest() {
+        clicks = 0f
+        combo = 0
+        charging = false
+        charge = 0f
+    }
+
     private fun burst() {
         for (k in 0 until 7) {
             val a = k * 0.9f
@@ -141,7 +166,7 @@ class Mascot {
     fun hits(cx: Float, cy: Float, u: Float, x: Float, y: Float): Boolean {
         val halfW = (MascotSprite.COLS / 2f + 2f) * u
         val halfH = MascotSprite.ROWS / 2f * u
-        return abs(x - cx) <= halfW + u && abs(y - (cy + yoff)) <= halfH + u
+        return abs(x - cx) <= halfW + u && abs(y - (cy + yoff * u)) <= halfH + u
     }
 
     /**
@@ -165,11 +190,11 @@ class Mascot {
         val shake = if (charging) sin(t * 1.6f) * 0.10f * charge else 0f
 
         val breathe = 1f + 0.045f * sin(t * 0.09f)
-        val stretch = (-yoff * 0.012f).coerceIn(-0.18f, 0.30f)   // 뜰수록 늘고 눌릴수록 납작
+        val stretch = (-yoff * 0.055f).coerceIn(-0.20f, 0.34f)   // 뜰수록 늘고 눌릴수록 납작
         val sx = breathe * (1f - stretch * 0.6f + squat * 0.22f)
         val sy = breathe * (1f + stretch - squat * 0.30f)
 
-        val y = cy + yoff + sin(t * 0.12f) * u * 0.35f + squat * u * 1.2f
+        val y = cy + (yoff + sin(t * 0.12f) * 0.10f + squat * 0.9f) * u
         val speed = abs(vy) + abs(yoff)
         val expr = when {
             charging -> "grin"
@@ -197,10 +222,16 @@ class Mascot {
         val x0 = cx - MascotSprite.COLS / 2f * ux
         val y0 = cy - mid * uy
 
+        // ★ **칸 경계를 정수 픽셀로 맞춘다.** 실수 좌표로 그리면 이웃한 칸이 서로 다르게
+        //   반올림돼 **머리카락 같은 틈**이 줄줄이 생긴다(폰에서 실제로 그랬다).
+        //   좌우·상하 모두 '같은 식'을 반올림하므로 이웃 칸이 정확히 같은 선을 쓴다.
         fun cell(col: Int, row: Int, span: Int, p: Paint) {
-            val left = x0 + col * ux + lean * (mid - row) * uy
-            val top = y0 + row * uy
-            c.drawRect(left, top, left + span * ux, top + uy, p)
+            val slide = lean * (mid - row) * uy
+            val left = Math.round(x0 + col * ux + slide).toFloat()
+            val right = Math.round(x0 + (col + span) * ux + slide).toFloat()
+            val top = Math.round(y0 + row * uy).toFloat()
+            val bottom = Math.round(y0 + (row + 1) * uy).toFloat()
+            c.drawRect(left, top, right, bottom, p)
         }
 
         val a = MascotSprite.ARM[arm] ?: MascotSprite.ARM[0]!!
@@ -257,15 +288,19 @@ class Mascot {
     private companion object {
         const val SPRING_K = 0.20f
         const val SPRING_DAMP = 0.14f
-        const val SPIN = 0.14f
+        const val SPIN = 0.16f
 
-        const val JUMP = 5.0f            // 콕 찔렀을 때
-        const val CHARGE_JUMP = 11.0f    // 기를 꽉 모았을 때 더해지는 힘
+        const val LIFT = 7.0f            // 최대한 뜨는 높이 (칸) — 몸이 10칸이니 거의 한 몸 반
+        const val JUMP = 2.4f            // 콕 찔렀을 때 (칸/프레임)
+        const val CHARGE_JUMP = 3.4f     // 기를 꽉 모았을 때 더해지는 힘
         const val CHARGE_FRAMES = 45f    // 약 2.8초면 가득 (16fps)
         const val CHARGE_MIN = 6         // 이보다 짧게 누르면 그냥 콕
 
         const val SURPRISE_FRAMES = 12
         const val CLICK_DECAY = 0.035f
+        const val COMBO_FRAMES = 12      // 약 0.75초 안에 다시 찌르면 이어진다 (16fps)
+        const val COMBO_MAX = 5
+        const val COMBO_JUMP = 0.7f      // 콤보 한 번마다 더 높이
         const val FAINT_AT = 12f         // 콕 여섯 번쯤
         const val FAINT_FRAMES = 44      // 약 2.7초
         const val FAINT_SCALE = 1.3f

@@ -187,6 +187,56 @@ object GaugeRenderer {
         return bmp
     }
 
+    // ---------------------------------------------------------------- 알림 속 클로디
+
+    /**
+     * **알림을 내렸을 때 보이는 클로디**(큰 아이콘). 상태바의 작은 아이콘은 시스템이
+     * 알파만 보고 한 색으로 물들여서 숫자밖에 못 넣지만, **큰 아이콘은 색 그대로 나온다** —
+     * 그래서 얼굴이 보이는 자리는 여기다.
+     *
+     * 그림표는 배경화면·앱 아이콘과 같은 원본(`MascotSprite`)을 쓴다.
+     */
+    fun mascotIcon(ctx: Context): Bitmap {
+        val p = Palette(ctx)
+        val cols = com.kyijgnes.cooldown.wallpaper.MascotSprite.COLS + 2   // 팔까지
+        val rows = com.kyijgnes.cooldown.wallpaper.MascotSprite.ROWS
+        val s = 192
+        val u = (s * 0.86f / maxOf(cols, rows)).toInt().coerceAtLeast(1)
+        val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val body = paint(0f, p.coral, REGULAR)
+        val hole = paint(0f, p.bg, REGULAR)
+        val x0 = (s - com.kyijgnes.cooldown.wallpaper.MascotSprite.COLS * u) / 2f
+        val y0 = (s - rows * u) / 2f
+
+        fun cell(col: Int, row: Int, span: Int, pt: Paint) =
+            c.drawRect(x0 + col * u, y0 + row * u, x0 + (col + span) * u, y0 + (row + 1) * u, pt)
+
+        val sprite = com.kyijgnes.cooldown.wallpaper.MascotSprite
+        val arm = sprite.ARM[0]!!
+        cell(arm[0], arm[1], 1, body)
+        cell(sprite.COLS - 1 - arm[0], arm[1], 1, body)
+        for ((rows0, top) in listOf(sprite.HEAD to 0, sprite.LEGS to sprite.HEAD.size)) {
+            for ((r, line) in rows0.withIndex()) {
+                var col = 0
+                while (col < line.length) {
+                    if (line[col] != '#') { col++; continue }
+                    var run = 1
+                    while (col + run < line.length && line[col + run] == '#') run++
+                    cell(col, top + r, run, body)
+                    col += run
+                }
+            }
+        }
+        val eyes = sprite.EYES["idle"]!!
+        var i = 0
+        while (i < eyes.size) {
+            cell(eyes[i], eyes[i + 1], 1, hole)
+            i += 2
+        }
+        return bmp
+    }
+
     // ---------------------------------------------------------------- 상태바 아이콘
 
     private val BOLD = Typeface.create("sans-serif-condensed", Typeface.BOLD)
