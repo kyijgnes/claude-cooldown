@@ -14,8 +14,8 @@
 
 ```
 내 PC (OAuth 토큰은 여기서만 — 절대 안 나간다)
-  └─ windows/cooldown_app.py   바탕화면 위젯 + 트레이. 직접 조회
-        │  조회 성공할 때마다 POST {key, 퍼센트·초기화시각}   (cooldown_push.py)
+  └─ pc/windows/cooldown_app.py   바탕화면 위젯 + 트레이. 직접 조회
+        │  조회 성공할 때마다 POST {key, 퍼센트·초기화시각}   (pc/cooldown_push.py)
         ▼
   server/  Next.js API route → Upstash Redis (REST)
         ▲
@@ -32,15 +32,15 @@
 
 | 경로 | 역할 |
 |---|---|
-| `cooldown_core.py` | **조회·파싱 공용 모듈. 파서·속도 분석(`pace`)은 여기 한 곳에만 둔다** |
-| `cooldown_ping.py` | **자동 핑(모닝 스타터) 순수 로직.** 설정·전송·"지금 쏠까" 판단. Tk 없음 |
-| `windows/cooldown_app.py` | **윈도우 앱 본체.** 창·트레이·조회·메뉴. 그리기는 안 한다 |
-| `windows/skins/base.py` | 스킨이 지켜야 할 약속(Skin) + 공용 색·글꼴 |
-| `windows/skins/{card,arc,table,slim}.py` | 디자인 4종. 우클릭 > 디자인 으로 전환 |
-| `windows/_shot_skin.py` | 스킨을 4가지 상태로 렌더해 PNG 로 남기는 개발 도구 |
-| `windows/클로드 쿨다운 실행.bat` | 콘솔 없이 앱을 띄우는 실행 파일 |
-| `cooldown_push.py` | **폰으로 보내기.** 키 생성·주소 정돈·POST·QR 만들기 |
-| `agent/cooldown_agent.py` | 헤드리스 전용 상주 에이전트(위젯 안 쓰는 PC용). 보통은 필요 없다 |
+| `pc/cooldown_core.py` | **조회·파싱 공용 모듈. 파서·속도 분석(`pace`)은 여기 한 곳에만 둔다** |
+| `pc/cooldown_ping.py` | **자동 핑(모닝 스타터) 순수 로직.** 설정·전송·"지금 쏠까" 판단. Tk 없음 |
+| `pc/windows/cooldown_app.py` | **윈도우 앱 본체.** 창·트레이·조회·메뉴. 그리기는 안 한다 |
+| `pc/windows/skins/base.py` | 스킨이 지켜야 할 약속(Skin) + 공용 색·글꼴 |
+| `pc/windows/skins/{card,arc,table,slim}.py` | 디자인 4종. 우클릭 > 디자인 으로 전환 |
+| `pc/windows/_shot_skin.py` | 스킨을 4가지 상태로 렌더해 PNG 로 남기는 개발 도구 |
+| `pc/windows/클로드 쿨다운 실행.bat` | 콘솔 없이 앱을 띄우는 실행 파일 |
+| `pc/cooldown_push.py` | **폰으로 보내기.** 키 생성·주소 정돈·POST·QR 만들기 |
+| `pc/agent/cooldown_agent.py` | 헤드리스 전용 상주 에이전트(위젯 안 쓰는 PC용). 보통은 필요 없다 |
 | `server/app/api/cooldown/route.ts` | POST(업서트) / GET(조회) 릴레이 |
 | `server/README.md` | **릴레이 문서 한 곳.** 저장소 만들기·환경변수·확인·되돌리기·무료 한도 계산 |
 | `server/relay_check.mjs` | 릴레이가 폰과 맺은 약속을 지키는지 확인(저장소를 또 바꿀 때의 합격 기준) |
@@ -49,7 +49,7 @@
 | `android/.../Look.kt` | **배경화면 꾸미기 값 한 덩어리(`Values`).** 읽기·쓰기도 여기만 |
 | `android/.../WallpaperGrab.kt` | 폰에 걸려 있던 배경화면을 한 장 떠 온다(기본 배경) |
 | `.github/workflows/android.yml` | 태그 밀면 APK 만들어 릴리스에 붙임 |
-| `requirements.txt` | requests / pillow / pystray / pywin32 / qrcode |
+| `pc/requirements.txt` | requests / pillow / pystray / pywin32 / qrcode |
 | `README.md` | 설치·배포 절차 |
 
 ## 확정된 사실
@@ -79,8 +79,8 @@
 - `utilization` 은 **0~100 스케일**이다. 100 을 곱하지 말 것.
 - 모델별 주간 한도는 `seven_day_opus` 같은 최상위 필드가 아니라 **`limits[]` 의
   `kind == "weekly_scoped"`** 에 들어온다. 최상위 필드는 이제 항상 null.
-- 형식이 또 바뀌면 고칠 곳은 `cooldown_core.py` 한 곳뿐.
-  확인은 `python cooldown_core.py` (원본 JSON 출력).
+- 형식이 또 바뀌면 고칠 곳은 `pc/cooldown_core.py` 한 곳뿐.
+  확인은 `python pc/cooldown_core.py` (원본 JSON 출력).
 
 ## 이번 주 사용 속도 (`cooldown_core.pace`)
 
@@ -114,7 +114,7 @@
   그 아래 `이대로 계속 쓰면 → 초기화 때 X%`(projected) · `하루 이만큼까지 OK X%`(per_day) ·
   `이대로면 다 쓰는 때`(runout) · `초기화`. **'지금쯤/지금' 처럼 겹쳐 헷갈리는 이름, '주 끝' 같은
   모호한 말, 두 값을 한 칸에 몰아넣기(옛 `남은 3일 · 하루`)를 되살리지 말 것.**
-- 확인: `python cooldown_core.py` 끝줄 (`주간 15% · 적정선 9% · 알맞음`).
+- 확인: `python pc/cooldown_core.py` 끝줄 (`주간 15% · 적정선 9% · 알맞음`).
 
 ## 자동 핑 (모닝 스타터)
 
@@ -140,7 +140,7 @@
   (`five.resets_at` 이 미래) **건너뛴다.** 활성 창에 메시지를 더 보내도 경계가
   밀리지 않고 토큰만 쓰기 때문. 창이 풀린 뒤 다음 앵커에 다시 정렬된다(오프그리드 핑 0).
   단, 사용자가 앵커가 아닌 시각에 직접 클로드를 쓰면 그 창만큼 경계가 밀린다 — 구조적 한계.
-- 판단은 `windows/cooldown_app.py` 의 `_ping_tick`(20초마다) → `cooldown_ping.should_ping_now`.
+- 판단은 `pc/windows/cooldown_app.py` 의 `_ping_tick`(20초마다) → `cooldown_ping.should_ping_now`.
   전송은 별도 스레드(`_start_ping`), 결과는 `ping_out` 큐로 받아 `_on_ping_result`.
   **같은 앵커 재전송 방지**: 자동 핑은 쏘기 전에 낙관적으로 `last_ping` 을 지금으로 세운다.
   실패하면 그 앵커는 건너뛴다(다음 앵커가 다시 정렬).
@@ -177,7 +177,7 @@
   시각 입력은 **`tk.Spinbox`**(시 0~23·분 0~59, `wrap`) — 직접 타이핑·화살표·길게눌러 반복
   (`repeatdelay`/`repeatinterval`)·스크롤 다 됨. `textvariable` trace 로 data 에 반영,
   포커스 아웃 때 두 자리로 정돈. 분은 1분 단위(간격 규칙 5시간 1분을 맞추려면 분 단위 조절 필요).
-- 단독 확인: `python cooldown_ping.py`(판단만) / `python cooldown_ping.py --send`(실제 1회 전송).
+- 단독 확인: `python pc/cooldown_ping.py`(판단만) / `python pc/cooldown_ping.py --send`(실제 1회 전송).
 
 ## 색 (밝게 / 어둡게)
 
@@ -202,7 +202,7 @@
 - 흐린 글자도 배경 대비 **4.5:1 이상**. 위계는 밝기가 아니라 글자 크기로 준다.
 - 게이지 칸 계산은 `int(pct * n / 100)` (내림). `round` 를 쓰면 99% 와 100% 가
   구별되지 않는다.
-- 확인: `python -u windows/_shot_skin.py <키> {ok|net|err|max} out.png`
+- 확인: `python -u pc/windows/_shot_skin.py <키> {ok|net|err|max} out.png`
   (`max` 는 100% · 가장 긴 문자열 · 긴 모델명인 최악 케이스)
 
 ## 앱이 꺼졌을 때 (블랙박스)
@@ -481,7 +481,7 @@
 - **콕** 찌르면 펄쩍 뛰며 눈이 커진다. **길게 누르면** 쭈그려 앉아 떨며 **기를 모으고**,
   떼면 모은 만큼 높이 뛴다(꽉 채우면 반짝이를 흩뿌린다). **연타하면 기절**한다(X_X + 별).
 - 그림표는 `MascotSprite.kt` — **앱 아이콘과 같은 생성기**(`android/art/make_claudi_icon.py`)가
-  데스크탑 `windows/skins/slim.py` 에서 뽑는다. **모양은 slim.py 만 고치고 스크립트를 돌린다.**
+  데스크탑 `pc/windows/skins/slim.py` 에서 뽑는다. **모양은 slim.py 만 고치고 스크립트를 돌린다.**
 - 움직임은 `Mascot.kt` 하나에 모았다. **상태를 들고 있으므로 그리는 쪽마다 하나씩** 만든다
   (배경화면 엔진 하나, 꾸미기 미리보기 하나). `WallpaperArt` 는 상태를 안 갖는다.
 - ★ **기울임은 회전이 아니라 계단식 밀기**다(윗줄일수록 옆으로 더). 도형을 돌리면 도트가 뭉개진다.
@@ -510,7 +510,7 @@
 데스크탑 위젯 슬림 바의 코랄 **도트 마스코트**를 폰으로 옮겼다 — PC·폰이 한 앱으로 읽힌다.
 
 - ★ **이 xml 은 손으로 고치지 않는다.** `android/art/make_claudi_icon.py` 가
-  **`windows/skins/slim.py` 의 도트 표(HEAD/LEGS/ARM/EYES)를 그대로 읽어** 만든다.
+  **`pc/windows/skins/slim.py` 의 도트 표(HEAD/LEGS/ARM/EYES)를 그대로 읽어** 만든다.
   마스코트를 바꿀 땐 **slim.py 표만 고치고 스크립트를 다시 돌린다** — 그래야 PC·폰이
   안 어긋난다. (옛 별빛 아이콘은 손으로 그렸다가 데스크탑을 고칠 때마다 따로 놀았다)
 - ★ **눈은 흰 도형이 아니라 `evenOdd` 로 뚫은 구멍**이다. 그래야 단색(monochrome)
@@ -594,16 +594,16 @@
   나가면 이 문제가 되돌아오기 때문. 서명 지문은 빌드 로그('서명 지문 남기기')에 남는다.
 - 손으로 만들 때: `.\build.ps1 release` → `app/build/outputs/apk/release/app-release.apk` (3.1MB)
 
-## exe 로 묶을 때 (build_exe.py)
+## exe 로 묶을 때 (pc/build_exe.py)
 
-- 빌드는 **`exe 빌드.bat` 더블클릭** 한 번이면 된다(PyInstaller 자동 설치 → `build_exe.py` 실행).
-  결과 `dist/클로드 쿨다운.exe` 하나만 배포하면 된다. 콘솔에서 직접: `python build_exe.py`.
+- 빌드는 **`pc/exe 빌드.bat` 더블클릭** 한 번이면 된다(PyInstaller 자동 설치 → `pc/build_exe.py` 실행).
+  결과 `pc/dist/클로드 쿨다운.exe` 하나만 배포하면 된다. 콘솔에서 직접: `python pc/build_exe.py`.
 - `skins/__init__.py` 가 `importlib` 로 스킨을 불러오므로 PyInstaller 가 스스로
   못 찾는다. **`--hidden-import skins.card` 처럼 스킨마다 넣어야 한다.**
   빼먹으면 exe 에 디자인이 하나도 안 들어간다.
-- `cooldown_core.py`·`cooldown_ping.py`·`cooldown_push.py` 가 저장소 루트에 있어 `--paths` 로
-  루트와 `windows` 를 둘 다 준다(+ `HIDDEN` 에 명시). 루트 모듈을 새로 추가하면 `HIDDEN` 에도 넣을 것.
-- **버전은 손으로 붙인다.** 빌드 결과는 늘 `dist/클로드 쿨다운.exe` 라, 만든 뒤
+- `pc/cooldown_core.py`·`pc/cooldown_ping.py`·`pc/cooldown_push.py` 가 `pc/`(build_exe 와 같은 곳)에 있어
+  `--paths` 로 `pc/`(ROOT)와 `pc/windows` 를 둘 다 준다(+ `HIDDEN` 에 명시). 공용 모듈을 새로 추가하면 `HIDDEN` 에도 넣을 것.
+- **버전은 손으로 붙인다.** 빌드 결과는 늘 `pc/dist/클로드 쿨다운.exe` 라, 만든 뒤
   `클로드 쿨다운 v0.0N.exe` 로 이름을 올려 두고(옛 판은 남겨 둔다) **그 exe 를 한 번 실행**한다 —
   `repair_autostart()` 가 자동 실행 바로가기를 자기 자신으로 갈아끼운다. 먼저 옛 판을 끝내야 한다
   (뮤텍스 때문에 두 번째 프로세스는 창을 안 띄우고 그냥 끝난다).
@@ -670,7 +670,7 @@
     **편집 팝업(시각 설정·폰 연결)은 `click_away=False`** — 타이핑 중 사라지면 안 되므로.
 - 내가 만드는 `.bat` 은 **순수 ASCII 로 쓸 것.** Write 도구가 UTF-8(BOM 없음)로 저장하는데
   한국어 Windows cmd 는 배치를 cp949 로 읽어, 한글이 든 줄(주석 포함)에서 바이트가 어긋나
-  뒤따르는 명령까지 깨진다. 한글 안내는 파이썬(`build_exe.py`)이 콘솔에 출력하게 맡긴다.
+  뒤따르는 명령까지 깨진다. 한글 안내는 파이썬(`pc/build_exe.py`)이 콘솔에 출력하게 맡긴다.
 - 폰 앱에 **툴팁·도움말 문단을 넣지 말 것**(폴더 전체 규칙). 설명이 필요하면 항목 이름을
   하는 일로 바꾸고 지금 상태를 화면에 그대로 보여 준다 — 예: 알림 스위치 이름이
   `상태바 · 잠금화면 · AOD`(이 스위치가 켜는 것) 자체다.

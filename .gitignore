@@ -8,7 +8,7 @@ node_modules/
 build/
 dist/
 *.spec
-windows/앱아이콘.ico
+pc/windows/앱아이콘.ico
 
 # Next.js 릴레이 서버 (server/)
 .next/
