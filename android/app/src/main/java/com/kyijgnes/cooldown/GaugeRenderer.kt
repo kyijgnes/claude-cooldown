@@ -191,20 +191,17 @@ object GaugeRenderer {
         val text = pct?.let { Math.round(it).toString() } ?: "–"
         val mid = s / 2f
 
-        // 클로디의 별빛 — **네 모서리 대각선에만** 놓는다. 가로 띠는 숫자가 다 써야 해서
-        // 여덟 살을 다 그리면 숫자를 그만큼 줄여야 하고, 24dp 로 줄면 그게 더 안 보인다.
-        val ray = paint(0f, Color.WHITE, BOLD).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = s * 0.075f
-            strokeCap = Paint.Cap.ROUND
-        }
+        // 클로디의 반짝임 — **네 모서리에 점**으로만 놓는다.
+        // ★ 살(대각선 짧은 선)로 그리면 24dp 에서 숫자 획과 섞여 `)17(` 처럼 읽힌다.
+        //   점은 획으로 안 보여서 숫자를 안 건드린다. 가로·세로 살은 애초에 못 넣는다 —
+        //   그 자리를 숫자가 다 쓰고, 숫자를 줄이면 그게 더 안 보인다.
+        val spark = paint(0f, Color.WHITE, BOLD)
         for (k in 0..3) {
             val a = Math.PI / 4 + k * Math.PI / 2
-            val dx = Math.cos(a).toFloat()
-            val dy = Math.sin(a).toFloat()
-            c.drawLine(
-                mid + dx * s * 0.47f, mid + dy * s * 0.47f,
-                mid + dx * s * 0.62f, mid + dy * s * 0.62f, ray,
+            c.drawCircle(
+                mid + Math.cos(a).toFloat() * s * 0.60f,
+                mid + Math.sin(a).toFloat() * s * 0.60f,
+                s * 0.072f, spark,
             )
         }
 
