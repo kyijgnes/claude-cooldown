@@ -1,6 +1,5 @@
 package com.kyijgnes.cooldown.wallpaper
 
-import android.app.KeyguardManager
 import android.app.WallpaperColors
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -27,7 +26,6 @@ class CooldownWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
         private val runner = Runnable { drawFrame() }
         private var showing = false
-        private var wasLocked: Boolean? = null
 
         override fun onVisibilityChanged(visible: Boolean) {
             showing = visible
@@ -63,8 +61,7 @@ class CooldownWallpaperService : WallpaperService() {
                 val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                 val now = System.currentTimeMillis()
                 WallpaperArt.render(
-                    ctx, Canvas(bmp), Store.snapshot(ctx).settled(now), now,
-                    Look.read(ctx), locked(),
+                    ctx, Canvas(bmp), Store.snapshot(ctx).settled(now), now, Look.read(ctx),
                 )
                 WallpaperColors.fromBitmap(bmp)
             } catch (e: Exception) {
@@ -72,22 +69,15 @@ class CooldownWallpaperService : WallpaperService() {
             }
         }
 
-        /** 잠금화면인가 — 상어가 입을 다물지 벌릴지가 여기서 갈린다. */
-        private fun locked(): Boolean =
-            getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true
-
         private fun drawFrame() {
-            val locked = locked()
             var canvas: Canvas? = null
             try {
                 canvas = surfaceHolder.lockCanvas()
                 if (canvas != null) {
                     val ctx = this@CooldownWallpaperService
-                    // 박자는 시계로 몬다 — 프레임을 몇 장 흘려도 상어가 느려지지 않는다
                     val now = System.currentTimeMillis()
                     WallpaperArt.render(
-                        ctx, canvas, Store.snapshot(ctx).settled(now), now,
-                        Look.read(ctx), locked,
+                        ctx, canvas, Store.snapshot(ctx).settled(now), now, Look.read(ctx),
                     )
                 }
             } catch (e: Exception) {
@@ -99,17 +89,6 @@ class CooldownWallpaperService : WallpaperService() {
                     } catch (e: Exception) {
                         // 이미 놓인 표면
                     }
-                }
-            }
-            // 잠금이 풀리면 그림이 통째로 바뀔 수 있다(상어 얼굴) — 색도 다시 재게 한다.
-            // ★ notifyColorsChanged 는 API 27 부터다(minSdk 26). 안 막으면 26 에서 죽는다 —
-            //   NoSuchMethodError 는 Error 라 아래 catch(Exception) 에 안 걸린다.
-            if (wasLocked != locked && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                wasLocked = locked
-                try {
-                    notifyColorsChanged()
-                } catch (e: Exception) {
-                    // 아직 붙기 전 — 다음 기회에
                 }
             }
             handler.removeCallbacks(runner)

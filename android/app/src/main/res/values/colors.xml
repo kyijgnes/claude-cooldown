@@ -17,14 +17,10 @@
     <!-- 홈 위젯 뒷판 — 반투명(65%)이라 배경화면이 비친다. GaugeRenderer.plate 와 같은 값 -->
     <color name="widget_plate">#a6eaf2fb</color>
 
-    <!-- 마스코트 액센트 — 상어 몸통색. 밝게/어둡게 양쪽에서 그대로 쓴다 -->
+    <!-- 마스코트 액센트. 밝게/어둡게 양쪽에서 그대로 쓴다 -->
     <color name="coral">#7cb0dd</color>
 
-    <!-- 상어 배경화면 팔레트 — 폰 테마 원본 실측값. 바다는 단색이다(위아래 같은 색) -->
+    <!-- 그림이 없을 때 쓰는 밋밋한 바탕 (밝게는 단색) -->
     <color name="sea_top">#bbd8f3</color>
     <color name="sea_bottom">#bbd8f3</color>
-    <color name="shark_tint">#ffffff</color>   <!-- 곱하기 필터. 흰색이면 그림 그대로 -->
-    <color name="bubble">#ffffff</color>
-    <!-- 원본 실측은 #97bfdd @70% 인데, 곁에 아무것도 없는 화면에선 그 값이 너무 도드라진다 -->
-    <color name="shark_shadow">#6e97bfdd</color>
 </resources>

@@ -1,7 +1,6 @@
 package com.kyijgnes.cooldown
 
 import android.app.Activity
-import android.app.KeyguardManager
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
@@ -149,17 +148,11 @@ class CustomizeActivity : Activity() {
     private fun paint() {
         val bmp = frame ?: return
         val now = System.currentTimeMillis()
-        // 앱을 보는 중이니 잠금은 풀린 상태다 — 상어도 그때 얼굴(입 벌린)로 보여 준다
-        WallpaperArt.render(
-            this, Canvas(bmp), Store.snapshot(this).settled(now), now, draft, locked(),
-        )
+        WallpaperArt.render(this, Canvas(bmp), Store.snapshot(this).settled(now), now, draft)
         preview.invalidate()
         handler.removeCallbacks(ticker)
         handler.postDelayed(ticker, 60L)   // 배경화면과 같은 박자
     }
-
-    private fun locked(): Boolean =
-        getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: false
 
     /** 미터기를 짚으면 미터기가, 그 밖을 짚으면 배경이 따라온다. */
     private fun drag(ev: MotionEvent): Boolean {
@@ -201,36 +194,18 @@ class CustomizeActivity : Activity() {
         controls.removeAllViews()
         syncSave()
 
-        // 배경 칸의 이름이 곧 지금 무엇을 쓰는지다 — 폰에서 떠 온 배경이면 '쓰던 배경',
-        // 직접 고른 사진이면 '내 사진'. 설명 문구를 따로 두지 않는다.
-        // ★ 떠 온 그림이 실제로 있을 때만 '쓰던 배경'이라고 적는다 — 안드로이드 13 부터는
-        //   다른 앱이 배경화면을 읽을 수 없어 못 떠 오는 폰이 많다(그땐 사진을 고르게 한다).
+        // 배경은 사진 한 갈래다 — 폰에서 떠 온 배경을 쓰는 중이면 버튼이 `사진 고르기`,
+        // 직접 고른 사진을 쓰는 중이면 `다른 사진` + `쓰던 배경으로`. 설명 문구는 두지 않는다.
+        // (안드로이드 13 부터는 배경화면을 못 떠 오는 폰이 많아 `쓰던 배경` 이 없을 수 있다)
         val grabbed = WallpaperGrab.saved(this)
         val ownWallpaper = grabbed.isNotEmpty() && (draft.photo.isEmpty() || draft.photo == grabbed)
 
         section("배경")
-        chips(
-            listOf((if (ownWallpaper) "쓰던 배경" else "내 사진") to Look.PHOTO, "상어" to Look.SEA),
-            draft.scene,
-        ) { pick ->
-            change(draft.copy(scene = pick))
-            // 보여 줄 그림이 아예 없으면 고르는 화면부터 띄운다 (안 그러면 상어가 그대로 남는다)
-            if (pick == Look.PHOTO && draft.photo.isEmpty() && grabbed.isEmpty()) pickPhoto()
-        }
-
-        if (draft.scene == Look.PHOTO) {
-            button(if (ownWallpaper) "사진 고르기" else "다른 사진") { pickPhoto() }
-            if (!ownWallpaper && grabbed.isNotEmpty()) {
-                button("쓰던 배경으로") {
-                    WallpaperArt.forgetPhoto()
-                    change(draft.copy(photo = grabbed, photoX = 0.5f, photoY = 0.5f))
-                }
-            }
-        }
-
-        if (draft.scene == Look.SEA) {
-            slider("상어 크기", draft.seaSize, Look.ART_MIN, Look.ART_MAX) {
-                change(draft.copy(seaSize = it.coerceIn(Look.ART_MIN, Look.ART_MAX)), rebuild = false)
+        button(if (draft.photo.isEmpty() || ownWallpaper) "사진 고르기" else "다른 사진") { pickPhoto() }
+        if (!ownWallpaper && grabbed.isNotEmpty()) {
+            button("쓰던 배경으로") {
+                WallpaperArt.forgetPhoto()
+                change(draft.copy(photo = grabbed, photoX = 0.5f, photoY = 0.5f))
             }
         }
 
@@ -351,7 +326,7 @@ class CustomizeActivity : Activity() {
             // 임시 권한만 받은 경우 — 이번 세션에서는 보인다
         }
         WallpaperArt.forgetPhoto()
-        change(draft.copy(scene = Look.PHOTO, photo = uri.toString(), photoX = 0.5f, photoY = 0.5f))
+        change(draft.copy(photo = uri.toString(), photoX = 0.5f, photoY = 0.5f))
     }
 
     private companion object {

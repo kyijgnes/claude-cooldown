@@ -6,8 +6,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -18,79 +16,47 @@ import com.kyijgnes.cooldown.Palette
 import com.kyijgnes.cooldown.R
 import com.kyijgnes.cooldown.Snapshot
 import com.kyijgnes.cooldown.WallpaperGrab
-import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
 
 /**
  * 배경화면 **그리기만** 한다 — 화면·수명 관리는 CooldownWallpaperService 가 맡는다.
  * (데스크탑에서 앱과 스킨을 나눈 것과 같은 결. 폰 없이 테스트로 그림을 뽑아 볼 수 있다)
  *
- * 두 겹이다: **배경**(쓰던 배경화면·고른 사진 / 상어)과 그 위에 뜨는 **미터기 판**.
- * 무엇을 어디에 그릴지는 `Look.Values` 로 받는다 — 이 파일은 설정을 직접 안 읽는다
- * (꾸미기 화면이 '저장 전' 값으로 미리보기를 그려야 하기 때문).
- *
- * 상어 그림·배치·박자는 폰에 깔려 있던 갤럭시 테마에서 그대로 가져왔다(아래 dp 값은
- * 원본 `animation.xml` 실측치. 출처는 클로드 디자인 프로젝트 `Shark Wallpaper Request`
- * 의 `theme_package/`).
+ * 두 겹이다: **배경**(쓰던 배경화면·고른 사진, 없으면 밋밋한 바다색)과
+ * 그 위에 뜨는 **미터기 판**. 무엇을 어디에 그릴지는 `Look.Values` 로 받는다 —
+ * 이 파일은 설정을 직접 안 읽는다(꾸미기 화면이 '저장 전' 값으로 미리보기를 그려야 하기 때문).
  */
 object WallpaperArt {
 
     private val REGULAR: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     private val MEDIUM: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
-    // ── 원본 테마 좌표계 (360×640dp 캔버스) ────────────────────────────────
-    private const val CANVAS_W = 360f
-    private const val ART_BOTTOM = 431.5f    // 그림자가 1.3배로 커졌을 때의 아랫변
 
-    private const val SHARK_CX = 184.25f     // 상어 칸 한가운데
-    private const val SHARK_CY = 348f
-    private const val SHARK_W = 110f
-    private const val DIVE = 16.486f         // 883ms 동안 내려가는 거리
-    private const val SWIM_MS = 883L         // 상어·그림자 한쪽 방향 시간
 
-    private const val SHADOW_CX = 181f       // 그림자는 제자리에서 커지기만 한다
-    private const val SHADOW_CY = 417.625f
-    private const val SHADOW_W = 52f
-    private const val SHADOW_H = 21.25f
-    private const val SHADOW_GROW = 0.3f     // 상어가 다 내려가면 1.3배
 
     // ── 미터기 판 (모든 값이 판 너비 u 의 비율. 크기를 키워도 구도가 안 무너진다) ──
     private const val BLOCK_W = 0.82f        // 판 너비 ÷ 화면 너비 (크기 1.0 일 때)
 
-    /**
-     * @param look    지금 그릴 값 한 벌. 꾸미기 화면은 **저장 전 값**을 넘겨 미리보기를 그린다.
-     * @param locked  잠금화면인가. **잠겨 있으면 상어가 입을 다물고, 풀면 벌린다.**
-     */
+    /** @param look 지금 그릴 값 한 벌. 꾸미기 화면은 **저장 전 값**을 넘겨 미리보기를 그린다. */
     fun render(
         ctx: Context, c: Canvas, snap: Snapshot, now: Long,
-        look: Look.Values = Look.read(ctx), locked: Boolean = true,
+        look: Look.Values = Look.read(ctx),
     ) {
         val p = Palette(ctx)
         val w = c.width.toFloat()
         val h = c.height.toFloat()
 
-        // 사진을 못 읽으면(안 골랐거나 지웠거나) 빈 파랑 대신 **상어 바다로 내려간다**
-        val sea = look.scene != Look.PHOTO || !drawPhoto(ctx, c, w, h, look)
-        if (sea) {
-            drawSea(c, w, h, p)
-            val k = look.seaSize * min(w / CANVAS_W, h / ART_BOTTOM)
-            // 원본 캔버스를 **상어 한가운데가 정해진 자리에 오도록** 얹는다 —
-            // 물방울·그림자까지 한 덩어리로 따라와서 크기를 바꿔도 구도가 안 무너진다
-            val ox = look.seaX * w - SHARK_CX * k
-            val oy = look.seaY * h - SHARK_CY * k
-            drawBubbles(c, k, ox, oy, now, p)
-            drawShark(ctx, c, k, ox, oy, now, p, locked)
-        }
+        // 배경으로 쓸 그림이 없으면(안 골랐고 떠 온 것도 없으면) **밋밋한 바다색**으로 둔다
+        if (!drawPhoto(ctx, c, w, h, look)) drawSea(c, w, h, p)
 
         drawMeter(ctx, c, w, h, snap, now, p, look)
     }
 
     // ---------------------------------------------------------------- 배경
 
+    /** 배경으로 쓸 그림이 없을 때의 밋밋한 바탕. 밝게는 단색, 어둡게는 위아래로 깊어진다. */
     private fun drawSea(c: Canvas, w: Float, h: Float, p: Palette) {
-        // 원본은 단색 바다다(밝게). 어둡게에서만 위아래로 깊어진다.
         val sea = Paint().apply {
             shader = LinearGradient(
                 0f, 0f, 0f, h,
@@ -124,132 +90,6 @@ object WallpaperArt {
         val left = -(dw - w) * look.bgX
         val top = -(dh - h) * look.bgY
         return RectF(left, top, left + dw, top + dh)
-    }
-
-    // ---------------------------------------------------------------- 상어
-
-    /**
-     * 상어와 그림자. **883ms 왕복 하나로 둘 다 몬다** —
-     * 상어가 16.5dp 내려가는 동안 그림자가 1.3배로 커진다(원본과 같은 박자).
-     */
-    private fun drawShark(
-        ctx: Context, c: Canvas, k: Float, ox: Float, oy: Float, now: Long,
-        p: Palette, locked: Boolean,
-    ) {
-        val t = swing(now)  // 0 → 1 → 0
-
-        val grow = 1f + SHADOW_GROW * t
-        val sw = SHADOW_W * k * grow / 2f
-        val sh = SHADOW_H * k * grow / 2f
-        val scx = ox + SHADOW_CX * k
-        val scy = oy + SHADOW_CY * k
-        c.drawOval(
-            RectF(scx - sw, scy - sh, scx + sw, scy + sh),
-            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.sharkShadow },
-        )
-
-        val bmp = sharkArt(ctx, locked)
-        val bw = SHARK_W * k
-        val bh = bw * bmp.height / bmp.width
-        val cx = ox + SHARK_CX * k
-        val cy = oy + (SHARK_CY + DIVE * t) * k
-        c.drawBitmap(
-            bmp,
-            null,
-            RectF(cx - bw / 2f, cy - bh / 2f, cx + bw / 2f, cy + bh / 2f),
-            artPaint(p.sharkTint),
-        )
-    }
-
-    /** 883ms 에 걸쳐 0 → 1, 다시 883ms 에 걸쳐 1 → 0 (원본 repeatMode=REVERSE·선형). */
-    private fun swing(now: Long): Float {
-        val phase = (now % (SWIM_MS * 2)).toFloat() / SWIM_MS
-        return if (phase <= 1f) phase else 2f - phase
-    }
-
-    /**
-     * 물방울 다섯 덩이. 원본은 제자리에서 프레임만 도는 그림이라 **떠오르지 않는다** —
-     * 크기·투명도만 흔들린다. 주기 1440/1600/1920ms 가 서로 안 나누어떨어져
-     * 다섯이 절대 같은 박자로 안 논다. **이 어긋남이 자연스러움의 핵심이라 그대로 둔다.**
-     */
-    private fun drawBubbles(c: Canvas, k: Float, ox: Float, oy: Float, now: Long, p: Palette) {
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.bubble }
-        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = p.bubble
-        }
-        for (cl in CLUSTERS) {
-            val phase = (now % cl.periodMs).toFloat() / cl.periodMs
-            cl.drops.forEachIndexed { i, d ->
-                val a = 2.0 * PI * (phase + i * 0.31f)
-                val r = d.r * k * (1f + 0.16f * sin(a).toFloat())
-                val x = ox + (cl.cx + d.dx) * k
-                val y = oy + (cl.cy + d.dy) * k + 1.4f * k * sin(a + 1.1).toFloat()
-                val alpha = (185 + 60 * sin(a + 2.2)).toInt()
-                if (d.ring) {
-                    ring.alpha = alpha
-                    ring.strokeWidth = max(0.7f * k, r * 0.26f)
-                    c.drawCircle(x, y, r, ring)
-                } else {
-                    fill.alpha = alpha
-                    c.drawCircle(x, y, r, fill)
-                }
-            }
-        }
-    }
-
-    /** 물방울 한 알 — 덩이 한가운데 기준 dp 오프셋·반지름, `ring` 이면 속이 빈 동그라미. */
-    private class Drop(val dx: Float, val dy: Float, val r: Float, val ring: Boolean = false)
-
-    /** 원본 `component_4`~`8` 의 60×60dp 칸 — 위치와 주기는 실측치, 알 배치는 원본 그림을 따랐다. */
-    private class Cluster(
-        val cx: Float, val cy: Float, val periodMs: Long, val drops: List<Drop>,
-    )
-
-    private val CLUSTERS = listOf(
-        Cluster(
-            91.25f, 199.5f, 1920L,
-            listOf(Drop(-8f, -6f, 3.1f, ring = true), Drop(7f, 2f, 1.7f), Drop(2f, 12f, 1.2f)),
-        ),
-        Cluster(
-            273.25f, 142.5f, 1440L,
-            listOf(Drop(6f, -8f, 2.6f), Drop(-7f, 3f, 1.9f, ring = true), Drop(9f, 10f, 1.3f, ring = true)),
-        ),
-        Cluster(
-            109.25f, 300.75f, 1920L,
-            listOf(Drop(-9f, 4f, 2.8f, ring = true), Drop(5f, -7f, 2.1f), Drop(10f, 9f, 1.4f)),
-        ),
-        Cluster(
-            254.75f, 293.75f, 1440L,
-            listOf(Drop(8f, 5f, 2.4f, ring = true), Drop(-6f, -6f, 1.8f), Drop(-2f, 11f, 1.2f, ring = true)),
-        ),
-        Cluster(
-            170.75f, 50.5f, 1600L,
-            listOf(Drop(-5f, -4f, 2.2f), Drop(8f, 6f, 1.6f, ring = true), Drop(-9f, 9f, 1.1f)),
-        ),
-    )
-
-    // 상어 비트맵과 물들이기 필터는 한 번만 만든다 (16fps 로 계속 다시 그린다)
-    private val sharks = HashMap<Int, Bitmap>()
-    private var tinted: PorterDuffColorFilter? = null
-    private var tintOf = 0
-
-    /**
-     * **잠겨 있으면 입을 다물고, 풀면 벌린다.** 폰 원본 테마의 다문 얼굴이 잠금화면 쪽이고,
-     * 잇몸이 살짝 핑크다(`android/art/paint_gums.py` 로 칠해 넣었다).
-     */
-    private fun sharkArt(ctx: Context, locked: Boolean): Bitmap {
-        val id = if (locked) R.drawable.shark else R.drawable.shark_open
-        return sharks.getOrPut(id) { BitmapFactory.decodeResource(ctx.resources, id) }
-    }
-
-    /** 어둡게에서는 곱하기로 상어를 깊은 바다색까지 내린다. 흰색이면 원본 그대로. */
-    private fun artPaint(tint: Int): Paint {
-        if (tint != tintOf) {
-            tintOf = tint
-            tinted = if (tint == -1) null else PorterDuffColorFilter(tint, PorterDuff.Mode.MULTIPLY)
-        }
-        return Paint(Paint.FILTER_BITMAP_FLAG).apply { colorFilter = tinted }
     }
 
     // ---------------------------------------------------------------- 미터기 판
@@ -393,9 +233,8 @@ object WallpaperArt {
         return look.withMeterPos((r.centerX() + dx) / w, (r.centerY() + dy) / h)
     }
 
-    /** 배경을 끈 만큼 옮긴 값 — 상어면 상어가, 사진이면 잘려 나간 쪽이 따라온다. */
+    /** 배경을 끈 만큼 옮긴 값 — 사진에서 잘려 나간 쪽이 따라온다. */
     fun dragBg(ctx: Context, w: Float, h: Float, look: Look.Values, dx: Float, dy: Float): Look.Values {
-        if (look.scene != Look.PHOTO) return look.withBg(look.bgX + dx / w, look.bgY + dy / h)
         val bmp = photoFor(ctx, photoUri(ctx, look)) ?: return look
         val r = photoRect(bmp, w, h, look)
         val overW = r.width() - w
