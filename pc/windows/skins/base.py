@@ -192,6 +192,15 @@ class Skin:
         기본은 아무것도 하지 않는다."""
         pass
 
+    def hold(self, x: float, y: float) -> None:
+        """그 자리에서 계속 누르고 있을 때(선택). 앱이 `HOLD_MS` 뒤 한 번만 부른다.
+        끌기로 바뀌면 안 부른다. 기본은 아무것도 하지 않는다."""
+        pass
+
+    def let_go(self) -> None:
+        """`hold()` 뒤에 손을 뗐을 때(선택). 끌기로 접힐 때도 불린다."""
+        pass
+
     def notice(self, text: str) -> None:
         """값은 멀쩡한데 알릴 것(예: 자동 시작 놓침)을 표시(선택). 기본은 no-op.
 

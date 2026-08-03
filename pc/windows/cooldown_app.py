@@ -148,6 +148,7 @@ THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "�
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
 ALPHA = 0.96  # 평소 창 불투명도
 BUSY_ALPHA = 0.78  # 새로고침 누른 직후
+HOLD_MS = 340  # 이만큼 누르고 있으면 '꾹 누름' — 마스코트가 기를 모으기 시작한다
 STATUS_BOX = 18  # 상태 점 + 새로고침 링을 담는 작은 캔버스 한 변 (px)
 DOT_R = 2.0  # 상태 점 반지름 — 링(반지름 7) 안쪽에 넉넉히 들어가게 작게
 
@@ -521,6 +522,8 @@ class App:
         self.last_error_stamp = ""
         self.last_manual = 0.0
         self._dragging = False
+        self._hold_job = None   # '꾹 누름' 판정 예약
+        self._holding = False   # 지금 꾹 누르고 있는가
         self._menu_open = False
         self._panels: list[tk.Toplevel] = []  # 열려 있는 팝업들 (한 번에 하나만 둔다)
 
@@ -581,20 +584,21 @@ class App:
         self.body = tk.Frame(self.root, bg=P.bg)
         self.body.pack(fill="both", expand=True)
         self.skin.build(self.body)
-        self._bind_drag(self.body)
+        # ★★ 드래그·우클릭은 **창(toplevel)에만** 건다. tk 이벤트는 자식에서 창으로
+        #   올라오므로 이것만으로 어느 자식을 눌러도 잡힌다 — 자식마다 또 걸면
+        #   **한 번 누른 게 두 번 처리된다**(마스코트가 두 배로 튀고, 기절 누적도 두 배로
+        #   쌓이고, 클릭 한 번에 반짝이가 터졌다. 2026-08-03 에 실제로 그러고 있었다).
         self._bind_drag(self.root)
         # 상태 점은 스킨 위에 얹는 별도 캔버스라 스킨을 다시 그릴 때마다 자리를 다시 잡는다.
         # (root 의 자식이라 _bind_drag 가 못 걸지만, 이벤트가 root 로 올라가 똑같이 동작한다)
         self._sync_status()
 
     def _bind_drag(self, widget: tk.Misc) -> None:
-        """위젯과 그 아래 모든 자식에 드래그·우클릭을 건다."""
+        """드래그·우클릭을 건다. **창에만 걸 것** — 자식에도 걸면 두 번 처리된다."""
         widget.bind("<Button-1>", self._press)
         widget.bind("<B1-Motion>", self._drag)
         widget.bind("<ButtonRelease-1>", self._release)
         widget.bind("<Button-3>", self._popup)
-        for child in widget.winfo_children():
-            self._bind_drag(child)
 
     def switch_skin(self, key: str) -> None:
         self._close_panels()  # 디자인을 바꾸면 옛 팝업(옛 색·자리)이 떠돌지 않게 닫는다
@@ -791,11 +795,45 @@ class App:
             self.skin.react(self._dx, self._dy)
         except Exception:  # noqa: BLE001
             pass
+        # 그대로 누르고 있으면 '꾹 누름'으로 넘긴다 (마스코트가 기를 모은다)
+        self._hold_job = self.root.after(
+            HOLD_MS, lambda x=self._dx, y=self._dy: self._begin_hold(x, y)
+        )
+
+    def _begin_hold(self, x, y):
+        self._hold_job = None
+        if self._holding or not self._dragging:
+            return
+        self._holding = True
+        try:
+            self.skin.hold(x, y)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _end_hold(self):
+        """누르기가 끝났거나(뗌) 끌기로 바뀌었다 — 꾹 누름을 접는다."""
+        if getattr(self, "_hold_job", None) is not None:
+            try:
+                self.root.after_cancel(self._hold_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._hold_job = None
+        if getattr(self, "_holding", False):
+            self._holding = False
+            try:
+                self.skin.let_go()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _drag(self, e):
+        # 끌기 시작한 순간 꾹 누름은 접는다 (옮기려던 것이지 놀려던 게 아니다)
+        start = getattr(self, "_from", (e.x_root, e.y_root))
+        if max(abs(e.x_root - start[0]), abs(e.y_root - start[1])) > DRAG_SLOP:
+            self._end_hold()
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
 
     def _release(self, e):
+        self._end_hold()
         self._dragging = False
         # 그냥 한 번 누른 것과 끌어서 옮긴 것을 구분한다.
         start = getattr(self, "_from", (e.x_root, e.y_root))
