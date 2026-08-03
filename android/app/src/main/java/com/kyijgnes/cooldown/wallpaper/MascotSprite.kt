@@ -43,6 +43,7 @@ object MascotSprite {
         "blink" to intArrayOf(2, 3, 3, 3, 5, 3, 6, 3),
         "grin" to intArrayOf(1, 3, 2, 3, 3, 3, 5, 3, 6, 3, 7, 3),
         "surprise" to intArrayOf(1, 2, 2, 2, 3, 2, 1, 3, 2, 3, 3, 3, 5, 2, 6, 2, 7, 2, 5, 3, 6, 3, 7, 3),
+        "focus" to intArrayOf(2, 3, 3, 3, 3, 2, 5, 3, 6, 3, 5, 2),
         "faint" to intArrayOf(1, 2, 3, 2, 2, 3, 1, 4, 3, 4, 5, 2, 7, 2, 6, 3, 5, 4, 7, 4),
     )
 

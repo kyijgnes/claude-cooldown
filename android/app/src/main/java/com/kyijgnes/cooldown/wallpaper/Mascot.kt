@@ -76,8 +76,6 @@ class Mascot {
         if (charging) {
             heldFrames++
             charge = (charge + 1f / CHARGE_FRAMES).coerceAtMost(1f)
-            // 기 모으는 동안 한 알씩 새어 나온다 (모을수록 자주)
-            if (heldFrames % max(3, 9 - (charge * 6f).toInt()) == 0) burst(1, 0.55f)
         }
 
         vy += -SPRING_K * yoff
@@ -137,9 +135,9 @@ class Mascot {
         spinDir = -spinDir
         surprise = SURPRISE_FRAMES
 
-        // **누를 때마다** 반짝인다. 꽉 채웠거나 콤보가 붙었으면 한 움큼 더.
-        val big = (held && charge > 0.6f) || combo >= 3
-        burst(if (big) SPARK_BIG + combo else SPARK_TAP + combo, if (big) 1.35f else 1f)
+        // ★ **크게 뛸 때만** 반짝인다 — 기를 꽉 채웠거나 타이밍을 맞춰 콤보를 이었을 때.
+        //   뗄 때마다 뿜어 봤더니 연타에서 앞것과 겹쳐 지저분했다(그래서 되돌렸다).
+        if ((held && charge > 0.6f) || combo >= 3) burst(SPARK_BIG + combo, 1.3f)
         clicks += if (held) 1f else 2f              // 콕콕 찌르는 쪽이 더 지친다
         if (clicks >= FAINT_AT) {
             faint = FAINT_FRAMES
@@ -324,14 +322,15 @@ class Mascot {
         const val COMBO_FRAMES = 22      // 약 0.75초 안에 다시 찌르면 이어진다 (30fps)
         const val COMBO_MAX = 5
         const val COMBO_JUMP = 0.8f      // 콤보 한 번마다 더 높이
-        const val FAINT_AT = 12f         // 콕 여섯 번쯤
+        // ★ 어쩌다 기절하면 놀라니까 높게 잡는다 — 작정하고 두드려야 뻗는다.
+        //   한 번에 +2, 매 프레임 CLICK_DECAY 만큼 식으므로 초당 한 번보다 빨라야 는다.
+        const val FAINT_AT = 40f
         const val FAINT_FRAMES = 80      // 약 2.7초
         // 기절 땐 X_X 눈이 보일 만큼만 키운다. ★ 1.3 은 딴 친구가 나타난 것처럼 커 보였다.
         const val FAINT_SCALE = 1.15f
 
         const val SPARK_LIFE = 44f       // 반짝이 수명 (프레임)
-        const val SPARK_TAP = 4          // 그냥 콕 눌렀을 때 (+콤보)
-        const val SPARK_BIG = 9          // 기를 채웠거나 콤보가 붙었을 때 (+콤보)
+        const val SPARK_BIG = 9          // 크게 뛸 때 (+콤보). 그냥 콕 찌른 것으론 안 나온다
         const val SPARK_WAKE = 12        // 기절에서 깨어날 때
     }
 }

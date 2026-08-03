@@ -73,7 +73,10 @@ POKE_MULT = 1.8       # 마스코트를 직접 콕 찌르면 반응이 이만큼
 SPIN_IMPULSE = 0.22   # 누를 때 좌우로 도는 힘 (부호를 번갈아 흔든다)
 SPRING_K = 0.20       # 제자리로 당기는 용수철 세기
 SPRING_DAMP = 0.14    # 감쇠 (0=계속 튐, 1=즉시 멈춤)
-FAINT_AT = 30.0       # 직접 콕 찌른 게 이만큼 쌓여야 기절 (딴 데 클릭은 안 쌓임)
+# 직접 콕 찌른 게 이만큼 쌓여야 기절 (딴 데 클릭은 안 쌓임). 한 번에 +2, 매 프레임
+# CLICK_DECAY 만큼 식으므로 **초당 1.3번보다 빠르게** 계속 찔러야 는다.
+# ★ 어쩌다 기절하면 놀라니까 높게 잡는다 — 작정하고 두드려야 뻗는다(약 12초 연타).
+FAINT_AT = 90.0
 CLICK_DECAY = 0.12    # 눌림 누적이 프레임마다 이만큼 식는다
 FAINT_FRAMES = 60     # 기절 지속 (약 2.7초)
 # 기절 땐 조금 부풀려 X_X 눈이 보이게 한다. ★ 1.35 는 딴 친구가 나타난 것처럼 커 보였다 —
@@ -81,15 +84,29 @@ FAINT_FRAMES = 60     # 기절 지속 (약 2.7초)
 FAINT_SCALE = 1.15
 SURPRISE_FRAMES = 7   # 직접 찔렸을 때 눈이 동그래지는 프레임 수
 HIT_R = 15            # 이 반경 안을 누르면 '직접 찌름'으로 본다 (px — 도트 그림 크기에 맞춤)
-# 반짝이 — 누를 때·잔동작·깨어날 때 한 움큼씩 뿜는다.
-# ★ **폰 쪽(`Mascot.burst`)과 같은 결**: 부채꼴로 가지런히 퍼뜨리면 도형을 그린 것처럼
-#   보인다(실제로 그랬다). 머리 둘레에 **흩뿌려 놓고 위로 떠오르며 작아지게** 한다.
+# 반짝이 — **크게 뛸 때만** 터진다 (폰 쪽과 같은 규칙).
+# ★★ 누를 때마다 뿜었더니 연타에서 앞것과 겹쳐 지저분했다. 지금은 **타이밍을 맞춰
+#   올라가는 결에 얹어 찔러 `SPARK_AT` 넘게 튀어오를 때만** 나온다 — 그냥 한 번 콕
+#   찌른 것(4.7)으로는 안 나오고, 리듬을 맞춰야 나오는 상이 된다.
+# ★ 모양은 폰(`Mascot.burst`)과 같은 결: 부채꼴로 가지런히 퍼뜨리면 도형을 그린 것처럼
+#   보이므로, 머리 둘레에 **흩뿌려 놓고 위로 떠오르며 작아지게** 한다.
 SPARK_LIFE = 22       # 반짝이 수명 (프레임)
-SPARK_POKE = 7        # 직접 콕 찔렀을 때 뿜는 개수
-SPARK_TAP = 3         # 딴 데를 눌렀을 때 (잔잔하게)
-SPARK_WAKE = 10       # 기절에서 깨어날 때 (펑)
+SPARK_AT = 6.1        # 이보다 세게 튀어오르면 터진다 (한 번 콕 = JUMP×POKE_MULT = 4.68)
+SPARK_POKE = 6        # 그때 뿜는 개수
+SPARK_WAKE = 7        # 기절에서 깨어날 때 (펑)
+SPARK_COOL = 26       # 한 번 뿜으면 이만큼(프레임 ≈ 1.2초)은 다시 안 뿜는다
 SPARK_SPREAD = 8.0    # 흩뿌리는 가로 폭 (px)
 SPARK_GRAV = 0.035    # 떠오르던 것이 처지는 정도
+
+# ---------------------------------------------------------------- 딴짓(오래 심심할 때)
+# 한참 아무도 안 건드리면 **혼자 열중한다** — 노트북을 두드리거나, 아예 자리를 비운다.
+# 위젯을 누르면 곧바로 하던 걸 접고 돌아온다.
+DEEP_IDLE = 640       # 이만큼(프레임 ≈ 29초) 아무 반응이 없으면 딴짓을 시작한다
+TYPE_MIN, TYPE_MAX = 200, 420    # 노트북 두드리기 지속 (9~19초)
+AWAY_MIN, AWAY_MAX = 170, 340    # 자리 비움 지속 (8~15초)
+AWAY_LEAD = 20        # 내려가기 전에 손 흔드는 프레임 (인사하고 간다)
+SINK_FRAMES = 10      # 아래로 내려갔다 올라오는 데 걸리는 프레임
+TYPE_BEAT = 3         # 이 프레임마다 손을 바꿔 두드린다
 GAP = 16  # 칸 사이
 SEG_GAP = 2  # 눈금 사이
 MARK_OUT = 2  # '지금쯤' 눈금이 게이지 위아래로 삐져나오는 길이
@@ -151,6 +168,18 @@ HEAD = (
 LEGS = ("..#...#..", ".##...##.")       # 평소 — 다리 둘에 발
 LEGS_WIDE = (".#.....#.", "##.....##")  # 기절 — 다리가 벌어져 주저앉는다
 
+# 노트북 — 오래 심심할 때 앞에 놓고 두드린다. 다리를 가리도록 그 자리에 겹쳐 그린다
+# (몸통이 없는 친구라, 다리 앞을 막아 주면 '앉아서 뭘 하는' 모습으로 읽힌다).
+# ★ 마스코트 격자와 **같은 좌표계**(9칸)다. 받침을 화면보다 넓게 빼야 노트북으로 읽힌다 —
+#   같은 폭으로 두면 그냥 네모 덩어리다.
+# ★★ **몸 색(코랄)으로 그리면 안 된다** — 머리와 붙어 큰 덩어리 하나로 보인다(실제로 그랬다).
+#   흐린 회색(`P.label`)으로 그려야 '앞에 놓인 물건'으로 갈라져 보인다.
+LAPTOP = (
+    "..#####..",   # 화면
+    "..#####..",
+    "#########",   # 받침 (화면보다 넓게)
+)
+
 # 팔은 **한 칸**이다(짧게). **왼팔 기준**이고 오른팔은 좌우로 뒤집어 쓴다(`8 - col`).
 # -1 번쩍 / 0 옆으로 / 1 축 늘어뜨림
 # ★ 팔 칸은 **그 줄의 머리 끝에 닿아야** 한다. 안 그러면 한 칸 떨어져 떠 보인다
@@ -170,6 +199,9 @@ EYES = {
     "grin": ((1, 3), (2, 3), (3, 3), (5, 3), (6, 3), (7, 3)),
     "surprise": ((1, 2), (2, 2), (3, 2), (1, 3), (2, 3), (3, 3),   # 크게 뜬 눈
                  (5, 2), (6, 2), (7, 2), (5, 3), (6, 3), (7, 3)),
+    # 열중 — 아랫줄만 남겨 화면을 내려다보는 눈. 깜빡임과 달리 안쪽 한 칸이 위로 붙어
+    # '감은 것'이 아니라 '내려다보는 것'으로 읽힌다.
+    "focus": ((2, 3), (3, 3), (3, 2), (5, 3), (6, 3), (5, 2)),
     "faint": ((1, 2), (3, 2), (2, 3), (1, 4), (3, 4),              # X_X
               (5, 2), (7, 2), (6, 3), (5, 4), (7, 4)),
 }
@@ -531,13 +563,21 @@ class SlimSkin(Skin):
         self._wave = 0                # 손 흔들기 남은 프레임
         self._look_dir = self._tilt_dir = self._wave_dir = 1
         self._sparks: list[list[float]] = []   # 뿜은 반짝이 [x, y, vx, vy, life]
+        self._spark_cool = 0          # 이만큼 지나야 다시 반짝인다 (연타에 겹치지 않게)
+        # 오래 심심할 때 하는 딴짓 — 노트북 두드리기 / 자리 비움
+        self._quiet = 0               # 마지막 반응 뒤 흐른 프레임
+        self._typing = 0              # 노트북 두드리기 남은 프레임
+        self._away = 0                # 자리 비움 남은 프레임
+        self._away_total = 0
         self._next_gesture = random.randint(20, 60)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
         self._draw_mascot()  # 첫 프레임은 바로 그린다
         self.c.after(FRAME_MS, lambda c=self.c, g=self._anim_gen: self._animate(c, g))
 
     def _hit(self, x: float, y: float) -> bool:
-        """누른 자리가 마스코트 위인가 (직접 콕 찌름)."""
+        """누른 자리가 마스코트 위인가 (직접 콕 찌름). 자리를 비웠으면 없는 셈."""
+        if self._away > 0:
+            return False
         dx = x - self.mascot_cx
         dy = y - self.h / 2
         return dx * dx + dy * dy <= HIT_R * HIT_R
@@ -545,7 +585,13 @@ class SlimSkin(Skin):
     def react(self, x: float | None = None, y: float | None = None) -> None:
         """눌렀을 때 반응. 좌표로 **마스코트를 직접 찔렀는지** 보고 다르게 논다:
         직접 찌르면 크게 놀라 펄쩍(눈 동그래짐)·많이 찌르면 기절.
-        **딴 데 클릭은 잔잔히 통통만 하고 기절엔 안 쌓인다.**"""
+        **딴 데 클릭은 잔잔히 통통만 하고 기절엔 안 쌓인다.**
+        딴짓(노트북·자리 비움) 중이었으면 그만두고 돌아온다."""
+        self._quiet = 0
+        self._typing = 0
+        if self._away > 0:  # 자리를 비웠다 — 부르면 곧바로 올라온다
+            self._away = min(self._away, SINK_FRAMES)
+            return
         if self._faint > 0:
             return
         if x is not None and self._hit(x, y):  # 콕! — 크게 놀란다
@@ -553,21 +599,28 @@ class SlimSkin(Skin):
             self._vr += SPIN_IMPULSE * 1.8 * self._spin_dir
             self._surprise = SURPRISE_FRAMES
             self._clicks += 2.0  # 직접 찌른 것만 지치게 한다
-            # 찌를수록 더 많이 튄다 — 연타하면 눈에 띄게 화려해진다
-            self._burst(SPARK_POKE + int(self._clicks / 6), 1.0)
+            # 올라가는 결에 얹어 찔러 **크게 튀어오를 때만** 반짝인다 (타이밍 맞히기 상)
+            if -self._vy >= SPARK_AT:
+                self._burst(SPARK_POKE, 1.0)
             if self._clicks >= FAINT_AT:  # 과부하 — 뻗는다
                 self._faint = FAINT_FRAMES
                 self._clicks = 0.0
                 self._surprise = 0
-        else:  # 딴 데 — 잔잔히 통통 (기절과 무관)
+        else:  # 딴 데 — 잔잔히 통통 (기절·반짝이와 무관)
             self._vy -= JUMP_IMPULSE
             self._vr += SPIN_IMPULSE * self._spin_dir
-            self._burst(SPARK_TAP, 0.7)
         self._spin_dir = -self._spin_dir
 
     def _burst(self, count: int, power: float = 1.0) -> None:
         """반짝이를 한 움큼 뿜는다 — 머리 둘레에 **흩뿌려** 놓고 떠오르며 사그라든다.
-        가지런히 퍼뜨리면(부채꼴) 도형을 그린 것처럼 보여, 자리를 일부러 흩는다."""
+        가지런히 퍼뜨리면(부채꼴) 도형을 그린 것처럼 보여, 자리를 일부러 흩는다.
+
+        ★ **`SPARK_COOL` 만큼 쉬었을 때만 나온다** — 연타할 때마다 뿜으면 앞것과 겹쳐
+        지저분하다(실제로 그랬다). 아껴 써야 반짝일 때 반갑다.
+        """
+        if self._spark_cool > 0:
+            return
+        self._spark_cool = SPARK_COOL
         cy = self.h / 2 + self._yoff
         for _ in range(max(0, min(16, count))):
             self._sparks.append([
@@ -594,6 +647,8 @@ class SlimSkin(Skin):
     def _step_sparks(self) -> None:
         """뿜은 반짝이 한 걸음 — 퍼지며 떠올랐다 처지고 사그라든다.
         기절 중에도 흘러야 하므로 잔동작(_idle_step)이 아니라 여기서 돌린다."""
+        if self._spark_cool > 0:
+            self._spark_cool -= 1
         for s in self._sparks:
             s[0] += s[2]; s[1] += s[3]; s[3] += SPARK_GRAV; s[4] -= 1
         self._sparks = [s for s in self._sparks if s[4] > 0]
@@ -626,7 +681,17 @@ class SlimSkin(Skin):
     def _idle_step(self) -> None:
         """쉬는 동안 이따금 딴짓을 시킨다 — 손 흔들기·눈 굴리기·고개 갸웃·기지개·
         부르르·반짝이 뿜기·가끔 폴짝. 한 번에 하나씩만, 반응(눌림)으로 출렁일 땐 쉰다.
+        한참(`DEEP_IDLE`) 아무도 안 건드리면 **노트북을 두드리거나 자리를 비운다.**
         (반짝이 자체를 굴리는 건 _step_sparks — 기절 중에도 흘러야 한다)"""
+        self._quiet += 1
+        if self._away > 0:  # 자리 비움 — 인사(손 흔들기)만 하고 내려가 있는다
+            self._away -= 1
+            if self._wave > 0:
+                self._wave -= 1
+            return
+        if self._typing > 0:  # 노트북 두드리는 중 — 잔동작을 겹치지 않는다
+            self._typing -= 1
+            return
         for key in ("_blink", "_look", "_tilt", "_stretch", "_wiggle", "_wave"):
             v = getattr(self, key)
             if v > 0:
@@ -634,10 +699,37 @@ class SlimSkin(Skin):
         busy = (self._blink or self._look or self._tilt or self._stretch
                 or self._wiggle or self._wave)
         moving = abs(self._vy) + abs(self._yoff) > 0.8
+        if self._quiet > DEEP_IDLE and not busy and not moving:
+            self._begin_absorbed()
+            return
         self._next_gesture -= 1
         if self._next_gesture <= 0 and not busy and not moving:
             self._begin_gesture()
             self._next_gesture = random.randint(30, 100)  # 다음 딴짓까지 1.4~4.5초
+
+    def _begin_absorbed(self) -> None:
+        """오래 심심해서 하는 일 — 노트북을 두드리거나 잠깐 자리를 비운다.
+        끝나면 `_quiet` 를 되감아 곧바로 또 시작하지 않게 한다."""
+        self._quiet = 0
+        if random.random() < 0.62:  # 대개는 노트북
+            self._typing = random.randint(TYPE_MIN, TYPE_MAX)
+        else:  # 가끔은 자리를 비운다 (손 한 번 흔들고 아래로 쏙 내려갔다 돌아온다)
+            self._away_total = AWAY_LEAD + random.randint(AWAY_MIN, AWAY_MAX)
+            self._away = self._away_total
+            self._wave = AWAY_LEAD
+
+    def _sink_amount(self) -> float:
+        """자리 비움에서 얼마나 내려가 있나 (0=제자리, 1=작업표시줄 아래로 완전히)."""
+        if self._away <= 0:
+            return 0.0
+        gone = self._away_total - self._away - AWAY_LEAD  # 인사가 끝난 뒤 흐른 프레임
+        if gone < 0:  # 아직 손 흔드는 중
+            return 0.0
+        if gone < SINK_FRAMES:  # 내려가는 중
+            return gone / SINK_FRAMES
+        if self._away < SINK_FRAMES:  # 올라오는 중
+            return self._away / SINK_FRAMES
+        return 1.0
 
     def _begin_gesture(self) -> None:
         g = random.choice(
@@ -671,6 +763,11 @@ class SlimSkin(Skin):
             self._draw_faint(c, self.mascot_cx, c.cget("bg"))
             self._draw_sparks(c)  # 기절해서도 아까 뿜은 것은 마저 흐른다
             return
+        # 자리 비움 — 작업표시줄 아래로 쏙 내려가 있다 (캔버스 밖이라 저절로 잘린다)
+        sink = self._sink_amount()
+        if sink >= 1.0:
+            self._draw_sparks(c)
+            return
         t = self._t
 
         # --- 잔동작에서 오는 보정값들 ---
@@ -696,32 +793,38 @@ class SlimSkin(Skin):
         sxk *= spring_scale * breathe
         syk *= spring_scale * breathe
         cy = self.h / 2 + math.sin(t * 0.12) * 1.1 + self._yoff   # 잔잔한 통통 + 용수철
+        cy += sink * (self.h / 2 + SPRITE_H)                      # 자리 비우러 내려가는 중
         lean = math.sin(t * 0.05) * 0.10 + self._roff + tilt + wig
         speed = abs(self._vy) + abs(self._yoff)                   # 출렁이는 중이면 신났다
 
         # 표정과 팔 — 콕 찔리면 놀라 만세, 출렁이면 눈웃음, 기지개도 만세
+        front = None
         if self._surprise > 0:
             expr, arms = "surprise", (-1, -1)
         elif speed > 1.2:
             expr, arms = "grin", (-1, -1)
-        elif self._blink > 0:
-            expr, arms = "blink", (0, 0)
-        elif stretch > 0.5:
-            expr, arms = "idle", (-1, -1)
         elif self._wave:  # 손 흔들기 — 한 팔만 번쩍, 그 팔이 오르내린다
             up = (self._wave // 4) % 2 == 0
             expr = "grin"
             arms = (-1 if up else 0, 0) if self._wave_dir < 0 else (0, -1 if up else 0)
+        elif self._typing > 0:  # 노트북에 열중 — 두 손을 번갈아 내리며 두드린다
+            expr, front = "focus", LAPTOP
+            arms = (1, 0) if (self._typing // TYPE_BEAT) % 2 == 0 else (0, 1)
+        elif self._blink > 0:
+            expr, arms = "blink", (0, 0)
+        elif stretch > 0.5:
+            expr, arms = "idle", (-1, -1)
         else:
             expr, arms = "idle", (0, 0)
 
         self._sprite(expr, arms, LEGS, self.mascot_cx, cy,
-                     MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx)
+                     MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx, front)
         self._draw_sparks(c)
 
     def _sprite(self, expr: str, arms: tuple[int, int], legs: tuple[str, ...],
                 cx: float, cy: float, ux: float, uy: float,
-                lean: float = 0.0, eye_dx: int = 0) -> None:
+                lean: float = 0.0, eye_dx: int = 0,
+                front: tuple[str, ...] | None = None) -> None:
         """도트 그림 한 장. 칸 경계를 같은 식으로 계산하므로 확대·기울임에도 틈이 안 생긴다.
 
         `lean` 은 기울임 — 위쪽 줄일수록 옆으로 더 미는 **계단식**이라 도트 결이 유지된다
@@ -739,7 +842,7 @@ class SlimSkin(Skin):
             c.create_rectangle(x, y, x + span * ux, y + uy,
                                fill=color, width=0, tags="mascot")
 
-        def paint(lines: tuple[str, ...], top: int) -> None:
+        def paint(lines: tuple[str, ...], top: int, color: str = MASCOT_COLOR) -> None:
             """줄마다 이어진 칸을 **한 덩이로** 그린다 — 매 프레임 도형 수를 3분의 1로.
             경계 식이 낱칸과 같으므로 그림은 한 픽셀도 안 달라진다."""
             for r, line in enumerate(lines):
@@ -751,7 +854,7 @@ class SlimSkin(Skin):
                     run = 1
                     while col + run < len(line) and line[col + run] == "#":
                         run += 1
-                    cell(col, top + r, MASCOT_COLOR, run)
+                    cell(col, top + r, color, run)
                     col += run
 
         for col, row in ARM[arms[0]]:            # 왼팔
@@ -762,6 +865,11 @@ class SlimSkin(Skin):
         paint(legs, len(HEAD))
         for col, row in EYES[expr]:
             cell(col + eye_dx, row, bg)
+        if front is not None:
+            # 앞에 놓인 것(노트북) — **맨 마지막에** 그려 다리를 가린다.
+            # 몸통이 없는 친구라, 다리 앞을 막아 줘야 '앉아서 뭘 하는' 모습으로 읽힌다.
+            # 색은 몸과 달라야 한다 (같은 코랄이면 머리와 붙어 덩어리로 보인다).
+            paint(front, len(HEAD), P.label)
 
     def _draw_sparks(self, c: tk.Canvas) -> None:
         """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
