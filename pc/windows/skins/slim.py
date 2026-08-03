@@ -75,16 +75,25 @@ BEAT_V = 1.7          # 그 자리에서 이만큼 느려야 (되돌아 오르�
 BEAT_WINDOW = 20      # 이 프레임 안에 다시 맞혀야 이어진다 — 늦으면 끊긴다
 COMBO_MAX = 5         # 5단
 COMBO_JUMP = 0.45     # 콤보 한 번마다 조금 더 높이 (상한 MAX_VY 에 걸린다)
-# **콤보 단마다 다른 재주.** 높이가 아니라 이 재주가 콤보의 상이다.
+# ★ **한 단을 올리는 데 두세 번 맞혀야 한다.** 맞히는 동안은 **소박하게** 반짝이만 조금,
+#   그 단의 마지막 한 방에서 재주가 나온다 — 그래야 올라가는 맛이 있다.
+TIER_HITS = (2, 2, 3, 3, 3)   # 각 단에 필요한 성공 횟수 (다 모으면 13번)
+TIER_UP = [sum(TIER_HITS[:i + 1]) for i in range(len(TIER_HITS))]  # 단이 오르는 누적 횟수
+# **콤보 단마다 다른 재주.** (프레임 수, 세로 회전 바퀴, 가로 회전 바퀴)
 #   1단 반짝이만 · 2단 앞구르기 · 3단 두 바퀴 · 4단 팽이돌기 · 5단 둘 다 + 폭죽
-# (프레임 수, 세로 회전 바퀴, 가로 회전 바퀴)
 TRICKS = {
+    1: (0, 0, 0),
     2: (13, 1, 0),
     3: (16, 2, 0),
     4: (14, 0, 2),
     5: (18, 2, 2),
 }
 TRICK_TRAIL = 2       # 재주 부리는 동안 이 프레임마다 반짝이 하나씩 흘린다
+# 5단까지 다 채우면 **슬림 바 전체에 축하 폭죽**을 터뜨리고 콤보를 끝낸다.
+FINALE_FRAMES = 52    # 폭죽이 이어지는 프레임
+FINALE_EVERY = 4      # 이 프레임마다 한 발
+FINALE_PER = 10       # 한 발에 뿜는 반짝이
+FINALE_BIG = (1.3, 2.0)  # 축하 반짝이는 수명을 길게 줘 더 크고 오래 남는다
 FRAME_MS = 45  # 애니메이션 한 프레임 (약 22fps — 물리가 부드럽게 이어지게)
 # 눌림 반응은 용수철처럼 — 누를 때마다 위로 튀는 '속도'를 더한다. 연타하면 힘이
 # 쌓여 자연스럽게 출렁이고(뚝 끊기지 않고), 너무 많이 치면 기절한다.
@@ -653,7 +662,9 @@ class SlimSkin(Skin):
         self._press = 0.0             # 눌린 정도 0~1
         self._runx = 0.0              # 달려오는 중의 가로 어긋남 (px, 0 이면 제자리)
         self._running = 0             # 달려오는 남은 프레임
-        self._combo = 0               # 박자를 이어 맞힌 횟수
+        self._combo = 0               # 지금 단 (0~COMBO_MAX)
+        self._hits = 0                # 이 판에서 박자를 맞힌 횟수
+        self._finale = 0              # 완주 축하 폭죽 남은 프레임
         self._beat_at = -999          # 마지막으로 박자를 맞힌 프레임
         self._trick = 0               # 재주 남은 프레임
         self._trick_len = 1            # 재주 전체 프레임
@@ -695,19 +706,26 @@ class SlimSkin(Skin):
             # 바닥에 멎은 그 짧은 순간에만 박자가 맞은 것으로 친다
             on_beat = self._yoff >= BEAT_AT and abs(self._vy) <= BEAT_V
             if on_beat and self._t - self._beat_at <= BEAT_WINDOW:
-                self._combo = min(COMBO_MAX, self._combo + 1)
+                self._hits += 1
             else:
-                self._combo = 1 if on_beat else 0
+                self._hits = 1 if on_beat else 0
             self._beat_at = self._t
+            self._combo = self._tier(self._hits)
             self._boost(JUMP_IMPULSE * POKE_MULT + self._combo * COMBO_JUMP)
             self._surprise = SURPRISE_FRAMES
             # ★ **박자를 맞히면 덜 지친다.** 그래야 '너무 빠르게 마구 누르면 콤보가 아니라
             #   기절에 먼저 닿는다' 가 된다 (박자대로면 식는 속도를 못 이겨 안 뻗는다).
             self._clicks += 1.0 if self._combo else 2.4
-            if self._combo:  # 박자를 맞혔다 — 단마다 다른 재주
+            if self._combo:
                 self._spark_cool = 0
-                self._burst(SPARK_POKE + self._combo * 3, 1.0 + self._combo * 0.25)
-                self._begin_trick(self._combo)
+                if self._hits in TIER_UP:  # 이 한 방으로 단이 올랐다 — 재주가 나온다
+                    self._burst(SPARK_POKE + self._combo * 3, 1.0 + self._combo * 0.25)
+                    self._begin_trick(self._combo)
+                    if self._combo >= COMBO_MAX:  # 완주 — 바 전체에 축하 폭죽
+                        self._finale = FINALE_FRAMES
+                        self._hits = self._combo = 0
+                else:  # 아직 올라가는 중 — 소박하게
+                    self._burst(2 + self._combo, 0.6 + self._combo * 0.08)
             else:  # 아무 때나 친 것 — 발밑에 먼지만
                 self._burst(SPARK_DUST, 1.0, foot=True)
             if self._clicks >= FAINT_AT:  # 과부하 — 뻗는다
@@ -742,6 +760,13 @@ class SlimSkin(Skin):
             self._spark_cool = 0
             self._burst(SPARK_POKE + int(8 * press), 1.2 + press * 0.8)
 
+    @staticmethod
+    def _tier(hits: int) -> int:
+        """맞힌 횟수로 지금 몇 단인지. 한 단에 `TIER_HITS` 번씩 걸린다."""
+        if hits <= 0:
+            return 0
+        return min(COMBO_MAX, sum(1 for up in TIER_UP if hits > up) + 1)
+
     def _begin_trick(self, combo: int) -> None:
         """콤보 단에 맞는 재주를 시작한다. 1단은 반짝이뿐, 5단은 앞구르기+팽이돌기+폭죽."""
         spec = TRICKS.get(combo)
@@ -756,8 +781,22 @@ class SlimSkin(Skin):
                     self.mascot_cx + math.cos(a) * 4,
                     self.h / 2 + self._yoff + math.sin(a) * 4,
                     math.cos(a) * 0.9, math.sin(a) * 0.7 - 0.2,
-                    SPARK_LIFE * random.uniform(0.7, 1.0),
+                    SPARK_LIFE * random.uniform(0.7, 1.0), MASCOT_COLOR,
                 ])
+
+    def _firework(self) -> None:
+        """축하 폭죽 한 발 — **마스코트 자리가 아니라 슬림 바 아무 데나** 터진다.
+        (완주는 판 전체가 축하할 일이다. 반짝이는 캔버스 좌표라 바를 가로질러 뿌려진다)"""
+        color = random.choice((P.green, P.amber, MASCOT_COLOR, P.title))
+        fx = random.uniform(PAD_L, self.width - PAD_R)
+        fy = random.uniform(6, self.h - 8)
+        for _ in range(FINALE_PER):
+            a = random.uniform(0, math.tau)
+            r = random.uniform(0.5, 1.0)
+            self._sparks.append([
+                fx, fy, math.cos(a) * r, math.sin(a) * r - 0.15,
+                SPARK_LIFE * random.uniform(*FINALE_BIG), color,
+            ])
 
     def _boost(self, power: float, launch: bool = False) -> None:
         """위로 튀어오르게 한다. `launch` 면 잠시 **창 밖으로** 나가도록 가둠을 푼다 —
@@ -791,7 +830,7 @@ class SlimSkin(Skin):
                     cy + random.uniform(3.0, 4.2) * MASCOT_U,
                     side * random.uniform(0.28, 0.62) * power,
                     random.uniform(-0.30, -0.08) * power,
-                    SPARK_LIFE * random.uniform(0.45, 0.75),
+                    SPARK_LIFE * random.uniform(0.45, 0.75), MASCOT_COLOR,
                 ])
             else:  # 머리 위 — 떠오른다
                 self._sparks.append([
@@ -799,7 +838,7 @@ class SlimSkin(Skin):
                     cy - random.uniform(2.5, 7.0) * MASCOT_U,
                     random.uniform(-0.22, 0.22) * power,
                     random.uniform(-0.85, -0.35) * power,
-                    SPARK_LIFE * random.uniform(0.62, 1.0),
+                    SPARK_LIFE * random.uniform(0.62, 1.0), MASCOT_COLOR,
                 ])
 
     def _animate(self, canvas: tk.Canvas, gen: int) -> None:
@@ -870,7 +909,11 @@ class SlimSkin(Skin):
         if self._clicks > 0:  # 눌림 누적은 서서히 식는다
             self._clicks = max(0.0, self._clicks - CLICK_DECAY)
         if self._combo and self._t - self._beat_at > BEAT_WINDOW:
-            self._combo = 0   # 박자가 끊겼다
+            self._combo = self._hits = 0   # 박자가 끊겼다
+        if self._finale > 0:  # 완주 축하 — 바 전체에 폭죽이 이어진다
+            self._finale -= 1
+            if self._finale % FINALE_EVERY == 0:
+                self._firework()
         if self._trick > 0:  # 재주 — 부리는 동안 반짝이 꼬리를 흘린다
             self._trick -= 1
             if self._trick % TRICK_TRAIL == 0:
@@ -878,7 +921,7 @@ class SlimSkin(Skin):
                     self.mascot_cx + random.uniform(-4, 4),
                     self.h / 2 + self._yoff + random.uniform(-4, 4),
                     random.uniform(-0.25, 0.25), random.uniform(-0.35, 0.05),
-                    SPARK_LIFE * 0.7,
+                    SPARK_LIFE * 0.7, MASCOT_COLOR,
                 ])
 
     # -------------------------------------------------- 심심할 때 하는 잔동작
@@ -1147,7 +1190,7 @@ class SlimSkin(Skin):
 
     def _draw_sparks(self, c: tk.Canvas) -> None:
         """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
-        for sx, sy, _vx, _vy, life in self._sparks:
+        for sx, sy, _vx, _vy, life, color in self._sparks:
             # 수명대로 작아진다 — 가루가 흩어져 사그라드는 결(폰 쪽과 같은 식)
             u = MASCOT_U * SPARK_SIZE * (life / SPARK_LIFE)
             if u < 0.45:
@@ -1155,7 +1198,7 @@ class SlimSkin(Skin):
             for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
                 x, y = sx + dx * u, sy + dy * u
                 c.create_rectangle(x - u / 2, y - u / 2, x + u / 2, y + u / 2,
-                                   fill=MASCOT_COLOR, width=0, tags="mascot")
+                                   fill=color, width=0, tags="mascot")
 
     def _draw_laptop(self, c: tk.Canvas, cx: float, cy: float) -> None:
         """노트북 — **도트가 아니라 1px 다각형**으로 그린다(위 `LAP_*` 주석 참고).
