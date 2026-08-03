@@ -2,7 +2,9 @@ package com.kyijgnes.cooldown.wallpaper
 
 import android.graphics.Canvas
 import android.graphics.Paint
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 
@@ -52,7 +54,10 @@ class Mascot {
     private var lastPoke = -999
     private var combo = 0      // 빠르게 이어 찌른 횟수 — 뛰는 힘이 커진다
 
-    /** 반짝이 [x, y, vy, 남은 수명] — 기를 다 모아 뛸 때 흩뿌린다. */
+    /**
+     * 반짝이 [x, y, vx, vy, 남은 수명] — **누를 때마다** 머리 위로 부채꼴로 흩뿌린다.
+     * 세게 눌렀거나 콤보가 붙으면 한 움큼 더, 기 모으는 동안엔 한 알씩 새어 나온다.
+     */
     private val sparks = ArrayList<FloatArray>()
 
     /** 한 프레임. 배경화면·미리보기가 그리기 직전에 부른다. */
@@ -62,7 +67,10 @@ class Mascot {
             faint--
             vy *= 0.8f; yoff *= 0.85f
             vLean *= 0.9f; lean *= 0.9f
-            if (faint == 0) { yoff = 0f; vy = 0f; lean = 0f; vLean = 0f }
+            if (faint == 0) {                  // 깨어남 — 펑 하고 털어낸다
+                yoff = 0f; vy = 0f; lean = 0f; vLean = 0f
+                burst(SPARK_WAKE, 1.4f)
+            }
             stepSparks()
             return
         }
@@ -70,6 +78,8 @@ class Mascot {
         if (charging) {
             heldFrames++
             charge = (charge + 1f / CHARGE_FRAMES).coerceAtMost(1f)
+            // 기 모으는 동안 한 알씩 새어 나온다 (모을수록 자주)
+            if (heldFrames % max(3, 9 - (charge * 6f).toInt()) == 0) burst(1, 0.55f)
         }
 
         vy += -SPRING_K * yoff
@@ -95,8 +105,8 @@ class Mascot {
         var i = 0
         while (i < sparks.size) {
             val s = sparks[i]
-            s[1] += s[2] * 0.5f; s[2] += 0.03f; s[3] -= 1f
-            if (s[3] <= 0f) sparks.removeAt(i) else i++
+            s[0] += s[2] * 0.5f; s[1] += s[3] * 0.5f; s[3] += 0.06f; s[4] -= 1f
+            if (s[4] <= 0f) sparks.removeAt(i) else i++
         }
     }
 
@@ -129,7 +139,9 @@ class Mascot {
         spinDir = -spinDir
         surprise = SURPRISE_FRAMES
 
-        if ((held && charge > 0.6f) || combo >= 3) burst()   // 꽉 채웠거나 콤보가 붙었다
+        // **누를 때마다** 반짝인다. 꽉 채웠거나 콤보가 붙었으면 한 움큼 더.
+        val big = (held && charge > 0.6f) || combo >= 3
+        burst(if (big) SPARK_BIG + combo else SPARK_TAP + combo, if (big) 1.35f else 1f)
         clicks += if (held) 1f else 2f              // 콕콕 찌르는 쪽이 더 지친다
         if (clicks >= FAINT_AT) {
             faint = FAINT_FRAMES
@@ -157,10 +169,17 @@ class Mascot {
         charge = 0f
     }
 
-    private fun burst() {
-        for (k in 0 until 7) {
-            val a = k * 0.9f
-            sparks.add(floatArrayOf(sin(a) * 14f, -abs(sin(a * 1.7f)) * 10f, -1.4f - k * 0.1f, 44f))
+    /** 머리 위쪽 반원으로 고르게 흩뿌린다. `power` 는 퍼지는 힘. */
+    private fun burst(count: Int, power: Float) {
+        val n = count.coerceIn(1, 20)
+        for (k in 0 until n) {
+            val a = (PI * (k + 0.5f) / n).toFloat()
+            sparks.add(floatArrayOf(
+                cos(a) * 4f, -6f,
+                -cos(a) * 1.6f * power,
+                (-1.5f - sin(a) * 1.3f) * power,
+                (SPARK_LIFE - (k % 4) * 4).toFloat(),
+            ))
         }
     }
 
@@ -273,10 +292,13 @@ class Mascot {
         }
     }
 
-    /** 뿜은 반짝이 — 도트 십자가 떠오르며 사그라든다. */
+    /**
+     * 뿜은 반짝이 — 도트 십자가 떠오르며 사그라든다.
+     * ★ 크기를 수명에 **그대로** 비례시키면 뿜자마자 안 보인다 — 끝까지 또렷하게 남긴다.
+     */
     private fun drawSparks(c: Canvas, cx: Float, cy: Float, u: Float, p: Paint) {
         for (s in sparks) {
-            val k = u * 0.45f * (s[3] / 44f)
+            val k = u * 0.5f * (0.45f + 0.55f * s[4] / SPARK_LIFE)
             if (k < 0.6f) continue
             plus(c, cx + s[0] * u * 0.25f, cy + s[1] * u * 0.25f, k, p)
         }
@@ -305,6 +327,12 @@ class Mascot {
         const val COMBO_JUMP = 0.8f      // 콤보 한 번마다 더 높이
         const val FAINT_AT = 12f         // 콕 여섯 번쯤
         const val FAINT_FRAMES = 80      // 약 2.7초
-        const val FAINT_SCALE = 1.3f
+        // 기절 땐 X_X 눈이 보일 만큼만 키운다. ★ 1.3 은 딴 친구가 나타난 것처럼 커 보였다.
+        const val FAINT_SCALE = 1.15f
+
+        const val SPARK_LIFE = 44f       // 반짝이 수명 (프레임)
+        const val SPARK_TAP = 4          // 그냥 콕 눌렀을 때 (+콤보)
+        const val SPARK_BIG = 9          // 기를 채웠거나 콤보가 붙었을 때 (+콤보)
+        const val SPARK_WAKE = 12        // 기절에서 깨어날 때
     }
 }

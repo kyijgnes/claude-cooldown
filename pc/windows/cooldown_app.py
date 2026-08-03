@@ -1083,14 +1083,17 @@ class App:
 
     def _notice_text(self) -> str:
         """위젯에 얹을 알림 문구 (값은 멀쩡할 때) — 자동 시작이 실패했거나 놓쳤을 때.
-        슬림 바처럼 자리가 좁은 스킨이 뒤를 자르고도 시각이 남게 시각을 앞세우고,
-        **까닭은 붙이지 않는다**(자리가 없다 — 트레이 알림과 실행 기록에 있다)."""
+
+        위젯 자리가 좁아 **여기서만은 '핑' 으로 짧게 쓴다**(메뉴·팝업·트레이는 그대로
+        '자동 시작'). 시각을 앞세우고 **까닭은 붙이지 않는다** — 까닭은 트레이 알림과
+        실행 기록에 있다.
+        """
         if not self.ping_cfg.get("enabled"):
             return ""
         if self._ping_fail is not None:  # 실패가 놓침보다 급하다 (지금 안 열린 것)
-            return f"{self._ping_fail[0]:%H:%M} 자동 시작 실패"
+            return f"{self._ping_fail[0]:%H:%M} 핑 실패"
         if self._missed_dt is not None:
-            return f"{self._missed_dt:%H:%M} 자동 시작 놓침"
+            return f"{self._missed_dt:%H:%M} 핑 놓침"
         return ""
 
     def _apply_notice(self) -> None:

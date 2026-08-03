@@ -1,23 +1,28 @@
 """
 초슬림 바 — 작업표시줄에 얹거나 화면 가장자리에 붙여 두는 낮고 긴 띠.
 **창 높이를 작업표시줄 높이에 맞춘다** (기본 48px, 설정·배율에 따라 달라지는 값을 실측).
-두 칸(5시간·주간)에 숫자와 눈금 게이지를 넣고, 오른쪽 끝에 번갈아 칸·기준 시각을 둔다.
+두 칸(5시간·주간)에 숫자와 눈금 게이지를 넣고, 오른쪽 끝에 번갈아 칸과 상태 점을 둔다.
 왼쪽 세로 띠는 두 한도 중 더 급한 쪽 색. 오류일 때는 띠와 바탕이 빨강으로 바뀌고
 번갈아 칸에 상태 문구가 대신 들어간다 (자리를 새로 만들지 않으므로 높이는 그대로).
 
-    ┃ 5시간 17%   4시간 12분 후 │ 주간 56%   2일 07시간 후 │ Fable 7%
-    ┃ ▪▪▪▪▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫     │ ▪▪▪▪▪▪▪▪▪▪▪▫▫▫▫┃▫▫▫▫▫     │ 03:07 기준
+    ┃ 5시간 17%   4시간 12분 후 │ 주간 56%   2일 07시간 후 │  Fable 7% ●
+    ┃ ▪▪▪▪▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫     │ ▪▪▪▪▪▪▪▪▪▪▪▫▫▫▫┃▫▫▫▫▫     │
 
 주간 게이지의 ┃ 는 '지금쯤' 눈금 — 주간 창이 흐른 만큼의 자리다. 채운 색이 눈금을
 앞질렀으면 그만큼 빨리 쓰는 중. 숫자·판정은 우클릭 > 이번 주 사용 속도 에서 본다.
 
-오른쪽 윗자리(`Fable 7%` 가 있는 곳)는 **한 줄뿐인데 보여 줄 것이 여럿이라 번갈아
-띄운다** — 모델별 한도 · 주간 적정선 · 자동 시작 알림이 차례로 밀려 올라간다.
-그 자리는 가장 긴 알림 문구가 들어갈 만큼 잡혀 있어, 짧은 것만 뜰 때 허전하지 않게
-하는 몫도 겸한다. 애니메이션은 `SLOT_*` 상수와 `_slot_*` 메서드에 모여 있다.
+오른쪽 끝 두 가지:
+- **번갈아 칸** — 한 줄뿐인데 보여 줄 것이 여럿이라 하나씩 바꿔 띄운다(모델별 한도 ·
+  주간 적정선 · 알림 · 오류). 칸보다 긴 글자는 **좌우로 훑어(pan)** 끝까지 보여 준다.
+  그래서 칸 자체는 좁아도 된다 — 창 폭을 480 으로 되돌린 근거다.
+  ★ 훑는 글자가 옆 칸을 침범하지 않게, 이 칸만 **따로 캔버스**(`self.slot`)로 만들어
+    거기 담는다. tk 캔버스는 제 테두리에서 잘라 주므로 이게 유일하게 깔끔한 길이다
+    (한 캔버스에 그리면 도형 단위 클리핑이 없어 마스코트·게이지 위로 글자가 흘러넘친다).
+- **상태 점** — 마지막 조회가 됐으면 초록, 안 됐으면 빨강. 옛 '03:07 기준' 자리를
+  대신한다. 시각은 작업표시줄 시계에 이미 있으니 값이 지금 것인지만 알면 된다.
 
 폭은 "100%" · "6일 23시간 후" 같은 최대 길이 문자열을 실제 글꼴로 재서 칸을 나눈다.
-창 폭(width)은 고정이라 그 최악 케이스가 들어가도록 넉넉히 잡았고, 남는 글자는 … 로 줄인다.
+두 한도 칸이 제 몫을 먼저 가져가고, 번갈아 칸은 남는 만큼만 쓴다(모자라면 훑는다).
 """
 
 from __future__ import annotations
@@ -48,8 +53,14 @@ from .base import (
 # 마스코트는 상태와 무관하게 클로드 코랄색으로 고정 — 상태는 띠가 맡는다.
 ACC = 4  # 왼쪽 상태 띠 (한도 색)
 PAD_L = ACC + 12  # 내용 시작 (띠 뒤)
-PAD_R = 14
-MGAP = 46  # 주간 칸 ↔ 오른쪽 사이의 넓힌 틈 — 여기 가운데에 마스코트를 앉힌다
+PAD_R = 10
+# 주간 칸 ↔ 번갈아 칸 사이의 틈 — 여기 가운데에 마스코트가 앉는다.
+# ★ **42 보다 줄이지 말 것** — 마스코트는 팔까지 11칸(22px)인데 숨쉬기·기지개로
+#   부풀고 계단식 기울임으로 윗줄이 옆으로 밀려, 실제로는 30px 남짓 쓴다.
+MGAP = 42
+DOT_R = 3.5  # 오른쪽 끝 상태 점(초록=조회됨 / 빨강=못 받음) 반지름
+DOT_GAP = 8  # 상태 점 ↔ 번갈아 칸
+MIN_SLOT = 52  # 번갈아 칸이 아무리 좁아도 이만큼은 준다 (그 아래는 훑어도 못 읽는다)
 MASCOT_U = 2    # 도트 한 칸 (px). 팔까지 가로 11칸(22px) · 세로 8칸(16px)
 MASCOT_COLOR = "#d97757"  # 클로드 코랄 — 밝게/어둡게 양쪽에서 그대로 쓴다
 FRAME_MS = 45  # 애니메이션 한 프레임 (약 22fps — 물리가 부드럽게 이어지게)
@@ -63,9 +74,17 @@ SPRING_DAMP = 0.14    # 감쇠 (0=계속 튐, 1=즉시 멈춤)
 FAINT_AT = 30.0       # 직접 콕 찌른 게 이만큼 쌓여야 기절 (딴 데 클릭은 안 쌓임)
 CLICK_DECAY = 0.12    # 눌림 누적이 프레임마다 이만큼 식는다
 FAINT_FRAMES = 60     # 기절 지속 (약 2.7초)
-FAINT_SCALE = 1.35    # 기절 땐 크게 부풀려 X_X 눈이 또렷이 보이게
+# 기절 땐 조금 부풀려 X_X 눈이 보이게 한다. ★ 1.35 는 딴 친구가 나타난 것처럼 커 보였다 —
+# 눈이 보일 만큼만 키운다(도트 한 칸 2px → 2.3px).
+FAINT_SCALE = 1.15
 SURPRISE_FRAMES = 7   # 직접 찔렸을 때 눈이 동그래지는 프레임 수
 HIT_R = 15            # 이 반경 안을 누르면 '직접 찌름'으로 본다 (px — 도트 그림 크기에 맞춤)
+# 반짝이 — 누를 때·기지개·깨어날 때 한 움큼씩 뿜는다 (폰 쪽 `Mascot.burst` 와 같은 결)
+SPARK_LIFE = 20       # 반짝이 수명 (프레임)
+SPARK_POKE = 6        # 직접 콕 찔렀을 때 뿜는 개수
+SPARK_TAP = 2         # 딴 데를 눌렀을 때 (잔잔하게)
+SPARK_WAKE = 9        # 기절에서 깨어날 때 (펑)
+SPARK_GRAV = 0.05     # 반짝이가 처지는 정도
 GAP = 16  # 칸 사이
 SEG_GAP = 2  # 눈금 사이
 MARK_OUT = 2  # '지금쯤' 눈금이 게이지 위아래로 삐져나오는 길이
@@ -76,23 +95,30 @@ SM_BASE = 3  # 8pt 글자 보정
 ROW_GAP = 6  # 윗줄 ↔ 게이지
 
 # ---------------------------------------------------------------- 번갈아 뜨는 칸
-# 오른쪽 윗자리는 한 줄인데 보여 줄 것은 여럿이다(모델별 한도 · 주간 적정선 · 알림).
+# 오른쪽 자리는 한 줄인데 보여 줄 것은 여럿이다(모델별 한도 · 주간 적정선 · 알림 · 오류).
 # 그래서 하나씩 번갈아 띄운다 — 보여 주던 것이 위로 밀리며 바탕색에 스며들고,
-# 다음 것이 아래에서 떠오른다. **자리를 새로 만들지 않으므로 창 높이는 그대로**다.
-SLOT_HOLD = 4200  # 한 가지를 보여 주는 시간 (ms)
-SLOT_STEP = 35  # 밀려 나가는 애니메이션 한 프레임 (ms)
+# 다음 것이 아래에서 떠오른다. **칸보다 긴 글자는 좌우로 훑어** 끝까지 보여 준다.
+SLOT_HOLD = 4200  # 한 가지를 보여 주는 시간 (ms). 훑는 것은 훑는 시간이 더해진다.
+SLOT_STEP = 35  # 애니메이션 한 프레임 (ms)
 SLOT_FRAMES = 6  # 나가기·들어오기 각각의 프레임 수
-SLOT_RISE = 5  # 밀려 나가는 거리 (px). 아래 게이지에 닿지 않게 작게 잡는다.
-MAX_SLOTS = 4  # 한 바퀴에 넣는 최대 가짓수 (더 있으면 앞에서 자른다)
+SLOT_RISE = 4  # 밀려 나가는 거리 (px)
+PAN_WAIT = 950  # 훑기 전·후로 멈춰 서 있는 시간 (ms) — 머리와 꼬리를 읽을 틈
+PAN_SPEED = 44  # 훑는 속도 (px/초). 눈으로 따라갈 만큼 느리게.
+PAN_MAX = 2.8  # 칸 폭의 이 배까지만 훑는다 — 더 길면 … 로 줄인다 (하염없이 안 흐르게)
+# ★ 몇 px 만 넘칠 때도 **그 시간을 다 써서 천천히** 민다. 속도대로 하면 4px 를
+#   0.1초에 밀어 버려 글자가 흠칫 떠는 것처럼 보인다 (실제로 그랬다).
+PAN_MIN_FRAMES = 14  # 약 0.5초
+MAX_SLOTS = 4  # 한 바퀴에 넣는 최대 가짓수 (더 있으면 뒤를 자른다)
 
 # 폭을 정할 때 쓰는 최대 길이 표본
 MAX_VALUE = "100%"
 # 주간은 '6일 23시간 후'보다 하루 안쪽으로 들어온 '23시간 59분 후'가 더 넓다.
 MAX_LEFT = ("4시간 59분 후", "23시간 59분 후")
-MAX_STAMP = "23:59 기준"
+# 번갈아 칸이 '자르지 않고' 담아 주면 좋은 것들. 못 담아도 훑어서 보여 주므로
+# 이건 최소 요구가 아니라 **바라는 폭**이다 (두 한도 칸이 먼저 제 몫을 가져간다).
 MAX_SCOPED = "Claude Opus 99%"
 MAX_ERROR = "재로그인 필요"
-MAX_NOTICE = "23:59 자동 시작 놓침"  # 번갈아 칸에 같이 도는 알림 — 폭 계산에 꼭 넣을 것
+MAX_NOTICE = "23:59 핑 실패"
 
 
 # ---------------------------------------------------------------- 마스코트 도트 그림
@@ -256,10 +282,10 @@ class Cell:
 class SlimSkin(Skin):
     key = "slim"
     name = "슬림 바 (작업표시줄용)"
-    # 오른쪽 칸이 MAX_NOTICE('23:59 자동 시작 놓침', 104px)까지 자르지 않고 담는 폭.
-    # 두 한도 칸이 먼저 제 몫을 가져가므로(need_cell×2 = 324px) 이보다 좁히면
-    # 오른쪽 칸부터 깎여 모델명·오류·알림이 … 로 잘린다. 줄이려면 MGAP 부터 줄일 것.
-    width = 520
+    # 두 한도 칸이 제 몫(need_cell×2)을 가져가고 남는 만큼이 번갈아 칸이다.
+    # ★ **긴 글자는 잘리지 않고 훑어서** 보여 주므로 이 폭을 늘릴 까닭이 없다 —
+    #   작업표시줄에서 자리를 덜 먹는 쪽이 낫다. (520 까지 넓혔다가 되돌린 값)
+    width = 480
     dockable = True
 
     def build(self, parent: tk.Misc) -> None:
@@ -277,7 +303,6 @@ class SlimSkin(Skin):
         top = slack * 45 // 100  # 위가 조금 좁아야 안정돼 보인다
         self.top_y = top + row_h // 2
         self.bar_y = top + row_h + ROW_GAP
-        self.bar_cy = self.bar_y + self.bar_h // 2
         self.div_top = top
         self.div_bot = self.bar_y + self.bar_h
 
@@ -297,16 +322,16 @@ class SlimSkin(Skin):
             + self.f_small.measure(left)
             for label, left in zip(("5시간", "주간"), MAX_LEFT)
         )
-        need_right = max(
-            self.f_small.measure(MAX_STAMP),
+        want_right = max(
             self.f_small.measure(MAX_SCOPED),
             self.f_small.measure(MAX_NOTICE),
             self.f_msg.measure(MAX_ERROR),
         )
-        # 가로: [띠] 5시간칸 |GAP| 주간칸 |MGAP(마스코트)| 오른쪽칸.
-        # 오른쪽 자리를 미리 확보하므로(right_w) 마스코트는 그 왼쪽 빈 틈에서만 논다.
-        avail = self.width - PAD_L - PAD_R - GAP - MGAP
-        self.right_w = min(need_right, max(60, avail - need_cell * 2))
+        # 가로: [띠] 5시간칸 |GAP| 주간칸 |MGAP(마스코트)| 번갈아칸 |DOT_GAP| ●
+        # 두 한도 칸이 먼저 제 몫을 가져가고, 남는 만큼이 번갈아 칸이다.
+        dot_w = int(DOT_R * 2 + DOT_GAP)
+        avail = self.width - PAD_L - PAD_R - GAP - MGAP - dot_w
+        self.right_w = min(want_right, max(MIN_SLOT, avail - need_cell * 2))
         cell_w = (avail - self.right_w) // 2
 
         self.accent = self.c.create_rectangle(0, 0, ACC, self.h, fill=P.track, width=0)
@@ -317,30 +342,37 @@ class SlimSkin(Skin):
         self.five = Cell(self, x1, cell_w, "5시간")
         self.week = Cell(self, x2, cell_w, "주간")
         week_end = x2 + cell_w
-        right_x0 = week_end + MGAP  # 오른쪽 칸(모델/기준) 왼쪽 경계
-        # 구분선: 5시간|주간, 그리고 주간|마스코트틈 (오른쪽 칸은 마스코트가 가른다)
+        right_x0 = week_end + MGAP  # 번갈아 칸 왼쪽 경계
+        # 구분선: 5시간|주간, 그리고 주간|마스코트틈 (오른쪽은 마스코트가 가른다)
         for dx in (x1 + cell_w + GAP // 2, week_end + 7):
             self.c.create_line(dx, self.div_top, dx, self.div_bot, fill=P.line, width=1)
 
-        # 마스코트는 그 구분선과 오른쪽 칸 사이 빈 틈 가운데에 앉는다
-        self.mascot_cx = (week_end + 7 + right_x0) // 2
-        self._start_mascot()  # 코랄 도트 마스코트 — 통통 튀고 눌리면 폴짝
-
-        # 오른쪽 윗자리 — 평소엔 번갈아 칸(모델별·적정선·알림), 오류일 땐 상태 문구.
-        # 같은 자리를 나눠 쓴다 (자리를 새로 만들면 창이 높아진다).
-        self.slot_rx = rx
-        self.slot_y = self.top_y + SM_BASE
-        self.model = self.c.create_text(
-            rx, self.slot_y, text="불러오는 중", anchor="e",
+        # 오른쪽은 이제 한 줄뿐이라 **위아래 가운데**에 앉힌다 (옛 '기준 시각' 줄이 비었다).
+        self.slot_cy = (self.div_top + self.div_bot) // 2
+        slot_h = self.f_small.metrics("linespace") + SLOT_RISE * 2
+        # ★ 훑는 글자가 옆으로 흘러넘치지 않게 이 칸만 따로 캔버스로 둔다 (테두리에서 잘림)
+        self.slot = tk.Canvas(
+            self.c, width=self.right_w, height=slot_h, bg=P.bg,
+            highlightthickness=0, bd=0,
+        )
+        self.c.create_window(rx - dot_w, self.slot_cy, window=self.slot, anchor="e")
+        self.model = self.slot.create_text(
+            self.right_w, slot_h / 2, text="불러오는 중", anchor="e",
             font=self.f_small, fill=P.faint,
         )
-        self.msg = self.c.create_text(
-            rx, self.top_y + LBL_BASE, text="", anchor="e", font=self.f_msg, fill=P.red
+        self.slot_h = slot_h
+
+        # 상태 점 — 초록이면 방금 받은 값, 빨강이면 못 받았다 (옛 '기준 시각' 자리)
+        self.dot = self.c.create_oval(
+            rx - DOT_R * 2, self.slot_cy - DOT_R, rx, self.slot_cy + DOT_R,
+            fill=P.faint, width=0,
         )
-        self.stamp = self.c.create_text(
-            rx, self.bar_cy, text="", anchor="e", font=self.f_small, fill=P.faint
-        )
+
+        # 마스코트는 구분선과 번갈아 칸 사이 빈 틈 가운데에 앉는다.
+        # **맨 마지막에 켠다** — 매 프레임 다시 그리므로 늘 맨 위에 온다.
+        self.mascot_cx = (week_end + 7 + right_x0) // 2
         self._slot_init()
+        self._start_mascot()  # 코랄 도트 마스코트 — 통통 튀고 눌리면 폴짝
 
         self.five.set(None, "")
         self.week.set(None, "")
@@ -350,12 +382,14 @@ class SlimSkin(Skin):
     # `notice()` 가 있을 때만 알림을 얹는다. 둘은 잇달아 불리므로 **바로 반영하지 않고**
     # 한 박자 뒤(after_idle)에 한 번만 반영한다 — 안 그러면 갱신마다 알림이 사라졌다
     # 다시 붙어 순서가 처음으로 되감긴다.
+    # 한 가지가 뜨는 흐름:  들어오기 → 멈춤 → (길면 훑기 → 멈춤) → 나가기 → 다음
     def _slot_init(self) -> None:
-        self._slot: list[tuple[str, str]] = []
-        self._slot_base: list[tuple[str, str]] = []
-        self._slot_notice: tuple[str, str] | None = None
+        self._slot: list[tuple[str, str, bool]] = []  # (글자, 색, 굵게?)
+        self._slot_base: list[tuple[str, str, bool]] = []
+        self._slot_notice: tuple[str, str, bool] | None = None
         self._slot_i = 0
         self._slot_on = True
+        self._slot_pan = 0.0  # 지금 것이 칸보다 넘치는 폭 (0 이면 훑지 않는다)
         self._slot_pending = None
         # build 가 다시 불려도(테마 전환) 세대는 **올리기만** 한다 — 0 으로 되돌리면
         # 옛 캔버스에 걸려 있던 콜백이 새 세대와 번호가 겹쳐 두 루프가 같이 돈다.
@@ -364,9 +398,19 @@ class SlimSkin(Skin):
     def _slot_queue(self) -> None:
         if self._slot_pending is None:
             try:
-                self._slot_pending = self.c.after_idle(self._slot_commit)
+                self._slot_pending = self.slot.after_idle(self._slot_commit)
             except tk.TclError:
                 pass
+
+    def _slot_cancel(self) -> None:
+        """예약해 둔 반영을 물린다. **`None` 으로 두기만 하면 안 된다** — 그러면
+        예약은 그대로 살아 있다가 나중에 옛 목록으로 자리를 덮어쓴다."""
+        if self._slot_pending is not None:
+            try:
+                self.slot.after_cancel(self._slot_pending)
+            except (tk.TclError, ValueError):
+                pass
+            self._slot_pending = None
 
     def _slot_commit(self) -> None:
         self._slot_pending = None
@@ -380,69 +424,90 @@ class SlimSkin(Skin):
         self._slot = items
         if not items:
             try:
-                self.c.itemconfigure(self.model, text="")
+                self.slot.itemconfigure(self.model, text="")
             except tk.TclError:
                 pass
             return
         self._slot_i = len(items) - 1 if fresh else min(self._slot_i, len(items) - 1)
-        self._slot_paint()
-        self._slot_restart()
+        self._slot_gen += 1  # 돌던 흐름을 은퇴시키고
+        self._slot_enter(self._slot_gen, SLOT_FRAMES)  # 지금 것을 곧바로 앉힌다
 
-    def _slot_paint(self, dy: float = 0.0, fade: float = 0.0) -> None:
-        """지금 차례인 것을 그린다. `dy` 는 위아래 밀림, `fade` 는 바탕에 스민 정도."""
+    def _slot_seat(self) -> tuple[str, str, bool]:
+        """지금 차례인 것을 글꼴·자리와 함께 앉히고, 넘치는 폭(`_slot_pan`)을 잰다."""
+        text, color, bold = self._slot[min(self._slot_i, len(self._slot) - 1)]
+        font = self.f_msg if bold else self.f_small
+        # 하염없이 흐르지 않게, 칸의 PAN_MAX 배를 넘는 글자는 … 로 줄여서 들인다
+        text = _fit(text, font, int(self.right_w * PAN_MAX))
+        self._slot_pan = max(0.0, font.measure(text) - self.right_w)
+        self.slot.itemconfigure(
+            self.model, text=text, font=font,
+            anchor="w" if self._slot_pan else "e",
+        )
+        return text, color, bold
+
+    def _slot_paint(self, dx: float = 0.0, dy: float = 0.0, fade: float = 0.0) -> None:
+        """`dx` 는 훑은 만큼, `dy` 는 위아래 밀림, `fade` 는 바탕에 스민 정도."""
         if not self._slot:
             return
-        text, color = self._slot[min(self._slot_i, len(self._slot) - 1)]
+        color = self._slot[min(self._slot_i, len(self._slot) - 1)][1]
+        x = dx if self._slot_pan else self.right_w  # 훑을 땐 왼쪽 끝에서 시작한다
         try:
-            self.c.coords(self.model, self.slot_rx, self.slot_y + dy)
-            self.c.itemconfigure(
-                self.model,
-                text=_fit(text, self.f_small, self.right_w),
-                fill=_mix(color, self.c.cget("bg"), fade),
+            self.slot.coords(self.model, x, self.slot_h / 2 + dy)
+            self.slot.itemconfigure(
+                self.model, fill=_mix(color, self.slot.cget("bg"), fade)
             )
         except tk.TclError:  # 캔버스가 사라졌다 (스킨·테마 전환)
             pass
 
-    def _slot_restart(self) -> None:
-        """돌던 애니메이션을 은퇴시키고 처음부터 다시 센다 (세대 토큰)."""
-        self._slot_gen += 1
-        if self._slot_on and len(self._slot) > 1:
-            self._slot_wait(self._slot_gen)
-
-    def _slot_wait(self, gen: int) -> None:
+    def _slot_after(self, gen: int, ms: int, fn) -> None:
         try:
-            self.c.after(SLOT_HOLD, lambda: self._slot_out(gen, 1))
+            self.slot.after(ms, lambda: fn(gen))
         except tk.TclError:
             pass
 
-    def _slot_out(self, gen: int, n: int) -> None:
-        """보여 주던 것이 위로 밀리며 바탕에 스민다."""
-        if gen != self._slot_gen or not self._slot_on or len(self._slot) < 2:
-            return
-        t = n / SLOT_FRAMES
-        self._slot_paint(dy=-SLOT_RISE * t, fade=t)
-        if n < SLOT_FRAMES:
-            try:
-                self.c.after(SLOT_STEP, lambda: self._slot_out(gen, n + 1))
-            except tk.TclError:
-                pass
-        else:
-            self._slot_i = (self._slot_i + 1) % len(self._slot)
-            self._slot_in(gen, 0)
+    def _slot_moves(self) -> bool:
+        """흐름을 돌릴 까닭이 있나 — 가짓수가 둘 이상이거나, 하나라도 넘쳐서 훑어야 하거나."""
+        return self._slot_on and (len(self._slot) > 1 or self._slot_pan > 0)
 
-    def _slot_in(self, gen: int, n: int) -> None:
-        """다음 것이 아래에서 떠오른다."""
-        if gen != self._slot_gen or not self._slot_on:
+    def _slot_enter(self, gen: int, n: int) -> None:
+        """아래에서 떠오른다. n=SLOT_FRAMES 면 애니메이션 없이 바로 앉힌다."""
+        if gen != self._slot_gen or not self._slot:
             return
-        t = n / SLOT_FRAMES
+        if n <= 0 or n >= SLOT_FRAMES:
+            self._slot_seat()
+        t = min(1.0, n / SLOT_FRAMES)
         self._slot_paint(dy=SLOT_RISE * (1 - t), fade=1 - t)
         if n < SLOT_FRAMES:
-            try:
-                self.c.after(SLOT_STEP, lambda: self._slot_in(gen, n + 1))
-            except tk.TclError:
-                pass
+            self._slot_after(gen, SLOT_STEP, lambda g: self._slot_enter(g, n + 1))
+        elif self._slot_moves():
+            self._slot_after(gen, PAN_WAIT if self._slot_pan else SLOT_HOLD,
+                             lambda g: self._slot_pan_step(g, 0))
+
+    def _slot_pan_step(self, gen: int, n: int) -> None:
+        """칸보다 긴 글자를 왼쪽으로 훑는다. 넘치는 게 없으면 곧바로 나간다."""
+        if gen != self._slot_gen or not self._slot_moves():
+            return
+        if self._slot_pan <= 0:
+            self._slot_out(gen, 1)
+            return
+        frames = max(PAN_MIN_FRAMES, int(self._slot_pan / PAN_SPEED * 1000 / SLOT_STEP))
+        self._slot_paint(dx=-self._slot_pan * min(1.0, n / frames))
+        if n < frames:
+            self._slot_after(gen, SLOT_STEP, lambda g: self._slot_pan_step(g, n + 1))
+        else:  # 꼬리까지 다 보여 준 채로 잠깐 멈췄다 나간다
+            self._slot_after(gen, PAN_WAIT, lambda g: self._slot_out(g, 1))
+
+    def _slot_out(self, gen: int, n: int) -> None:
+        """보여 주던 것이 위로 밀리며 바탕에 스민다."""
+        if gen != self._slot_gen or not self._slot_moves():
+            return
+        t = n / SLOT_FRAMES
+        self._slot_paint(dx=-self._slot_pan, dy=-SLOT_RISE * t, fade=t)
+        if n < SLOT_FRAMES:
+            self._slot_after(gen, SLOT_STEP, lambda g: self._slot_out(g, n + 1))
         else:
-            self._slot_wait(gen)
+            self._slot_i = (self._slot_i + 1) % len(self._slot)
+            self._slot_enter(gen, 0)
 
     # -------------------------------------------------- 마스코트 '클로디' (도트 캐릭터)
     # 슬림 바에 사는 코랄색 도트 친구 — 몸통 없이 큰 머리에 팔 둘·다리 둘.
@@ -461,7 +526,7 @@ class SlimSkin(Skin):
         self._blink = self._look = self._tilt = self._stretch = self._wiggle = 0
         self._wave = 0                # 손 흔들기 남은 프레임
         self._look_dir = self._tilt_dir = self._wave_dir = 1
-        self._sparks: list[list[float]] = []   # 뿜은 반짝이 [x, y, vy, life]
+        self._sparks: list[list[float]] = []   # 뿜은 반짝이 [x, y, vx, vy, life]
         self._next_gesture = random.randint(20, 60)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
         self._draw_mascot()  # 첫 프레임은 바로 그린다
@@ -484,6 +549,8 @@ class SlimSkin(Skin):
             self._vr += SPIN_IMPULSE * 1.8 * self._spin_dir
             self._surprise = SURPRISE_FRAMES
             self._clicks += 2.0  # 직접 찌른 것만 지치게 한다
+            # 찌를수록 더 많이 튄다 — 연타하면 눈에 띄게 화려해진다
+            self._burst(SPARK_POKE + int(self._clicks / 6), 1.0)
             if self._clicks >= FAINT_AT:  # 과부하 — 뻗는다
                 self._faint = FAINT_FRAMES
                 self._clicks = 0.0
@@ -491,7 +558,21 @@ class SlimSkin(Skin):
         else:  # 딴 데 — 잔잔히 통통 (기절과 무관)
             self._vy -= JUMP_IMPULSE
             self._vr += SPIN_IMPULSE * self._spin_dir
+            self._burst(SPARK_TAP, 0.7)
         self._spin_dir = -self._spin_dir
+
+    def _burst(self, count: int, power: float = 1.0) -> None:
+        """반짝이를 한 움큼 뿜는다 — 머리 위쪽 반원으로 퍼지며 떠올랐다 사그라든다."""
+        top = self.h / 2 - 4.0 * MASCOT_U + self._yoff
+        for k in range(max(0, min(16, count))):
+            a = math.pi * (k + 0.5) / max(1, count)  # 왼쪽→오른쪽으로 고르게
+            self._sparks.append([
+                self.mascot_cx + math.cos(a) * 3.0,
+                top,
+                -math.cos(a) * 0.85 * power,          # 옆으로 퍼지고
+                (-0.5 - math.sin(a) * 0.7) * power,   # 위로 솟는다
+                SPARK_LIFE - (k % 4) * 2,
+            ])
 
     def _animate(self, canvas: tk.Canvas, gen: int) -> None:
         if gen != self._anim_gen:  # 새 build 가 시작됐다 — 이 루프는 은퇴
@@ -506,14 +587,23 @@ class SlimSkin(Skin):
             return
         canvas.after(FRAME_MS, lambda: self._animate(canvas, gen))
 
+    def _step_sparks(self) -> None:
+        """뿜은 반짝이 한 걸음 — 퍼지며 떠올랐다 처지고 사그라든다.
+        기절 중에도 흘러야 하므로 잔동작(_idle_step)이 아니라 여기서 돌린다."""
+        for s in self._sparks:
+            s[0] += s[2]; s[1] += s[3]; s[3] += SPARK_GRAV; s[4] -= 1
+        self._sparks = [s for s in self._sparks if s[4] > 0]
+
     def _step_physics(self) -> None:
         """용수철 한 걸음. 눌림으로 생긴 속도를 제자리(0)로 부드럽게 당긴다."""
+        self._step_sparks()
         if self._faint > 0:  # 기절 중 — 서서히 늘어졌다가 깨어난다
             self._faint -= 1
             self._vy *= 0.8; self._yoff *= 0.85
             self._vr *= 0.9; self._roff *= 0.9
-            if self._faint == 0:  # 깨어남 — 말끔히 리셋
+            if self._faint == 0:  # 깨어남 — 말끔히 리셋하고 펑 하고 털어낸다
                 self._yoff = self._vy = self._roff = self._vr = 0.0
+                self._burst(SPARK_WAKE, 1.2)
             return
         self._vy += -SPRING_K * self._yoff
         self._vy *= 1 - SPRING_DAMP
@@ -531,12 +621,8 @@ class SlimSkin(Skin):
     # -------------------------------------------------- 심심할 때 하는 잔동작
     def _idle_step(self) -> None:
         """쉬는 동안 이따금 딴짓을 시킨다 — 손 흔들기·눈 굴리기·고개 갸웃·기지개·
-        부르르·반짝이 뿜기·가끔 폴짝. 한 번에 하나씩만, 반응(눌림)으로 출렁일 땐 쉰다."""
-        # 뿜은 반짝이 갱신 (위로 떠오르며 사그라든다)
-        if self._sparks:
-            for s in self._sparks:
-                s[1] += s[2]; s[2] += 0.015; s[3] -= 1  # y+=vy, 서서히 처지고, 수명--
-            self._sparks = [s for s in self._sparks if s[3] > 0]
+        부르르·반짝이 뿜기·가끔 폴짝. 한 번에 하나씩만, 반응(눌림)으로 출렁일 땐 쉰다.
+        (반짝이 자체를 굴리는 건 _step_sparks — 기절 중에도 흘러야 한다)"""
         for key in ("_blink", "_look", "_tilt", "_stretch", "_wiggle", "_wave"):
             v = getattr(self, key)
             if v > 0:
@@ -567,12 +653,10 @@ class SlimSkin(Skin):
         elif g == "wiggle":
             self._wiggle = 16
         elif g == "sparkle":
-            self._sparks.append(
-                [self.mascot_cx + random.uniform(-3, 3),
-                 self.h / 2 - 4.5 * MASCOT_U, -0.55, 16]
-            )
+            self._burst(4, 0.8)  # 혼자 반짝반짝
         elif g == "hop":
             self._vy -= JUMP_IMPULSE * 0.7  # 혼자 살짝 폴짝
+            self._burst(3, 0.6)
 
     def _draw_mascot(self) -> None:
         """매 프레임 지우고 다시 그린다. 평소엔 숨쉬듯 잔잔히 + 이따금 잔동작,
@@ -581,6 +665,7 @@ class SlimSkin(Skin):
         c.delete("mascot")
         if self._faint > 0:
             self._draw_faint(c, self.mascot_cx, c.cget("bg"))
+            self._draw_sparks(c)  # 기절해서도 아까 뿜은 것은 마저 흐른다
             return
         t = self._t
 
@@ -676,8 +761,9 @@ class SlimSkin(Skin):
 
     def _draw_sparks(self, c: tk.Canvas) -> None:
         """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
-        for sx, sy, _vy, life in self._sparks:
-            u = MASCOT_U * 0.6 * (life / 16)
+        for sx, sy, _vx, _vy, life in self._sparks:
+            # 끝까지 또렷하게 — 크기를 수명에 그대로 비례시키면 뿜자마자 안 보인다
+            u = MASCOT_U * 0.95 * (0.45 + 0.55 * life / SPARK_LIFE)
             if u < 0.7:
                 continue
             for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
@@ -707,6 +793,7 @@ class SlimSkin(Skin):
     # -------------------------------------------------- 바탕 두 얼굴
     def _paint(self, bg: str, accent: str) -> None:
         self.c.configure(bg=bg)
+        self.slot.configure(bg=bg)  # 번갈아 칸도 같은 바탕이라야 이어져 보인다
         self.c.itemconfigure(self.accent, fill=accent)
 
     # -------------------------------------------------- 값
@@ -716,46 +803,44 @@ class SlimSkin(Skin):
         self.five.set(usage.five.pct, usage.five.left, five_due(usage))
         self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
 
-        # 오른쪽 칸에 번갈아 띄울 것들. 모델별 한도(Fable 7%)에 이어 **주간 적정선**도
-        # 넣는다 — 게이지의 ┃ 눈금이 몇 %인지 여기 말고는 볼 데가 없고, 늘 두 가지
-        # 이상이 돌아 자리가 비어 보이지 않는다.
+        # 번갈아 칸에 띄울 것들. 모델별 한도(Fable 7%)에 이어 **주간 적정선**도 넣는다 —
+        # 게이지의 ┃ 눈금이 몇 %인지 여기 말고는 볼 데가 없다.
         base = [
-            (f"{s.label} {s.pct:.0f}%", P.label)
+            (f"{s.label} {s.pct:.0f}%", P.label, False)
             for s in usage.scoped
             if s.pct is not None
         ]
         if p is not None:
-            base.append((f"적정선 {p.due:.0f}%", P.label))
+            base.append((f"적정선 {p.due:.0f}%", P.label, False))
         self._slot_base = base
         self._slot_notice = None  # 알림은 곧바로 이어 불리는 notice() 가 다시 얹는다
         self._slot_on = True
         self._slot_queue()
 
-        self.c.itemconfigure(self.msg, text="")
-        self.c.itemconfigure(self.stamp, text=f"{stamp} 기준")
+        # 상태 점 — 방금 받았다. (stamp 는 안 쓴다: 시각은 작업표시줄 시계에 있다)
+        self.c.itemconfigure(self.dot, fill=P.green)
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
-        # 기준 시각은 오류일수록 중요하다 — 붉게 죽이지 않고 P.faint 그대로 둔다.
         self._paint(P.red_bg, P.red)
-        # 오류가 번갈아 칸을 통째로 쓴다 — 돌던 것을 세우고 자리를 비운다
-        self._slot_on = False
-        self._slot_gen += 1
-        self._slot = []
+        # 오류가 번갈아 칸을 통째로 쓴다 (굵게·빨강 한 가지만). 길면 훑어서 다 보여 준다.
+        self._slot_cancel()  # 조회 성공으로 예약해 뒀던 반영이 오류를 덮지 않게
         self._slot_base = []
         self._slot_notice = None
-        self.c.coords(self.model, self.slot_rx, self.slot_y)
-        self.c.itemconfigure(self.model, text="")
-        self.c.itemconfigure(self.msg, text=_clip(text, self.f_msg, self.right_w))
+        self._slot_on = True
+        self._slot_i = 0
+        self._slot = [(text, P.red, True)]
+        self._slot_gen += 1
+        self._slot_enter(self._slot_gen, SLOT_FRAMES)
+        self.c.itemconfigure(self.dot, fill=P.red)
         if not keep_values:
             self.five.set(None, "")
             self.week.set(None, "")
-            self.c.itemconfigure(self.stamp, text=stamp)
 
     def notice(self, text: str) -> None:
-        # 값은 멀쩡한데 알릴 것(자동 시작 실패·놓침)을 번갈아 칸에 호박색으로 끼운다.
+        # 값은 멀쩡한데 알릴 것(핑 실패·놓침)을 번갈아 칸에 호박색으로 끼운다.
         # show() 직후 앱이 부른다 — 빈 문자열이면 그대로 둔다(show() 가 이미 비웠다).
         # 뜨는 순간 순서를 기다리지 않고 먼저 보여 준다(_slot_commit 의 fresh).
         if not text:
             return
-        self._slot_notice = (text, P.amber)
+        self._slot_notice = (text, P.amber, False)
         self._slot_queue()

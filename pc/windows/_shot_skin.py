@@ -89,7 +89,7 @@ def main() -> None:
     elif mode == "note":
         # 값은 멀쩡한데 알릴 것이 있는 상태 — 앱이 show() 바로 뒤에 notice() 를 부른다
         skin.show(demo(), STAMP)
-        skin.notice("20:03 자동 시작 실패")
+        skin.notice("20:03 핑 실패")
     elif mode == "net":
         skin.show(demo(), STAMP)
         skin.show_error("연결 실패", True, STAMP)
