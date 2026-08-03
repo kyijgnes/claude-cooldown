@@ -96,10 +96,8 @@ TRICK_TRAIL = 2       # 재주 부리는 동안 이 프레임마다 반짝이 �
 # ★★ **축하는 `_party` 로 잰다 — 마지막 발을 쏜 뒤가 아니라 반짝이가 다 사그라들 때까지.**
 #   `_finale`(쏘는 동안)만 잠그면 **화면엔 폭죽이 한창인데 클로디만 먼저 평소로 돌아가**
 #   클릭에 반응한다(실제로 그랬다). 마지막 발의 반짝이는 2초 넘게 더 흐른다.
-FINALE_FRAMES = 46    # 폭죽을 쏘는 프레임 (약 2초). 꼬리까지 하면 축하는 4초 남짓
-FINALE_EVERY = 4      # 이 프레임마다 한 발
-FINALE_DOUBLE = 2     # 이 배수 발마다 **두 발이 겹쳐** 터진다
-FINALE_PER = (9, 15)  # 한 발에 뿜는 반짝이 (발마다 다르게)
+FINALE_FRAMES = 44    # 폭죽을 쏘아 올리는 프레임 (약 2초). 꼬리까지 하면 축하는 4초 남짓
+FINALE_PER = (11, 17)  # 한 발에 뿜는 반짝이 (발마다 다르게)
 FINALE_SPREAD = (0.55, 1.35)  # 발마다 퍼지는 정도도 다르다 — 같으면 한 발을 복사한 듯하다
 FINALE_BIG = (1.4, 2.4)  # 축하 반짝이는 수명을 길게 줘 더 크고 오래 남는다
 FINALE_HOP = 11       # 축하하는 동안 이 프레임마다 폴짝 (통통 튀는 주기와 맞는 값)
@@ -107,6 +105,17 @@ FINALE_POP = 1.9      # 그 폴짝의 힘 (`JUMP_IMPULSE` 배수). 0.95 는 4px 
 # ★ **만세는 프레임 수로 세지 않고 '떠 있으면 든다'** — 뛰는 것과 팔이 따로 놀면
 #   신난 게 아니라 헛도는 것으로 보인다. 뜬 김에 들고 내려앉으면 내린다.
 FINALE_CHEER = 1.0    # 이만큼(px) 떠 있으면 두 팔 번쩍
+# ★★ **폭죽은 클로디가 쏘아 올린다.** 뛰어오르며 팔을 번쩍 들면 **손끝에서 한 알이 솟아**
+#   날아가다 제자리에서 터진다 — 그래야 폭죽이 어디서 왔는지가 그림 안에서 설명된다
+#   (그냥 아무 데서나 터지면 클로디는 구경꾼이다). 쓰는 사람이 청해서 넣었다(2026-08-04).
+# ★ **소품을 새로 그리지 않는다** — 대포도 화살표도 없고 **반짝이 한 알이 날아갈 뿐**이다.
+#   그래서 옛날에 빼 버린 '기 모아 쏘기'(평소 놀이에 얹은 발사체)와는 다르다.
+SHELL_FLY = 7         # 쏘아 올린 것이 자리에 닿기까지 (프레임)
+SHELL_SHOTS = (2, 3)  # 한 번 뛸 때 이만큼 쏜다
+SHELL_TRAIL = 0.45    # 날아가며 흘리는 꼬리 (반짝이 수명 배수)
+SHELL_HAND = 9.0      # 손끝이 몸 한가운데에서 이만큼 떨어져 있다 (px)
+SHOT_FRAMES = 6       # 쏘고 나서 이만큼은 팔을 든 채 몸이 쭉 늘어난다
+SHOT_STRETCH = 0.18   # 그때 늘어나는 정도
 FRAME_MS = 45  # 애니메이션 한 프레임 (약 22fps — 물리가 부드럽게 이어지게)
 # 눌림 반응은 용수철처럼 — 누를 때마다 위로 튀는 '속도'를 더한다. 연타하면 힘이
 # 쌓여 자연스럽게 출렁이고(뚝 끊기지 않고), 너무 많이 치면 기절한다.
@@ -687,6 +696,9 @@ class SlimSkin(Skin):
         self._hits = 0                # 이 판에서 박자를 맞힌 횟수
         self._finale = 0              # 완주 축하 폭죽을 **쏘는** 남은 프레임
         self._party = False           # 축하가 흐르는 중 (폭죽 + 사그라드는 꼬리까지)
+        self._shells: list[list] = []  # 쏘아 올린 폭죽 [x, y, vx, vy, 남은프레임, 색]
+        self._shot = 0                # 쏘고 나서 팔을 든 채 늘어나 있는 프레임
+        self._hop_in = 0              # 다음 폴짝까지 남은 프레임
         self._beat_at = -999          # 마지막으로 박자를 맞힌 프레임
         self._trick = 0               # 재주 남은 프레임
         self._trick_len = 1            # 재주 전체 프레임
@@ -768,6 +780,7 @@ class SlimSkin(Skin):
                     if self._combo >= COMBO_MAX:  # 완주 — 바 전체에 축하 폭죽
                         self._finale = FINALE_FRAMES
                         self._party = True
+                        self._hop_in = 0  # 첫 박자는 곧바로 (쏘는 게 늦으면 뜸 들여 보인다)
                         self._hits = self._combo = 0
                 else:  # 아직 올라가는 중 — 소박하게
                     self._burst(2 + self._combo, 0.6 + self._combo * 0.08)
@@ -830,17 +843,41 @@ class SlimSkin(Skin):
                     SPARK_LIFE * random.uniform(0.7, 1.0), MASCOT_COLOR,
                 ])
 
-    def _firework(self) -> None:
-        """축하 폭죽 한 발 — **마스코트 자리가 아니라 슬림 바 아무 데나** 터진다.
-        (완주는 판 전체가 축하할 일이다. 반짝이는 캔버스 좌표라 바를 가로질러 뿌려진다)
+    def _shoot(self) -> None:
+        """**손끝에서 폭죽 한 알을 쏘아 올린다.** 겨눈 쪽 손으로 던지고, 날아간 알은
+        `_step_shells` 가 자리에 닿는 순간 터뜨린다."""
+        fx = random.uniform(PAD_L, self.width - PAD_R)
+        fy = random.uniform(4, self.h * 0.5)          # 바 위쪽에서 터진다
+        side = -1 if fx < self.mascot_cx else 1       # 겨눈 쪽 손으로
+        sx = self.mascot_cx + side * SHELL_HAND
+        sy = self.h / 2 + self._yoff - 4.0            # 번쩍 든 손 위
+        self._shells.append([
+            sx, sy, (fx - sx) / SHELL_FLY, (fy - sy) / SHELL_FLY, SHELL_FLY,
+            random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title)),
+        ])
+
+    def _step_shells(self) -> None:
+        """쏘아 올린 알 한 걸음 — 꼬리를 흘리며 날아가다 자리에 닿으면 거기서 터진다."""
+        for s in self._shells:
+            s[0] += s[2]
+            s[1] += s[3]
+            s[4] -= 1
+            self._sparks.append([  # 꼬리 — 지나온 자리에 옅게 남는다
+                s[0], s[1], s[2] * 0.12, s[3] * 0.12 + 0.08,
+                SPARK_LIFE * SHELL_TRAIL, s[5],
+            ])
+        for s in self._shells:
+            if s[4] <= 0:
+                self._pop(s[0], s[1], s[5])
+        self._shells = [s for s in self._shells if s[4] > 0]
+
+    def _pop(self, fx: float, fy: float, color: str) -> None:
+        """쏘아 올린 알이 터진다 — 그 자리에서 사방으로 흩뿌린다.
 
         ★ **발마다 색·개수·퍼지는 정도가 다르다** — 다 같으면 한 발을 복사해 놓은 것처럼
         보인다. 몇 알은 흰빛(`P.title`)으로 섞어 심지가 남은 결을 낸다.
         """
-        color = random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title))
         core = P.title if random.random() < 0.5 else color
-        fx = random.uniform(PAD_L, self.width - PAD_R)
-        fy = random.uniform(6, self.h - 8)
         spread = random.uniform(*FINALE_SPREAD)
         for i in range(random.randint(*FINALE_PER)):
             a = random.uniform(0, math.tau)
@@ -965,17 +1002,22 @@ class SlimSkin(Skin):
             self._clicks = max(0.0, self._clicks - CLICK_DECAY)
         if self._combo and self._t - self._beat_at > BEAT_WINDOW:
             self._combo = self._hits = 0   # 박자가 끊겼다
-        if self._party:  # 완주 축하 — 바 전체에 폭죽이 이어지고 같이 폴짝거린다
-            if self._finale > 0:  # 아직 쏘는 중
+        if self._party:  # 완주 축하 — 폴짝 뛰며 쏘아 올리고, 다 사그라들 때까지 이어진다
+            if self._finale > 0:
                 self._finale -= 1
-                if self._finale % FINALE_EVERY == 0:
-                    self._firework()
-                    if (self._finale // FINALE_EVERY) % FINALE_DOUBLE == 0:
-                        self._firework()  # 두 발이 겹쳐 터진다
-            elif not self._sparks:  # 마지막 알까지 사그라들었다 — 이제 축하 끝
+            elif not self._sparks and not self._shells:  # 마지막 알까지 갔다 — 축하 끝
                 self._party = False
-            if self._party and self._t % FINALE_HOP == 0:  # 클로디도 신나서 폴짝
+            if self._shot > 0:
+                self._shot -= 1
+            if self._hop_in <= 0:  # 한 박자 — 폴짝 뛰면서 그 손으로 쏘아 올린다
+                self._hop_in = FINALE_HOP
                 self._boost(JUMP_IMPULSE * FINALE_POP)
+                if self._finale > 0:
+                    self._shot = SHOT_FRAMES
+                    for _ in range(random.randint(*SHELL_SHOTS)):
+                        self._shoot()
+            self._hop_in -= 1
+            self._step_shells()
         if self._trick > 0:  # 재주 — 부리는 동안 반짝이 꼬리를 흘린다
             self._trick -= 1
             if self._trick % TRICK_TRAIL == 0:
@@ -1179,9 +1221,13 @@ class SlimSkin(Skin):
             else:  # 공 놀이 — 던져 둔 공은 아래로 떨어져 나간다
                 expr, arms = done, (0, 0)
                 ball = (self._ball_at[0], self._ball_at[1] + (1 - k) ** 2 * self.h)
-        elif self._party:  # 완주 축하 — 폭죽이 흐르는 동안 내내 같이 폴짝폴짝 만세
+        elif self._party:  # 완주 축하 — 폴짝 뛰며 쏘아 올리고 내내 만세를 부른다
             expr = "grin"
-            arms = (-1, -1) if self._yoff < -FINALE_CHEER else (0, 0)
+            # 쏜 직후엔 **팔을 든 채 몸이 쭉 늘어난다**(던진 결). 그 뒤엔 뜬 동안만 만세.
+            arms = ((-1, -1) if self._shot > 0 or self._yoff < -FINALE_CHEER
+                    else (0, 0))
+            if self._shot > 0:
+                syk *= 1 + SHOT_STRETCH * (self._shot / SHOT_FRAMES)
         elif self._surprise > 0:
             expr, arms = "surprise", (-1, -1)
         elif speed > 1.2:
@@ -1230,6 +1276,7 @@ class SlimSkin(Skin):
             c.create_rectangle(ball[0] - u, ball[1] - u, ball[0] + u, ball[1] + u,
                                fill=P.amber, width=0, tags="mascot")
         self._draw_sparks(c)
+        self._draw_shells(c)  # 쏘아 올린 폭죽은 반짝이보다 앞에 (꼬리에 묻히지 않게)
         self._draw_zzz(c)
 
     def _sprite(self, expr: str, arms: tuple[int | None, int | None],
@@ -1287,6 +1334,13 @@ class SlimSkin(Skin):
         for col, row in EYES[expr]:
             cell(col + eye_dx, row, bg)
 
+    def _cross(self, c: tk.Canvas, x: float, y: float, u: float, color: str) -> None:
+        """도트다운 작은 십자(칸 다섯) 하나 — 반짝이와 쏘아 올린 알이 같이 쓴다."""
+        for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
+            px, py = x + dx * u, y + dy * u
+            c.create_rectangle(px - u / 2, py - u / 2, px + u / 2, py + u / 2,
+                               fill=color, width=0, tags="mascot")
+
     def _draw_sparks(self, c: tk.Canvas) -> None:
         """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
         for sx, sy, _vx, _vy, life, color in self._sparks:
@@ -1294,10 +1348,12 @@ class SlimSkin(Skin):
             u = MASCOT_U * SPARK_SIZE * (life / SPARK_LIFE)
             if u < 0.45:
                 continue
-            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
-                x, y = sx + dx * u, sy + dy * u
-                c.create_rectangle(x - u / 2, y - u / 2, x + u / 2, y + u / 2,
-                                   fill=color, width=0, tags="mascot")
+            self._cross(c, sx, sy, u, color)
+
+    def _draw_shells(self, c: tk.Canvas) -> None:
+        """쏘아 올려 날아가는 중인 폭죽 — 반짝이보다 조금 크고 밝은 한 알."""
+        for sx, sy, _vx, _vy, _left, color in self._shells:
+            self._cross(c, sx, sy, MASCOT_U * 0.8, color)
 
     def _draw_laptop(self, c: tk.Canvas, cx: float, cy: float) -> None:
         """노트북 — **도트가 아니라 1px 다각형**으로 그린다(위 `LAP_*` 주석 참고).
