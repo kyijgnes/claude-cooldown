@@ -124,6 +124,18 @@ SHELL_SHOTS = (2, 3)  # 한 번 뛸 때 이만큼 쏜다
 SHELL_STEP = 3.0      # 줄기를 이만큼(px)마다 한 알씩 찍어 잇는다
 SHELL_TRAIL = 0.8     # 지나온 자리에 남기는 연기 (반짝이 수명 배수)
 SHELL_HAND = 9.0      # 손끝이 몸 한가운데에서 이만큼 떨어져 있다 (px)
+# ★★ **파티 폭죽(크래커)을 손에 들고 쏜다.** 손끝에서 알만 솟으면 '쏘는 것'인지가 안
+#   읽힌다 — 쥔 물건이 있어야 겨누고 터뜨리는 그림이 된다(쓰는 사람이 청함, 2026-08-04).
+# ★ **노트북과 같이 1px 다각형**이다 — 도트 한 칸이 2px 이라 이 크기에 원뿔이 안 나온다.
+#   마스코트 본체는 도트 그대로(폰과 표를 공유하므로 격자를 지킨다).
+POP_LEN = 9.0         # 크래커 길이 (px)
+POP_BASE = 1.3        # 손에 쥔 쪽 반폭
+POP_MOUTH = 3.2       # 터지는 쪽(입) 반폭
+POP_TILT = -0.62      # 겨누는 각도 (라디안, 위로)
+POP_HAND = 5.0        # 손이 몸 한가운데에서 몇 칸 떨어져 있나 (도트 칸)
+POP_CONFETTI = 6      # 쏠 때 입에서 흩어지는 색종이
+POP_KICK = 2.2        # 쏜 반동으로 몸이 뒤로 밀리는 정도 (px)
+POP_DROP = 9          # 다 쏘고 나면 이만큼에 걸쳐 아래로 치운다 (프레임)
 # 던지는 몸짓 — **웅크렸다가 쭉 펴며 던진다.** 그냥 통통 튀기만 하면 **누른 것에 반응하는
 # 것과 구별이 안 된다**(실제로 '축하 중인데 클릭 때마다 점프한다' 로 읽혔다).
 SHOT_WIND = 3         # 던지기 전에 이만큼 웅크린다
@@ -713,6 +725,9 @@ class SlimSkin(Skin):
         self._shells: list[list] = []  # 쏘아 올린 폭죽 [x, y, vx, vy, 남은프레임, 색]
         self._shot = 0                # 쏘고 나서 팔을 든 채 늘어나 있는 프레임
         self._hop_in = 0              # 다음 폴짝까지 남은 프레임
+        self._pop_side = -1           # 파티 폭죽을 든 손 (겨누는 쪽)
+        self._pop_mouth = (0.0, 0.0)  # 그 크래커 입의 자리 — 알은 여기서 나간다
+        self._pop_drop = 0            # 다 쏘고 크래커를 아래로 치우는 남은 프레임
         self._beat_at = -999          # 마지막으로 박자를 맞힌 프레임
         self._trick = 0               # 재주 남은 프레임
         self._trick_len = 1            # 재주 전체 프레임
@@ -794,7 +809,11 @@ class SlimSkin(Skin):
                     if self._combo >= COMBO_MAX:  # 완주 — 바 전체에 축하 폭죽
                         self._finale = FINALE_FRAMES
                         self._party = True
-                        self._hop_in = 0  # 첫 박자는 곧바로 (쏘는 게 늦으면 뜸 들여 보인다)
+                        self._pop_drop = 0
+                        self._aim()
+                        # ★ 첫 발은 **한 프레임 뒤**다 — 크래커를 한 번 그려 봐야 입이
+                        #   어디인지 알고(`_pop_mouth`), 거기서 알이 나간다.
+                        self._hop_in = 1
                         self._hits = self._combo = 0
                 else:  # 아직 올라가는 중 — 소박하게
                     self._burst(2 + self._combo, 0.6 + self._combo * 0.08)
@@ -857,21 +876,37 @@ class SlimSkin(Skin):
                     SPARK_LIFE * random.uniform(0.7, 1.0), MASCOT_COLOR,
                 ])
 
+    def _aim(self) -> None:
+        """이번 박자에 크래커를 겨누는 쪽을 고른다 — **넓은 쪽이 자주 걸리게.**
+        (마스코트가 오른쪽에 앉아 있어 바는 대부분 왼쪽이다)"""
+        left = max(1.0, self.mascot_cx - PAD_L)
+        right = max(1.0, (self.width - PAD_R) - self.mascot_cx)
+        self._pop_side = -1 if random.random() < left / (left + right) else 1
+
     def _shoot(self) -> None:
-        """**손끝에서 폭죽 한 알을 쏘아 올린다.** 겨눈 쪽 손으로 던지고, 날아간 알은
+        """**크래커 입에서 폭죽 한 알이 나간다.** 겨눈 쪽으로 쏘고, 날아간 알은
         `_step_shells` 가 자리에 닿는 순간 터뜨린다."""
-        fx = random.uniform(PAD_L, self.width - PAD_R)
+        sx, sy = self._pop_mouth
+        if self._pop_side < 0:  # 겨눈 쪽 안에서 자리를 고른다
+            fx = random.uniform(PAD_L, max(PAD_L + 1, self.mascot_cx - 16))
+        else:
+            fx = random.uniform(min(self.width - PAD_R - 1, self.mascot_cx + 8),
+                                self.width - PAD_R)
         fy = random.uniform(4, self.h * 0.5)          # 바 위쪽에서 터진다
-        side = -1 if fx < self.mascot_cx else 1       # 겨눈 쪽 손으로
-        sx = self.mascot_cx + side * SHELL_HAND
-        sy = self.h / 2 + self._yoff - 4.0            # 번쩍 든 손 위
+        color = random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title))
         # 걸리는 시간은 **거리에서 나온다** — 먼 데는 오래 날아간다(위 ★★ 참고)
         fly = min(SHELL_MAX,
                   max(SHELL_MIN, round(math.hypot(fx - sx, fy - sy) / SHELL_SPEED)))
-        self._shells.append([
-            sx, sy, (fx - sx) / fly, (fy - sy) / fly, fly,
-            random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title)),
-        ])
+        self._shells.append([sx, sy, (fx - sx) / fly, (fy - sy) / fly, fly, color])
+        # 뻥 — 입에서 색종이가 흩어진다 (터지는 건 저 위지만 쏜 자리도 티가 나야 한다)
+        for _ in range(POP_CONFETTI):
+            a = POP_TILT + random.uniform(-0.55, 0.55)
+            sp = random.uniform(0.9, 2.1)
+            self._sparks.append([
+                sx, sy, math.cos(a) * sp * self._pop_side, math.sin(a) * sp,
+                SPARK_LIFE * random.uniform(0.4, 0.7),
+                random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title)),
+            ])
 
     def _step_shells(self) -> None:
         """쏘아 올린 알 한 걸음 — 꼬리를 흘리며 날아가다 자리에 닿으면 거기서 터진다."""
@@ -1026,14 +1061,17 @@ class SlimSkin(Skin):
                 self._party = False
             if self._shot > 0:
                 self._shot -= 1
-            if self._hop_in <= 0:  # 한 박자 — 폴짝 뛰면서 그 손으로 쏘아 올린다
+            if self._hop_in <= 0:  # 한 박자 — 폴짝 뛰며 크래커를 뻥 터뜨린다
                 self._hop_in = FINALE_HOP
                 self._boost(JUMP_IMPULSE * FINALE_POP)
                 if self._finale > 0:
                     self._shot = SHOT_FRAMES
                     for _ in range(random.randint(*SHELL_SHOTS)):
                         self._shoot()
+                    self._aim()  # 다음 박자에 겨눌 쪽 (쏘기 전에 그쪽으로 들고 있게)
             self._hop_in -= 1
+            if self._finale <= 0 and self._pop_drop < POP_DROP:
+                self._pop_drop += 1  # 다 쐈다 — 크래커를 아래로 치운다
             self._step_shells()
         if self._trick > 0:  # 재주 — 부리는 동안 반짝이 꼬리를 흘린다
             self._trick -= 1
@@ -1204,7 +1242,7 @@ class SlimSkin(Skin):
         speed = abs(self._vy) + abs(self._yoff)                   # 출렁이는 중이면 신났다
 
         # 표정과 팔 — 콕 찔리면 놀라 만세, 출렁이면 눈웃음, 기지개도 만세
-        lap = ball = extra = None
+        lap = ball = extra = popper = None
         legs = LEGS
         if self._pressed:  # 눌리는 중 — 눈을 질끈 감고 납작해진다
             expr, arms = "blink", (0, 0)
@@ -1238,19 +1276,28 @@ class SlimSkin(Skin):
             else:  # 공 놀이 — 던져 둔 공은 아래로 떨어져 나간다
                 expr, arms = done, (0, 0)
                 ball = (self._ball_at[0], self._ball_at[1] + (1 - k) ** 2 * self.h)
-        elif self._party:  # 완주 축하 — 웅크렸다 던지며 폴짝, 내내 만세
+        elif self._party:  # 완주 축하 — 크래커를 겨눴다 뻥, 폴짝, 내내 만세
             expr = "grin"
-            if self._shot > 0:  # 막 던졌다 — 팔을 든 채 몸이 쭉 늘어난다
+            if self._shot > 0:  # 막 터뜨렸다 — 팔을 든 채 몸이 쭉 늘고 반동으로 밀린다
                 arms = (-1, -1)
                 syk *= 1 + SHOT_STRETCH * (self._shot / SHOT_FRAMES)
                 sxk *= 1 - SHOT_STRETCH * 0.4 * (self._shot / SHOT_FRAMES)
-            elif self._finale > 0 and self._hop_in <= SHOT_WIND:  # 던지기 직전 — 웅크린다
+                cx -= self._pop_side * POP_KICK * (self._shot / SHOT_FRAMES)
+            elif self._finale > 0 and self._hop_in <= SHOT_WIND:  # 쏘기 직전 — 웅크린다
                 arms = (0, 0)
                 syk *= 1 - SHOT_CROUCH
                 sxk *= 1 + SHOT_CROUCH * 0.6
                 cy += 1.6
             else:  # 그 사이엔 뜬 동안만 만세
                 arms = (-1, -1) if self._yoff < -FINALE_CHEER else (0, 0)
+            # 크래커는 **겨눈 쪽 손**에 들려 있다. 팔이 오르내리면 같이 따라간다.
+            if self._pop_drop < POP_DROP:
+                popper = (cx + self._pop_side * POP_HAND * MASCOT_U * sxk,
+                          cy + ((3 if arms[0] == -1 else 4) + 0.5 - 4) * MASCOT_U * syk,
+                          self._pop_side)
+                if self._pop_drop:  # 다 쏘고 나면 손에서 놓아 아래로 치운다
+                    k = self._pop_drop / POP_DROP
+                    popper = (popper[0], popper[1] + k * k * self.h, self._pop_side)
         elif self._surprise > 0:
             expr, arms = "surprise", (-1, -1)
         elif speed > 1.2:
@@ -1292,6 +1339,8 @@ class SlimSkin(Skin):
                      MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx, None, extra)
         if lap is not None:  # 노트북은 도트가 아니라 다각형이라 스프라이트 뒤에 따로 그린다
             self._draw_laptop(c, *lap)
+        if popper is not None:  # 파티 폭죽도 다각형 (손 위에 얹혀 보이게 몸보다 앞)
+            self._draw_popper(c, *popper)
         if ball is not None:
             # 공은 몸 위에 그린다(손보다 앞). **몸 색으로 그리면 몸에 붙은 혹처럼 보인다** —
             # 호박색 장난감으로 둔다(알림 색과 자리가 겹치지 않아 헷갈릴 일이 없다).
@@ -1397,6 +1446,30 @@ class SlimSkin(Skin):
         for dx, dy in LAP_LID:
             pts += [cx + dx, cy + dy]
         c.create_polygon(pts, fill=P.label, width=0, tags="mascot")
+
+    def _draw_popper(self, c: tk.Canvas, hx: float, hy: float, side: int) -> None:
+        """파티 폭죽(크래커) — 쥔 쪽은 좁고 입은 넓은 원뿔을 겨눈 쪽으로 기울여 든다.
+        입 자리는 `_pop_mouth` 에 남겨 뒀다가 **다음 발이 거기서 나가게** 한다.
+
+        ★ 노트북과 같이 **1px 다각형**이다(도트 격자로는 이 크기에 원뿔이 안 나온다).
+        ★ 몸과 같은 코랄로 그리면 **몸에 붙은 혹**처럼 보인다 — 밝은 색 물건으로 둔다
+          (공놀이 공에서 이미 겪은 것).
+        """
+        dx, dy = math.cos(POP_TILT) * side, math.sin(POP_TILT)
+        px, py = -dy * side, dx * side          # 축에 수직인 방향
+        mx, my = hx + dx * POP_LEN, hy + dy * POP_LEN
+        self._pop_mouth = (mx, my)
+        c.create_polygon(
+            hx + px * POP_BASE, hy + py * POP_BASE,
+            mx + px * POP_MOUTH, my + py * POP_MOUTH,
+            mx - px * POP_MOUTH, my - py * POP_MOUTH,
+            hx - px * POP_BASE, hy - py * POP_BASE,
+            fill=P.title, width=0, tags="mascot",
+        )
+        # 입에 두른 띠 한 줄 — 원뿔이 통짜 세모로 안 보이게 (호박색 = 잔치 물건)
+        c.create_line(mx + px * POP_MOUTH, my + py * POP_MOUTH,
+                      mx - px * POP_MOUTH, my - py * POP_MOUTH,
+                      fill=P.amber, width=2, tags="mascot")
 
     def _draw_zzz(self, c: tk.Canvas) -> None:
         """낮잠 z — 머리 위로 비스듬히 떠오른다. 도트 3×3 이라 이 크기에서도 z 로 읽힌다."""
