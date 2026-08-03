@@ -148,6 +148,8 @@ THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "�
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
 ALPHA = 0.96  # 평소 창 불투명도
 BUSY_ALPHA = 0.78  # 새로고침 누른 직후
+STATUS_BOX = 18  # 상태 점 + 새로고침 링을 담는 작은 캔버스 한 변 (px)
+DOT_R = 2.0  # 상태 점 반지름 — 링(반지름 7) 안쪽에 넉넉히 들어가게 작게
 
 _MUTEX = None  # 중복 실행 판정용. 프로세스가 살아 있는 동안 붙들고 있어야 한다.
 
@@ -581,6 +583,9 @@ class App:
         self.skin.build(self.body)
         self._bind_drag(self.body)
         self._bind_drag(self.root)
+        # 상태 점은 스킨 위에 얹는 별도 캔버스라 스킨을 다시 그릴 때마다 자리를 다시 잡는다.
+        # (root 의 자식이라 _bind_drag 가 못 걸지만, 이벤트가 root 로 올라가 똑같이 동작한다)
+        self._sync_status()
 
     def _bind_drag(self, widget: tk.Misc) -> None:
         """위젯과 그 아래 모든 자식에 드래그·우클릭을 건다."""
@@ -843,16 +848,77 @@ class App:
         self._spin_once()
         self.poller.refresh_now()
 
-    def _spin_once(self):
-        """새로고침을 눌렀다는 표시 — 오른쪽 위 모서리에서 스피너를 한 바퀴 돌린다.
-        스킨과 무관하게 root 위에 얹는 작은 캔버스 하나로 그린다. 색은 그릴 때 정한다."""
+    # ---- 상태 점 + 새로고침 링 (한 자리를 나눠 쓴다) ----
+    # 스킨이 `status_spot()` 으로 자리를 알려 주면 그 한가운데에 **상태 점**을 늘 띄우고,
+    # 새로고침을 누르면 **그 점 둘레로 링이 한 바퀴** 돈다. 둘을 한 캔버스에 그려야
+    # 겹쳐도 따로 놀지 않는다 (tk 위젯은 투명이 안 돼 포개면 아래가 가려진다).
+    def _sync_status(self):
+        """스킨이 바뀌거나 값·오류·테마가 바뀔 때 상태 캔버스를 제자리에 다시 놓는다."""
         try:
-            sp = getattr(self, "_spinner", None)
-            if sp is None:
-                sp = tk.Canvas(self.root, width=16, height=16, highlightthickness=0, bd=0)
-                self._spinner = sp
-            sp.configure(bg=P.bg)
-            sp.place(relx=1.0, rely=0.0, x=-7, y=7, anchor="ne")
+            spot = self.skin.status_spot()
+        except Exception:  # noqa: BLE001
+            spot = None
+        box = getattr(self, "_status", None)
+        if box is None:
+            box = self._status = tk.Canvas(
+                self.root, width=STATUS_BOX, height=STATUS_BOX,
+                highlightthickness=0, bd=0,
+            )
+        self._status_dot = spot is not None
+        try:
+            if spot is None:
+                # 점을 안 쓰는 스킨 — 링만 옛날처럼 오른쪽 위 구석에 잠깐 뜬다
+                box.configure(bg=P.bg)
+                box.place_forget()
+            else:
+                x, y, bg = spot
+                box.configure(bg=bg)
+                box.place(x=int(x), y=int(y), anchor="center")
+                self._draw_status()
+        except tk.TclError:
+            pass
+
+    def _draw_status(self, spin: int | None = None):
+        """점(있으면)과 도는 링(새로고침 중일 때)을 한 캔버스에 그린다."""
+        box = getattr(self, "_status", None)
+        if box is None:
+            return
+        mid = STATUS_BOX / 2
+        ring = STATUS_BOX / 2 - 2
+        box.delete("all")
+        if spin is not None:
+            box.create_oval(
+                mid - ring, mid - ring, mid + ring, mid + ring,
+                outline=P.track, width=2,  # 배경 링
+            )
+            box.create_arc(
+                mid - ring, mid - ring, mid + ring, mid + ring,
+                start=(90 - spin * 30) % 360, extent=110,
+                style="arc", outline=P.title, width=2,  # 도는 조각(밝게)
+            )
+        if not self._status_dot:
+            return
+        if self.last_error is not None:
+            color = P.red
+        elif self.last_usage is None:
+            color = P.faint  # 아직 한 번도 못 받았다
+        else:
+            color = P.green
+        box.create_oval(
+            mid - DOT_R, mid - DOT_R, mid + DOT_R, mid + DOT_R, fill=color, width=0
+        )
+
+    def _spin_once(self):
+        """새로고침을 눌렀다는 표시 — 상태 점 둘레로 링이 한 바퀴 돈다.
+        점을 안 쓰는 스킨에서는 오른쪽 위 구석에 링만 잠깐 뜬다."""
+        try:
+            box = getattr(self, "_status", None)
+            if box is None:
+                self._sync_status()
+                box = self._status
+            if not self._status_dot:  # 구석에 잠깐 띄우는 옛 방식
+                box.configure(bg=P.bg)
+                box.place(relx=1.0, rely=0.0, x=-6, y=6, anchor="ne")
             if getattr(self, "_spinning", False):
                 return  # 이미 도는 중이면 겹쳐 시작하지 않는다
             self._spinning = True
@@ -862,12 +928,7 @@ class App:
                 if not self.alive:
                     return
                 try:
-                    sp.delete("all")
-                    sp.create_oval(2, 2, 14, 14, outline=P.track, width=2)  # 배경 링
-                    sp.create_arc(
-                        2, 2, 14, 14, start=(90 - n * 30) % 360, extent=110,
-                        style="arc", outline=P.title, width=2,  # 도는 조각(밝게)
-                    )
+                    self._draw_status(spin=n)
                 except tk.TclError:
                     self._spinning = False
                     return
@@ -876,7 +937,10 @@ class App:
                 else:
                     self._spinning = False
                     try:
-                        sp.place_forget()
+                        if self._status_dot:
+                            self._draw_status()  # 링만 걷고 점은 남긴다
+                        else:
+                            box.place_forget()
                     except tk.TclError:
                         pass
 
@@ -1119,6 +1183,7 @@ class App:
         self._clear_busy()
         self.skin.show(usage, self._stamp(usage))
         self._apply_notice()
+        self._sync_status()  # 상태 점을 초록으로 (바탕색도 정상으로 돌아왔다)
         self._reassert_dock()
         export(usage)
         cooldown_stats.record(usage)  # 통계용 기록 (값이 그대로면 안 쌓인다)
@@ -1168,6 +1233,7 @@ class App:
         keep = self.last_usage is not None
         text = self._error_text(err)
         self.skin.show_error(text, keep, self.last_error_stamp)
+        self._sync_status()  # 상태 점을 빨강으로 (붉은 바탕에 맞춰 자리도 다시)
         self.tray.icon = draw_icon(None)
         detail = f"{type(err).__name__}: {err}" if not str(err) else text
         self.tray.title = f"클로드 쿨다운 — {detail}"[:127]

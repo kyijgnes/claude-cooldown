@@ -177,6 +177,16 @@ class Skin:
         """
         raise NotImplementedError
 
+    def status_spot(self) -> tuple[int, int, str] | None:
+        """상태 점(조회됨 초록 / 못 받음 빨강)을 놓을 자리 `(x, y, 바탕색)`.
+
+        **앱이 그린다** — 새로고침 스피너가 같은 자리에서 그 둘레를 도는 링이라,
+        둘을 한 캔버스에 두어야 겹쳐도 조화롭기 때문이다. 좌표는 **창 기준 한가운데**.
+        `None`(기본)이면 점 없이 스피너만, 옛날처럼 오른쪽 위 구석에 잠깐 뜬다 —
+        기준 시각을 글자로 보여 주는 스킨은 점이 필요 없다.
+        """
+        return None
+
     def react(self, x: float | None = None, y: float | None = None) -> None:
         """위젯을 눌렀을 때의 반응(선택). `x`/`y` 는 창 기준 누른 자리(스킨이 쓰면).
         기본은 아무것도 하지 않는다."""

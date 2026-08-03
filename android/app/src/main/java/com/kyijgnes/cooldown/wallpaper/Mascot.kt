@@ -2,9 +2,7 @@ package com.kyijgnes.cooldown.wallpaper
 
 import android.graphics.Canvas
 import android.graphics.Paint
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 
@@ -169,16 +167,20 @@ class Mascot {
         charge = 0f
     }
 
-    /** 머리 위쪽 반원으로 고르게 흩뿌린다. `power` 는 퍼지는 힘. */
+    /**
+     * 머리 둘레에 **흩뿌린다.** ★ 부채꼴로 가지런히 놓으면 도형을 그린 것처럼 보인다 —
+     * sin 위상을 어긋나게 써서 난수 없이도 흩어지게 한다(`t` 를 섞어 뿜을 때마다 다르게).
+     */
     private fun burst(count: Int, power: Float) {
         val n = count.coerceIn(1, 20)
         for (k in 0 until n) {
-            val a = (PI * (k + 0.5f) / n).toFloat()
+            val a = (t + k * 7) * 0.9f
             sparks.add(floatArrayOf(
-                cos(a) * 4f, -6f,
-                -cos(a) * 1.6f * power,
-                (-1.5f - sin(a) * 1.3f) * power,
-                (SPARK_LIFE - (k % 4) * 4).toFloat(),
+                sin(a) * 14f * power,
+                -abs(sin(a * 1.7f)) * 10f - 2f,
+                sin(a * 2.3f) * 0.3f * power,      // 옆으로는 살짝만 흐른다
+                (-1.4f - (k % 5) * 0.1f) * power,  // 위로 떠오른다
+                SPARK_LIFE * (0.62f + 0.38f * abs(sin(a * 3.1f))),
             ))
         }
     }
@@ -292,13 +294,10 @@ class Mascot {
         }
     }
 
-    /**
-     * 뿜은 반짝이 — 도트 십자가 떠오르며 사그라든다.
-     * ★ 크기를 수명에 **그대로** 비례시키면 뿜자마자 안 보인다 — 끝까지 또렷하게 남긴다.
-     */
+    /** 뿜은 반짝이 — 도트 십자가 떠오르며 수명대로 작아진다(가루가 흩어지는 결). */
     private fun drawSparks(c: Canvas, cx: Float, cy: Float, u: Float, p: Paint) {
         for (s in sparks) {
-            val k = u * 0.5f * (0.45f + 0.55f * s[4] / SPARK_LIFE)
+            val k = u * 0.45f * (s[4] / SPARK_LIFE)
             if (k < 0.6f) continue
             plus(c, cx + s[0] * u * 0.25f, cy + s[1] * u * 0.25f, k, p)
         }
