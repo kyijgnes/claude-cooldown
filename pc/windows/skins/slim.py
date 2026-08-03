@@ -662,6 +662,7 @@ class SlimSkin(Skin):
         self._press = 0.0             # 눌린 정도 0~1
         self._runx = 0.0              # 달려오는 중의 가로 어긋남 (px, 0 이면 제자리)
         self._running = 0             # 달려오는 남은 프레임
+        self._played = False          # 마지막 누르기를 마스코트가 가져갔나
         self._combo = 0               # 지금 단 (0~COMBO_MAX)
         self._hits = 0                # 이 판에서 박자를 맞힌 횟수
         self._finale = 0              # 완주 축하 폭죽 남은 프레임
@@ -675,13 +676,19 @@ class SlimSkin(Skin):
         self._draw_mascot()  # 첫 프레임은 바로 그린다
         self.c.after(FRAME_MS, lambda c=self.c, g=self._anim_gen: self._animate(c, g))
 
-    def _hit(self, x: float, y: float) -> bool:
-        """누른 자리가 마스코트 위인가 (직접 콕 찌름). 자리를 비웠으면 없는 셈."""
-        if self._away > 0:
-            return False
+    def _near(self, x: float, y: float) -> bool:
+        """누른 자리가 마스코트 자리인가 (자리를 비웠는지는 안 본다)."""
         dx = x - self.mascot_cx
         dy = y - self.h / 2
         return dx * dx + dy * dy <= HIT_R * HIT_R
+
+    def _hit(self, x: float, y: float) -> bool:
+        """누른 자리가 마스코트 위인가 (직접 콕 찌름). 자리를 비웠으면 없는 셈."""
+        return self._away <= 0 and self._near(x, y)
+
+    def absorbed(self) -> bool:
+        """마지막 누르기를 마스코트가 가져갔나 — 그러면 앱이 새로고침을 안 한다."""
+        return self._played
 
     def react(self, x: float | None = None, y: float | None = None) -> None:
         """눌렀을 때 반응. 좌표로 **마스코트를 직접 찔렀는지** 보고 다르게 논다:
@@ -690,6 +697,8 @@ class SlimSkin(Skin):
         딴짓 중이었으면 그만두고 돌아온다."""
         self._quiet = 0
         self._act = ""
+        # 마스코트를 누른 것이면 '논 것' 이지 새로고침 요청이 아니다 (absorbed 참고)
+        self._played = x is not None and self._near(x, y)
         if self._away > 0:
             # 자리를 비웠는데 불렀다 — **호다닥 올라와서 허둥지둥**한다
             # (올라오는 시간을 RUSH_BACK 로 줄이고, 도착하면 펄쩍 + 부르르 + 놀란 눈)

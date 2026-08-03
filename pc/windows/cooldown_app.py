@@ -847,7 +847,15 @@ class App:
         if moved < threshold:
             if docked:
                 self._reassert_dock()  # 밀린 만큼 작업표시줄 자리로 다시 붙인다
-            self.refresh_now()
+            # ★ **마스코트를 두드린 것은 새로고침이 아니다.** 박자 놀이로 수십 번을
+            #   누르는데 그때마다 조회를 부르면(15초에 한 번씩이라도) 문서화도 안 된
+            #   엔드포인트를 괜히 두드리게 된다. 마스코트 밖을 누르면 그대로 새로고침.
+            try:
+                played = self.skin.absorbed()
+            except Exception:  # noqa: BLE001
+                played = False
+            if not played:
+                self.refresh_now()
             return
 
         # 확실히 끌어 옮겼다 — 자유 위치로 떼어 낸다. (다시 붙이려면 우클릭 메뉴에서)
