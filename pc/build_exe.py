@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,20 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 WIN = os.path.join(ROOT, "windows")
 ICON = os.path.join(WIN, "앱아이콘.ico")
 NAME = "클로드 쿨다운"
+# ★★ **버전은 한 곳에서만 적는다 — `android/app/build.gradle.kts` 의 `versionName`.**
+#   릴리스 태그(v0.11)·apk·이 exe 이름이 전부 그걸 따른다. 예전에는 exe 이름을 손으로
+#   올려서 로컬만 0.31 인데 릴리스는 0.10 인 꼴이 났다(2026-08-04 에 고침).
+GRADLE = os.path.join(os.path.dirname(ROOT), "android", "app", "build.gradle.kts")
+
+
+def version() -> str:
+    """gradle 에 적힌 판 번호. 못 읽으면 이름에 번호를 안 붙인다(빌드는 계속)."""
+    try:
+        with open(GRADLE, encoding="utf-8") as f:
+            m = re.search(r'versionName\s*=\s*"([^"]+)"', f.read())
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
 
 # skins/__init__.py 가 importlib 로 불러오므로 PyInstaller 가 스스로 못 찾는다.
 # 빼먹으면 exe 에 디자인이 하나도 안 들어가고 "쓸 수 있는 스킨이 없습니다" 로 죽는다.
@@ -90,6 +105,21 @@ def main() -> int:
     exe = os.path.join(ROOT, "dist", f"{NAME}.exe")
     size = os.path.getsize(exe) / 1024 / 1024
     print(f"\n완성: {exe}  ({size:.1f} MB)")
+
+    # **판 번호를 붙인 이름으로도 둔다** — 자동 실행 바로가기가 가리키는 것이 이 파일이고,
+    # 릴리스에 올리는 것도 이 파일이다(이름이 곧 판 번호라 어느 판이 도는지 알 수 있다).
+    ver = version()
+    if ver:
+        named = os.path.join(ROOT, "dist", f"claude-cooldown-v{ver}.exe")
+        try:
+            shutil.copy2(exe, named)
+            print(f"판 번호 붙인 것: {named}")
+        except PermissionError:
+            # 같은 판을 다시 빌드했는데 그게 지금 돌고 있으면 못 덮어쓴다
+            print(f"! {os.path.basename(named)} 을 못 바꿨다 — 지금 돌고 있는 것 같다.")
+            print("  트레이에서 끝내고 다시 돌리거나, 위 파일을 직접 실행할 것.")
+    else:
+        print("! 판 번호를 못 읽었다 (android/app/build.gradle.kts 의 versionName)")
     print("이 파일 하나만 주면 된다. 파이썬은 필요 없다.")
     shutil.rmtree(os.path.join(ROOT, "build"), ignore_errors=True)
     return 0
