@@ -70,7 +70,11 @@ MASCOT_COLOR = "#d97757"  # 클로드 코랄 — 밝게/어둡게 양쪽에서 �
 BEAT_AT = 1.5         # 제자리보다 이만큼 아래(px)로 내려갔을 때 치면 박자가 맞은 것
 BEAT_WINDOW = 60      # 이 프레임 안에 다시 맞혀야 콤보가 이어진다
 COMBO_MAX = 8
-COMBO_JUMP = 1.15     # 콤보 한 번마다 더 높이 튄다
+COMBO_JUMP = 0.45     # 콤보 한 번마다 조금 더 높이 (상한 MAX_VY 에 걸린다)
+# 콤보의 진짜 상 — 일정 콤보부터 **공중제비를 돌며 반짝이 꼬리**를 남긴다.
+FLIP_AT = 2           # 이 콤보부터 돈다
+FLIP_FRAMES = 10      # 한 바퀴 도는 데 걸리는 프레임 (튀는 주기와 맞춤)
+FLIP_TRAIL = 2        # 도는 동안 이 프레임마다 반짝이 하나씩 흘린다
 FRAME_MS = 45  # 애니메이션 한 프레임 (약 22fps — 물리가 부드럽게 이어지게)
 # 눌림 반응은 용수철처럼 — 누를 때마다 위로 튀는 '속도'를 더한다. 연타하면 힘이
 # 쌓여 자연스럽게 출렁이고(뚝 끊기지 않고), 너무 많이 치면 기절한다.
@@ -92,7 +96,9 @@ PRESS_POP = 18.0      # 떼면 튕겨 오르는 힘 (눌린 만큼 곱해진다)
 PRESS_BURST = 0.35    # 이만큼 넘게 눌렸다 떼면 **팡** 터진다
 LAUNCH_LIFT = 70.0    # 날아오르는 동안엔 창 안으로 가두지 않는다 (칸이 아니라 px)
 LAUNCH_FRAMES = 46    # 이 프레임 동안은 가둠을 푼다
-LAUNCH_AT = 9.0       # 이보다 세게 튀면 가둠을 푼다 (콤보가 쌓여도 여기 닿는다)
+# ★ **창 밖으로 나가는 건 꾹 누르기의 특전이다.** 콤보로는 안 나간다 — 연타로 자꾸 나가면
+#   화면에 없는 시간이 길어져 굼떠 보인다. 콤보의 상은 높이가 아니라 **공중제비와 반짝이**다.
+MAX_VY = 8.2          # 그냥 누르기·콤보로 낼 수 있는 최대 속도 (꾹 누르기는 예외)
 # ★ **좌우로 흔드는 움직임은 뺐다** — 늘 살랑거리니 산만하고 안 예뻤다.
 #   누를 때 도는 힘도 0 이다. 남은 좌우 움직임은 **가끔 하는 고개 갸웃**(_tilt) 과
 #   노트북 볼 때 기울이는 것(TYPE_LEAN) 뿐이다. 되살리지 말 것.
@@ -208,25 +214,17 @@ LEGS = ("..#...#..", ".##...##.")       # 평소 — 다리 둘에 발
 LEGS_WIDE = (".#.....#.", "##.....##")  # 기절 — 다리가 벌어져 주저앉는다
 LEGS_RUN = ("...#.#...", "..##.##..")   # 달릴 때 — 다리가 모였다 (LEGS 와 번갈아 쓴다)
 
-# 옆으로 돌아앉아 두드리는 **노트북** — 흐린 회색 통짜 블록(덮개, 위가 왼쪽으로 기울어 섬)
-# + 오른쪽(클로디 쪽)으로 뻗는 받침.
-# ★★ **회색 테두리에 화면을 세우지 말 것** — 정면이든 옆이든 무슨 크기·색이어도 판때기나
-#   쐐기 덩어리였다(작게·크게·3/4·옆모습·회색·호박색·흰 화면까지 다 해 봤다).
-#   **통짜 코랄 블록 + 받침** 이 실루엣만으로 노트북이 된다.
-# ★ 노트북+몸을 합친 그림이 **마스코트 자리(구분선~번갈아 칸, 35px) 안에** 들어가야 하므로
-#   몸을 `TYPE_SHIFT` 만큼 오른쪽으로 물린다. 노트북을 키우려면 이 값도 같이 손볼 것.
-# ★ 노트북+몸을 합친 그림이 **마스코트 자리(구분선 ~ 번갈아 칸 사이, 35px)** 안에 들어가야
-#   한다. 아래 값은 그 폭에 딱 맞춘 것이다 — 노트북을 키우려면 `TYPE_SHIFT` 도 같이 손볼 것.
-DESK_X = -8
-DESK_Y = 3
+# 옆으로 돌아앉아 두드리는 **노트북**.
+# ★★ **이것만은 도트 격자를 쓰지 않는다.** 한 칸이 2px 이라 노트북이 들어갈 자리(16×15px)에
+#   칸이 8×7 밖에 안 나온다 — 그 해상도로는 무슨 모양·색을 해도 판때기나 쐐기였다
+#   (작게·크게·정면·3/4·옆모습·회색·코랄·호박색 화면까지 다 해 보고 내린 결론).
+#   **1px 단위 다각형 둘(기운 덮개 + 얇은 받침)** 이면 그 자리에서 바로 노트북이 된다.
+#   마스코트 본체는 도트 그대로다 — 폰 앱과 표를 공유하므로 격자를 지킨다.
+# ★ 좌표는 몸 한가운데(cx, cy) 기준 px. 노트북+몸을 합친 그림이 **마스코트 자리
+#   (구분선~번갈아 칸, 35px) 안에** 들어가야 하므로 몸을 `TYPE_SHIFT` 만큼 오른쪽으로 물린다.
 TYPE_SHIFT = 8        # 노트북까지 한 그림이 되도록 몸을 오른쪽으로 (px)
-DESK = (
-    "####...",   # 덮개 — 위가 왼쪽으로 기울어 서 있다
-    "####...",
-    ".####..",
-    ".####..",
-    ".######",   # 받침 — 오른쪽(클로디 쪽)으로 뻗는다
-)
+LAP_BASE = (-24, 6, -8, 9)          # 받침(키보드) — 왼쪽 x, 윗 y, 오른쪽 x, 아랫 y
+LAP_LID = ((-22, 6), (-12, 6), (-15, -5), (-25, -5))  # 덮개 — 위가 왼쪽으로 기운 평행사변형
 # 타이핑하는 팔 — 몸에서 왼쪽 아래로 뻗어 받침에 닿는다. 두 자세를 번갈아 두드린다.
 # ★ 기본 팔(ARM)은 한 칸뿐이라 노트북까지 안 닿는다 — 이때만 길게 뻗은 팔을 따로 쓴다.
 TYPE_ARM = (
@@ -647,6 +645,7 @@ class SlimSkin(Skin):
         self._running = 0             # 달려오는 남은 프레임
         self._combo = 0               # 박자를 이어 맞힌 횟수
         self._beat_at = -999          # 마지막으로 박자를 맞힌 프레임
+        self._flip = 0                # 공중제비 남은 프레임
         self._launch = 0              # 이 동안은 창 밖까지 날아가도 안 가둔다
         self._next_gesture = random.randint(20, 60)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
@@ -693,6 +692,8 @@ class SlimSkin(Skin):
             if self._combo:  # 박자를 맞혔다 — 콤보만큼 화려하게
                 self._spark_cool = 0
                 self._burst(SPARK_POKE + self._combo * 2, 1.0 + self._combo * 0.16)
+                if self._combo >= FLIP_AT:  # 콤보가 붙으면 공중제비까지
+                    self._flip = FLIP_FRAMES
             else:  # 아무 때나 친 것 — 발밑에 먼지만
                 self._burst(SPARK_DUST, 1.0, foot=True)
             if self._clicks >= FAINT_AT:  # 과부하 — 뻗는다
@@ -720,19 +721,22 @@ class SlimSkin(Skin):
             return
         self._pressed = False
         press, self._press = self._press, 0.0
-        self._boost(JUMP_IMPULSE + PRESS_POP * press)
+        self._boost(JUMP_IMPULSE + PRESS_POP * press, launch=True)
         if press >= PRESS_BURST:
             self._surprise = SURPRISE_FRAMES * 3
             # 일부러 만든 순간이라 쿨다운과 무관하게 터뜨린다
             self._spark_cool = 0
             self._burst(SPARK_POKE + int(8 * press), 1.2 + press * 0.8)
 
-    def _boost(self, power: float) -> None:
-        """위로 튀어오르게 한다. **크게 튀면 잠시 창 밖으로 나가도록 가둠을 푼다** —
-        작업표시줄 위로 사라졌다 돌아오는 그 맛이 꾹 누르기·콤보의 값이다."""
+    def _boost(self, power: float, launch: bool = False) -> None:
+        """위로 튀어오르게 한다. `launch` 면 잠시 **창 밖으로** 나가도록 가둠을 푼다 —
+        그건 꾹 누르기의 특전이고, 그냥 누르기·콤보는 `MAX_VY` 를 넘지 않는다.
+        (상한이 없으면 연타할 때 속도가 쌓여 천장에 붙어 굼떠 보인다)"""
         self._vy -= power
-        if power >= LAUNCH_AT:
+        if launch:
             self._launch = LAUNCH_FRAMES
+        else:
+            self._vy = max(self._vy, -MAX_VY)
 
     def _burst(self, count: int, power: float = 1.0, foot: bool = False) -> None:
         """반짝이를 한 움큼 뿜는다 — **흩뿌려** 놓고 사그라든다. 가지런히 퍼뜨리면
@@ -819,7 +823,14 @@ class SlimSkin(Skin):
             lift = LAUNCH_LIFT
         else:
             lift = max(4.0, (self.h - SPRITE_H) / 2 - 1)
-        self._yoff = max(-lift, min(lift * 0.65, self._yoff + self._vy))
+        # ★ 끝에 닿으면 **속도까지 죽인다.** 위치만 가두면 연타할 때 속도가 계속 쌓여
+        #   천장에 붙은 채 한참 못 내려온다 — 그게 '마비된 것 같다' 의 정체였다.
+        nxt = self._yoff + self._vy
+        if nxt < -lift:
+            nxt, self._vy = -lift, 0.0
+        elif nxt > lift * 0.65:
+            nxt, self._vy = lift * 0.65, 0.0
+        self._yoff = nxt
         self._vr += -SPRING_K * self._roff
         self._vr *= 1 - SPRING_DAMP
         self._roff += self._vr
@@ -829,6 +840,15 @@ class SlimSkin(Skin):
             self._clicks = max(0.0, self._clicks - CLICK_DECAY)
         if self._combo and self._t - self._beat_at > BEAT_WINDOW:
             self._combo = 0   # 박자가 끊겼다
+        if self._flip > 0:  # 공중제비 — 도는 동안 반짝이 꼬리를 흘린다
+            self._flip -= 1
+            if self._flip % FLIP_TRAIL == 0:
+                self._sparks.append([
+                    self.mascot_cx + random.uniform(-4, 4),
+                    self.h / 2 + self._yoff + random.uniform(-4, 4),
+                    random.uniform(-0.25, 0.25), random.uniform(-0.35, 0.05),
+                    SPARK_LIFE * 0.7,
+                ])
 
     # -------------------------------------------------- 심심할 때 하는 잔동작
     def _idle_step(self) -> None:
@@ -957,6 +977,10 @@ class SlimSkin(Skin):
         squash = max(SQUASH_MIN, min(SQUASH_MAX, -self._vy * SQUASH))
         sxk *= 1 - squash * 0.55
         syk *= 1 + squash
+        # 공중제비 — 가로축을 중심으로 한 바퀴. `syk` 를 음수까지 돌리면 도트를 그대로
+        # 뒤집어 그리므로(=`uy` 가 음수) 획이 안 뭉개진다.
+        if self._flip > 0:
+            syk *= math.cos((1 - self._flip / FLIP_FRAMES) * math.tau)
         spring_scale = 1.0 + max(0.0, -self._yoff) * 0.02  # 위로 뜰수록 살짝 커짐
         # 낮잠 중엔 더 크고 느리게 숨쉰다
         breathe = (1 + 0.10 * math.sin(t * 0.05)) if self._act == "nap" else (
@@ -992,7 +1016,7 @@ class SlimSkin(Skin):
             expr = "grin"
             arms = (-1 if up else 0, 0) if self._wave_dir < 0 else (0, -1 if up else 0)
         elif self._act == "type":  # 노트북에 열중 — **옆으로 돌아앉아** 왼쪽 화면을 본다
-            expr, front = "side", DESK
+            expr, front = "side", True
             # 옆모습이라 기본 팔은 안 그리고(None), **노트북까지 뻗은 긴 팔**을 대신 그린다
             arms = (None, None)
             extra = TYPE_ARM[(self._act_left // TYPE_BEAT) % 2]
@@ -1019,7 +1043,9 @@ class SlimSkin(Skin):
             expr, arms = "idle", (0, 0)
 
         self._sprite(expr, arms, legs, cx, cy,
-                     MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx, front, extra)
+                     MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx, None, extra)
+        if front:  # 노트북은 도트가 아니라 다각형이라 스프라이트 뒤에 따로 그린다
+            self._draw_laptop(c, cx, cy)
         if ball is not None:
             # 공은 몸 위에 그린다(손보다 앞). **몸 색으로 그리면 몸에 붙은 혹처럼 보인다** —
             # 호박색 장난감으로 둔다(알림 색과 자리가 겹치지 않아 헷갈릴 일이 없다).
@@ -1083,12 +1109,6 @@ class SlimSkin(Skin):
         paint(legs, len(HEAD))
         for col, row in EYES[expr]:
             cell(col + eye_dx, row, bg)
-        if front is not None:
-            # 앞에 놓인 것(책상) — **맨 마지막에** 그린다.
-            # **흐린 회색(P.label)** 으로 그린다 — 몸 색으로 그리면 팔·몸과 한 덩어리가 된다.
-            # ★ 앞에 놓인 것은 **기울이지 않는다**(tilt=0) — 바닥에 놓인 물건이라
-            #   고개를 따라 같이 기울면 통째로 미끄러진 것처럼 보인다.
-            paint(front, DESK_Y, P.label, 0.0, DESK_X)
 
     def _draw_sparks(self, c: tk.Canvas) -> None:
         """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
@@ -1101,6 +1121,17 @@ class SlimSkin(Skin):
                 x, y = sx + dx * u, sy + dy * u
                 c.create_rectangle(x - u / 2, y - u / 2, x + u / 2, y + u / 2,
                                    fill=MASCOT_COLOR, width=0, tags="mascot")
+
+    def _draw_laptop(self, c: tk.Canvas, cx: float, cy: float) -> None:
+        """노트북 — **도트가 아니라 1px 다각형**으로 그린다(위 `LAP_*` 주석 참고).
+        고개를 따라 기울이지 않는다 — 바닥에 놓인 물건이다."""
+        x0, y0, x1, y1 = LAP_BASE
+        c.create_rectangle(cx + x0, cy + y0, cx + x1, cy + y1,
+                           fill=P.label, width=0, tags="mascot")
+        pts = []
+        for dx, dy in LAP_LID:
+            pts += [cx + dx, cy + dy]
+        c.create_polygon(pts, fill=P.label, width=0, tags="mascot")
 
     def _draw_zzz(self, c: tk.Canvas) -> None:
         """낮잠 z — 머리 위로 비스듬히 떠오른다. 도트 3×3 이라 이 크기에서도 z 로 읽힌다."""
