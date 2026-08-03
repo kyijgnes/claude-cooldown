@@ -356,8 +356,10 @@ class SlimSkin(Skin):
         self._slot_notice: tuple[str, str] | None = None
         self._slot_i = 0
         self._slot_on = True
-        self._slot_gen = 0
         self._slot_pending = None
+        # build 가 다시 불려도(테마 전환) 세대는 **올리기만** 한다 — 0 으로 되돌리면
+        # 옛 캔버스에 걸려 있던 콜백이 새 세대와 번호가 겹쳐 두 루프가 같이 돈다.
+        self._slot_gen = getattr(self, "_slot_gen", 0) + 1
 
     def _slot_queue(self) -> None:
         if self._slot_pending is None:
