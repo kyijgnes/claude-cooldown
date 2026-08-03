@@ -1,10 +1,11 @@
 """
 스킨 렌더 확인용 (개발 도구) — 창을 띄워 PNG 로 저장하고 바로 끝난다.
 
-    python _shot_skin.py card ok  out.png     정상
-    python _shot_skin.py card net out.png     연결 실패 (값 유지)
-    python _shot_skin.py card err out.png     재로그인 필요 (값 없음)
-    python _shot_skin.py card max out.png     100% · 가장 긴 문자열 (겹침 확인)
+    python _shot_skin.py card ok   out.png    정상
+    python _shot_skin.py card net  out.png    연결 실패 (값 유지)
+    python _shot_skin.py card err  out.png    재로그인 필요 (값 없음)
+    python _shot_skin.py card max  out.png    100% · 가장 긴 문자열 (겹침 확인)
+    python _shot_skin.py card note out.png    값은 멀쩡 + 자동 시작 알림
 
 뒤에 light / dark 를 붙이면 그 테마로 그린다 (없으면 윈도우 설정을 따른다).
     python _shot_skin.py card ok out.png light
@@ -85,6 +86,10 @@ def main() -> None:
         skin.show(demo(), STAMP)
     elif mode == "max":
         skin.show(demo(extreme=True), STAMP)
+    elif mode == "note":
+        # 값은 멀쩡한데 알릴 것이 있는 상태 — 앱이 show() 바로 뒤에 notice() 를 부른다
+        skin.show(demo(), STAMP)
+        skin.notice("20:03 자동 시작 실패")
     elif mode == "net":
         skin.show(demo(), STAMP)
         skin.show_error("연결 실패", True, STAMP)

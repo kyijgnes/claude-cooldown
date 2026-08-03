@@ -34,6 +34,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 
 from cooldown_core import (  # noqa: E402
+    DAY_PP,
     MIN_INTERVAL,
     ConnectionFailed,
     LoginRequired,
@@ -45,6 +46,7 @@ from cooldown_core import (  # noqa: E402
 
 import cooldown_ping  # noqa: E402
 import cooldown_push  # noqa: E402
+import cooldown_stats  # noqa: E402
 import skins  # noqa: E402
 from skins.base import (  # noqa: E402
     KR,
@@ -528,6 +530,9 @@ class App:
         # 앱이 떠서 처리한 가장 최근 앵커 / 컴퓨터 꺼짐 등으로 놓친 앵커 (자동 시작)
         self._last_anchor_dt = cooldown_ping._parse_iso(self.ping_cfg.get("last_anchor"))
         self._missed_dt = cooldown_ping._parse_iso(self.ping_cfg.get("last_missed"))
+        # 마지막 자동 시작 실패 (시각, 까닭). 다음 성공·기능 끄기·실행 기록 열기로 지운다.
+        # 껐다 켜면 사라진다 — 지난 실패는 '실행 기록' 이 갖고 있다.
+        self._ping_fail: tuple[datetime, str] | None = None
 
         # 폰으로 보내기 — 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다
         self.push_cfg = cooldown_push.load_cfg()
@@ -549,6 +554,7 @@ class App:
         self.root.configure(bg=P.bg)
 
         repair_autostart()
+        cooldown_stats.trim()  # 오래된 기록 덜어내기 — 켤 때 한 번이면 된다
 
         self.body: tk.Frame | None = None
         self.skin = skins.make(self.state["skin"])
@@ -669,6 +675,8 @@ class App:
 
         # 게이지의 '지금쯤' 눈금이 무슨 뜻인지, 숫자와 판정까지 여기서 다 본다.
         self.menu.add_command(label="이번 주 사용 속도…", command=self.open_pace)
+        # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
+        self.menu.add_command(label="사용량 통계…", command=self.open_stats)
         self.menu.add_separator()
 
         # ---- 쿨다운 (사용량 표시) ----
@@ -754,6 +762,7 @@ class App:
                 pystray.MenuItem(
                     "이번 주 사용 속도", lambda: self.commands.put("pace")
                 ),
+                pystray.MenuItem("사용량 통계", lambda: self.commands.put("stats")),
                 pystray.MenuItem(
                     "윈도우 켤 때 자동 실행",
                     lambda: self.commands.put("toggle_autostart"),
@@ -993,6 +1002,7 @@ class App:
                 "front": self.bring_to_front,
                 "toggle_autostart": self.toggle_autostart,
                 "pace": self.open_pace,
+                "stats": self.open_stats,
             }[cmd]()
             if cmd == "quit":
                 return
@@ -1072,11 +1082,16 @@ class App:
             )
 
     def _notice_text(self) -> str:
-        """위젯에 얹을 알림 문구 (값은 멀쩡할 때). 지금은 '자동 시작 놓침' 하나.
-        슬림 바처럼 자리가 좁은 스킨이 뒤를 자르고도 시각이 남게 시각을 앞세운다."""
-        if not self.ping_cfg.get("enabled") or self._missed_dt is None:
+        """위젯에 얹을 알림 문구 (값은 멀쩡할 때) — 자동 시작이 실패했거나 놓쳤을 때.
+        슬림 바처럼 자리가 좁은 스킨이 뒤를 자르고도 시각이 남게 시각을 앞세우고,
+        **까닭은 붙이지 않는다**(자리가 없다 — 트레이 알림과 실행 기록에 있다)."""
+        if not self.ping_cfg.get("enabled"):
             return ""
-        return f"{self._missed_dt:%H:%M} 자동 시작 놓침"
+        if self._ping_fail is not None:  # 실패가 놓침보다 급하다 (지금 안 열린 것)
+            return f"{self._ping_fail[0]:%H:%M} 자동 시작 실패"
+        if self._missed_dt is not None:
+            return f"{self._missed_dt:%H:%M} 자동 시작 놓침"
+        return ""
 
     def _apply_notice(self) -> None:
         """스킨에 알림 문구를 얹는다. 오류가 떠 있으면(자리가 겹친다) 얹지 않는다."""
@@ -1103,6 +1118,7 @@ class App:
         self._apply_notice()
         self._reassert_dock()
         export(usage)
+        cooldown_stats.record(usage)  # 통계용 기록 (값이 그대로면 안 쌓인다)
         self._start_push(usage)
 
         self.tray.icon = draw_icon(usage.five.pct)
@@ -1260,11 +1276,14 @@ class App:
             self.ping_cfg["last_missed"] = None
         cooldown_ping.save_cfg(self.ping_cfg)
         if ok:
-            self._redraw()  # 놓침 표시가 있었으면 곧바로 지운다
+            self._ping_fail = None
+            self._redraw()  # 실패·놓침 표시가 있었으면 곧바로 지운다
             self.poller.refresh_now()  # 창이 열렸으니 위젯 숫자를 곧바로 갱신
         else:
+            reason = cooldown_ping.friendly_error(detail)
+            self._ping_fail = (when, reason)
+            self._redraw()  # 위젯 오른쪽 칸에도 띄운다 (트레이 알림은 놓치기 쉽다)
             try:
-                reason = cooldown_ping.friendly_error(detail)
                 self.tray.notify(f"자동 시작 실패 · {reason}", "클로드 쿨다운")
             except Exception:  # noqa: BLE001
                 pass
@@ -1280,8 +1299,9 @@ class App:
                 self._last_anchor_dt = base
                 self.ping_cfg["last_anchor"] = base.isoformat()
         else:
-            # 껐으면 놓침 표시도 지운다 (더는 지킬 게 없다)
+            # 껐으면 실패·놓침 표시도 지운다 (더는 지킬 게 없다)
             self._missed_dt = None
+            self._ping_fail = None
             self.ping_cfg["last_missed"] = None
         cooldown_ping.save_cfg(self.ping_cfg)
         self.var_ping.set(bool(self.ping_cfg["enabled"]))
@@ -1498,6 +1518,187 @@ class App:
         except Exception:  # noqa: BLE001
             pass
 
+    # -------------------------------------------------- 사용량 통계
+    def open_stats(self):
+        """쌓아 둔 기록에서 '언제 얼마나 썼나' 를 셈해 보여 준다.
+
+        사용량 단위는 **주간 한도 %p** — 5시간 퍼센트는 5시간마다 0으로 돌아가
+        더할 수가 없고, 주간 퍼센트가 오른 만큼이 곧 그 사이에 쓴 양이다.
+        셈은 전부 `cooldown_stats` 가 하고, 여기서는 그리기만 한다.
+        """
+        W = 344
+        try:
+            rep = cooldown_stats.analyze(cooldown_stats.read_samples(days=30))
+            top, body = self._open_panel("사용량 통계")
+            wrap = tk.Frame(body, bg=P.bg)
+            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
+            inner = W - PANEL_PAD * 2
+
+            if rep.samples < 2:
+                tk.Label(
+                    wrap, text="쌓인 기록 없음", bg=P.bg, fg=P.title, font=(KR, 12, "bold")
+                ).pack(anchor="w", pady=(6, 2))
+                tk.Label(
+                    wrap, text="위젯이 떠 있는 동안 5분마다 쌓임",
+                    bg=P.bg, fg=P.faint, font=(KR, 9),
+                ).pack(anchor="w", pady=(0, 10))
+                self._finalize_panel(top, W)
+                return
+
+            tk.Label(
+                wrap,
+                text=f"기록 {rep.span_days:.0f}일 · 표본 {rep.samples}개",
+                bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
+            ).pack(fill="x", pady=(0, 8))
+
+            # ---- 일별 ----
+            self._section(wrap, "일별 사용량", "주간 한도 기준")
+            self._chart_days(wrap, rep.days, inner)
+            self._pair(
+                wrap, "오늘", f"{rep.today:.0f}%p", pace_color(self._day_level(rep.today))
+            )
+            self._pair(wrap, "어제", f"{rep.yesterday:.0f}%p", P.sub)
+            self._pair(wrap, "하루 평균 (최근 이레)", f"{rep.avg_day:.0f}%p", P.sub)
+            if rep.busiest is not None:
+                day, value = rep.busiest
+                self._pair(
+                    wrap, "가장 많이 쓴 날",
+                    f"{day.month}/{day.day:02d}({'월화수목금토일'[day.weekday()]}) "
+                    f"{value:.0f}%p",
+                    P.sub,
+                )
+
+            tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(12, 10))
+
+            # ---- 시간대 ----
+            self._section(wrap, "시간대", "0~23시")
+            self._chart_hours(wrap, rep.hours, inner)
+            if rep.peak_hour is not None:
+                self._pair(
+                    wrap, "가장 많이 쓰는 때",
+                    f"{rep.peak_hour:02d}~{(rep.peak_hour + 1) % 24:02d}시", P.sub,
+                )
+
+            # ---- 5시간 창 ----
+            if rep.windows:
+                tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(12, 10))
+                self._section(wrap, "5시간 창 최고", f"최근 {len(rep.windows)}개")
+                self._chart_windows(wrap, rep.windows, inner)
+                self._pair(
+                    wrap, "평균 최고", f"{rep.win_avg:.0f}%", tone(rep.win_avg)
+                )
+                self._pair(
+                    wrap, "90% 넘긴 창", f"{rep.win_full}개",
+                    P.red if rep.win_full else P.sub,
+                )
+
+            self._finalize_panel(top, W)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _section(parent: tk.Misc, title: str, note: str = "") -> None:
+        """작은 제목 한 줄 — 왼쪽 이름, 오른쪽에 무엇을 재는지."""
+        row = tk.Frame(parent, bg=P.bg)
+        row.pack(fill="x", pady=(0, 5))
+        tk.Label(row, text=title, bg=P.bg, fg=P.title, font=(KR, 9, "bold")).pack(
+            side="left"
+        )
+        if note:
+            tk.Label(row, text=note, bg=P.bg, fg=P.faint, font=(KR, 8)).pack(side="right")
+
+    @staticmethod
+    def _day_level(value: float) -> int:
+        """하루 사용량을 적정선(DAY_PP)과 견준 등급 — 0 여유 · 1 조금 빠름 · 2 많이 빠름.
+        주간 판정(cooldown_core.pace)과 같은 잣대라 색이 서로 어긋나지 않는다."""
+        if value <= DAY_PP:
+            return 0
+        return 1 if value <= DAY_PP * 1.5 else 2
+
+    @staticmethod
+    def _chart_days(parent: tk.Misc, days: list, width: int, height: int = 62) -> None:
+        """날짜별 막대 + 하루 적정선(점선). 막대 색은 적정선과 견준 결과다 —
+        게이지의 초록/노랑/빨강과 같은 뜻(여유·조금 빠름·많이 빠름)."""
+        c = tk.Canvas(
+            parent, width=width, height=height + 13, bg=P.bg, highlightthickness=0, bd=0
+        )
+        c.pack(fill="x", pady=(0, 8))
+        n = max(1, len(days))
+        pitch = width / n
+        bar_w = max(3.0, pitch - 4)
+        # 눈금(적정선)이 늘 보이도록 꼭대기는 적정선보다 반드시 높게 잡는다
+        top_v = max([v for _d, v in days] + [DAY_PP]) * 1.15
+        today = datetime.now().date()
+        for i, (day, value) in enumerate(days):
+            x = i * pitch + (pitch - bar_w) / 2
+            h = value / top_v * height if top_v > 0 else 0
+            if value <= 0:  # 안 쓴 날도 자리는 남긴다 (기록이 없는 것과 구분)
+                c.create_rectangle(
+                    x, height - 2, x + bar_w, height, fill=P.track, width=0
+                )
+            else:
+                c.create_rectangle(
+                    x, height - max(2.0, h), x + bar_w, height,
+                    fill=pace_color(App._day_level(value)), width=0,
+                )
+            c.create_text(
+                x + bar_w / 2, height + 7,
+                text="월화수목금토일"[day.weekday()],
+                font=(KR, 7), fill=P.title if day == today else P.faint,
+            )
+        y = height - DAY_PP / top_v * height
+        c.create_line(0, y, width, y, fill=P.title, width=1, dash=(3, 3))
+
+    @staticmethod
+    def _chart_hours(parent: tk.Misc, hours: list, width: int, height: int = 40) -> None:
+        """0~23시 막대 — 하루 중 언제 쓰는지. 가장 많은 때만 밝게."""
+        c = tk.Canvas(
+            parent, width=width, height=height + 13, bg=P.bg, highlightthickness=0, bd=0
+        )
+        c.pack(fill="x", pady=(0, 8))
+        top_v = max(hours) or 1.0
+        peak = max(range(24), key=lambda h: hours[h])
+        pitch = width / 24
+        bar_w = max(3.0, pitch - 3)
+        for h in range(24):
+            x = h * pitch + (pitch - bar_w) / 2
+            bar_h = hours[h] / top_v * height
+            c.create_rectangle(
+                x, height - max(2.0, bar_h), x + bar_w, height,
+                fill=(P.title if h == peak and hours[h] > 0 else P.label)
+                if hours[h] > 0 else P.track,
+                width=0,
+            )
+            if h % 6 == 0:
+                c.create_text(
+                    x + bar_w / 2, height + 7, text=f"{h}", font=(NUM, 7), fill=P.faint
+                )
+
+    @staticmethod
+    def _chart_windows(parent: tk.Misc, windows: list, width: int,
+                       height: int = 40) -> None:
+        """5시간 창마다 '어디까지 찼나' — 0~100% 고정 눈금이라 창끼리 바로 견준다."""
+        c = tk.Canvas(
+            parent, width=width, height=height + 13, bg=P.bg, highlightthickness=0, bd=0
+        )
+        c.pack(fill="x", pady=(0, 8))
+        n = max(1, len(windows))
+        pitch = width / n
+        bar_w = max(4.0, pitch - 5)
+        for i, w in enumerate(windows):
+            x = i * pitch + (pitch - bar_w) / 2
+            c.create_rectangle(x, 0, x + bar_w, height, fill=P.track, width=0)
+            filled = w.peak / 100 * height
+            c.create_rectangle(
+                x, height - max(2.0, filled), x + bar_w, height,
+                fill=tone(w.peak), width=0,
+            )
+            # 창이 열린 시각 — 하루 경계가 헷갈리지 않게 시(時)만 적는다
+            c.create_text(
+                x + bar_w / 2, height + 7, text=f"{w.start.hour}",
+                font=(NUM, 7), fill=P.faint,
+            )
+
     @staticmethod
     def _gap_sentence(p) -> str:
         """판정을 한 줄로 — 적정선(고르게 쓸 때)보다 얼마나 앞섰나/뒤졌나."""
@@ -1697,6 +1898,10 @@ class App:
         '실행됨'을 줄마다 반복하면 영수증처럼 늘어져 보여, 성공 줄에서는 뺀다."""
         try:
             entries = cooldown_ping.read_log_entries(40)
+            # 여기서 까닭까지 봤으니 위젯의 '자동 시작 실패' 표시는 내린다
+            if self._ping_fail is not None:
+                self._ping_fail = None
+                self._redraw()
             top, body = self._open_panel("실행 기록")
             wrap = tk.Frame(body, bg=P.bg)
             wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))

@@ -34,6 +34,7 @@ HIDDEN = [
     "cooldown_core",  # 루트 모듈 (--paths 로 찾지만 명시해 확실히)
     "cooldown_ping",  # 자동 핑(모닝 스타터) 로직
     "cooldown_push",  # 폰으로 보내기 (릴레이 업로드)
+    "cooldown_stats",  # 사용량 기록·통계
     "qrcode",  # 폰 연결 QR. 함수 안에서 늦게 import 해 PyInstaller 가 못 찾는다
     "pystray._win32",
     "win32com.client",
