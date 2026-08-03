@@ -75,11 +75,12 @@ POKE_MULT = 2.6       # 마스코트를 직접 콕 찌르면 반응이 이만큼
 SQUASH = 0.055        # 속도 1당 늘어나는 비율
 SQUASH_MAX = 0.34     # 최대로 늘어나는 정도
 SQUASH_MIN = -0.20    # 최대로 눌리는 정도
-# **꾹 누르고 있으면 쓰다듬는 것이다** — 눈웃음을 지은 채 가만히 있고 하트가 떠오른다.
-# ★ '기 모아서 뛰기/쏘기' 로 만들어 봤다가 뺐다 — 게임 같지 이 친구답지 않았다.
-#   손을 얹고 있는 것에 가장 자연스러운 반응은 **좋아하는 것**이다.
-PET_EVERY = 22        # 이 프레임마다 하트 하나
-PET_LIFE = 34         # 하트가 떠 있는 프레임
+# **꾹 누르고 있으면 눌린다.** 손가락에 눌려 점점 납작해지고, 떼면 용수철처럼 튕겨 오른다.
+# ★★ 여기에 '기 모아 뛰기' · '기 모아 쏘기' · '쓰다듬기(하트)' 를 차례로 붙여 봤다가 전부 뺐다.
+#   소품이나 기호를 얹으면 게임 같거나 유치했다. **누르니까 눌린다** — 그 이상 필요 없다.
+PRESS_FRAMES = 26     # 이만큼이면 최대로 눌린다
+PRESS_FLAT = 0.42     # 최대로 납작해지는 정도
+PRESS_POP = 2.0       # 떼면 튕겨 오르는 힘 (눌린 만큼 곱해진다)
 # ★ **좌우로 흔드는 움직임은 뺐다** — 늘 살랑거리니 산만하고 안 예뻤다.
 #   누를 때 도는 힘도 0 이다. 남은 좌우 움직임은 **가끔 하는 고개 갸웃**(_tilt) 과
 #   노트북 볼 때 기울이는 것(TYPE_LEAN) 뿐이다. 되살리지 말 것.
@@ -197,34 +198,17 @@ LEGS = ("..#...#..", ".##...##.")       # 평소 — 다리 둘에 발
 LEGS_WIDE = (".#.....#.", "##.....##")  # 기절 — 다리가 벌어져 주저앉는다
 LEGS_RUN = ("...#.#...", "..##.##..")   # 달릴 때 — 다리가 모였다 (LEGS 와 번갈아 쓴다)
 
-# 노트북 — 오래 심심할 때 앞에 놓고 두드린다. 다리를 가리도록 그 자리에 겹쳐 그린다
-# (몸통이 없는 친구라, 다리 앞을 막아 주면 '앉아서 뭘 하는' 모습으로 읽힌다).
-# ★ 마스코트 격자와 **같은 좌표계**(9칸)다.
-# ★★ **몸 색(코랄)으로 그리면 안 된다** — 머리와 붙어 큰 덩어리 하나로 보인다(실제로 그랬다).
-#   흐린 회색(`P.label`) 테두리로 그린다.
-# ★★ **가운데 한 줄을 밝게 파야(`LAPTOP_LIT`) 노트북으로 읽힌다.** 통짜 회색 덩어리는
-#   그냥 책상·치마처럼 보였다 — '켜진 화면'이 있어야 물건의 정체가 잡힌다.
-# ★★ **몸 앞(정면)에 두면 무슨 모양을 그려도 노트북이 안 된다.** 다리를 가린 판때기로만
-#   보인다. **옆으로 돌아앉아** 왼쪽에 따로 놓아야 물건과 몸이 갈라져 노트북이 된다.
-#   그래서 이때는 얼굴도 옆모습(`EYES["side"]`, 눈 하나)이고 팔도 가까운 쪽 하나만 그린다.
-# ★ 마스코트 격자 왼쪽 밖이므로 `LAPTOP_X` 만큼 왼쪽, `LAPTOP_Y` 줄부터 그린다.
-LAPTOP_X = -6
-LAPTOP_Y = 4          # 가슴 높이부터 (다리보다 조금 아래까지 내려온다)
-LAPTOP = (
-    ".....###",   # 화면 꼭대기 (오른쪽으로 기울어 섰다)
-    "....####",
-    "...#####",
-    "..######",
-    "########",   # 받침(키보드)
-)
-LAPTOP_LIT = ((5, 1), (4, 2), (5, 2), (3, 3), (4, 3), (5, 3))  # 켜진 화면
-
-# 쓰다듬을 때 떠오르는 하트 (5×4 도트).
-PET_HEART = (
-    ".#.#.",
-    "#####",
-    ".###.",
-    "..#..",
+# 옆으로 돌아앉아 두드리는 **납작한 책상(키보드)**.
+# ★★ **노트북을 그리려 하지 말 것.** 화면을 세우면 정면이든 옆이든 무슨 모양·크기·색이어도
+#   노트북으로 안 읽힌다 — 정면은 다리를 가린 판때기, 옆은 쐐기 덩어리였다(다 해 봤다).
+#   **화면을 아예 빼고 납작한 판만** 두면 '뭔가를 두드리고 있다' 가 그대로 읽힌다.
+#   읽히는 건 물건의 생김새가 아니라 **손이 오르내리는 동작**이다.
+# ★ 마스코트 격자 왼쪽 밖이므로 `DESK_X` 만큼 왼쪽, `DESK_Y` 줄부터 그린다.
+DESK_X = -6
+DESK_Y = 6            # 손이 닿는 높이 (다리와 같은 줄)
+DESK = (
+    "########",   # 상판
+    ".######.",   # 받침
 )
 
 # 낮잠 — 머리 위로 떠오르는 z.
@@ -634,9 +618,8 @@ class SlimSkin(Skin):
         self._away_total = 0
         self._rise = SINK_FRAMES      # 올라오는 데 걸리는 프레임 (부르면 RUSH_BACK 로 줄인다)
         self._rushing = False         # 불려서 호다닥 올라오는 중인가
-        self._petting = False         # 꾹 누르고 있는 중 (쓰다듬는 것으로 본다)
-        self._pet = 0                 # 쓰다듬은 프레임 (하트를 띄우는 박자)
-        self._hearts: list[list[float]] = []   # 하트 [x, y, life]
+        self._pressed = False         # 꾹 누르고 있는 중 (손가락에 눌린다)
+        self._press = 0.0             # 눌린 정도 0~1
         self._runx = 0.0              # 달려오는 중의 가로 어긋남 (px, 0 이면 제자리)
         self._running = 0             # 달려오는 남은 프레임
         self._next_gesture = random.randint(20, 60)
@@ -690,24 +673,22 @@ class SlimSkin(Skin):
         self._spin_dir = -self._spin_dir
 
     def hold(self, x: float, y: float) -> None:
-        """꾹 누르고 있다 — **쓰다듬는 것으로 본다.** 눈웃음을 지은 채 가만히 있고
-        하트가 하나씩 떠오른다. 딴 데를 누른 거면 아무 일도 없다.
+        """꾹 누르고 있다 — **손가락에 눌려 납작해진다.** 딴 데를 누른 거면 아무 일도 없다.
 
-        ★ '기를 모았다 뛰기/쏘기' 로 만들어 봤다가 뺐다 — 게임 같지 이 친구답지 않았다.
-        손을 얹고 있는 것에 가장 자연스러운 반응은 **좋아하는 것**이다.
+        ★ 여기에 '기 모아 뛰기'·'기 모아 쏘기'·'쓰다듬기(하트)' 를 차례로 붙여 봤다가
+        전부 뺐다. 소품이나 기호를 얹으면 게임 같거나 유치했다 — **누르니까 눌린다.**
         """
         if self._faint > 0 or self._away > 0 or not self._hit(x, y):
             return
-        self._petting = True
-        self._pet = 0
+        self._pressed = True
 
     def let_go(self) -> None:
-        """손을 뗐다 — 기분 좋게 한 번 폴짝."""
-        if not self._petting:
+        """손을 뗐다 — 눌린 만큼 용수철처럼 튕겨 오른다."""
+        if not self._pressed:
             return
-        self._petting = False
-        self._pet = 0
-        self._vy -= JUMP_IMPULSE * 0.9
+        self._pressed = False
+        self._vy -= JUMP_IMPULSE + PRESS_POP * self._press
+        self._press = 0.0
 
     def _burst(self, count: int, power: float = 1.0, foot: bool = False) -> None:
         """반짝이를 한 움큼 뿜는다 — **흩뿌려** 놓고 사그라든다. 가지런히 퍼뜨리면
@@ -766,16 +747,6 @@ class SlimSkin(Skin):
         for z in self._zzz:  # z 는 비스듬히 떠오른다 (옆 칸을 침범하지 않게 조금만)
             z[0] += 0.13; z[1] -= 0.28; z[2] -= 1
         self._zzz = [z for z in self._zzz if z[2] > 0]
-        for hh in self._hearts:  # 하트는 살랑살랑 떠오른다
-            hh[1] -= 0.34; hh[2] -= 1
-        self._hearts = [hh for hh in self._hearts if hh[2] > 0]
-        if self._petting:  # 쓰다듬는 동안 박자에 맞춰 하나씩
-            self._pet += 1
-            if self._pet % PET_EVERY == 1:
-                self._hearts.append([
-                    self.mascot_cx + random.uniform(-4, 4),
-                    self.h / 2 - 5.0 * MASCOT_U, PET_LIFE,
-                ])
         if self._running > 0:  # 달려오는 중 — 왼쪽에서 제자리로
             self._running -= 1
             self._runx = -RUN_DIST * (self._running / RUN_FRAMES) ** 1.6
@@ -791,9 +762,10 @@ class SlimSkin(Skin):
                 self._yoff = self._vy = self._roff = self._vr = 0.0
                 self._burst(SPARK_WAKE, 1.2)
             return
-        if self._petting:  # 쓰다듬는 중 — 가만히 있는다
-            self._vy *= 0.7
-            self._yoff *= 0.85
+        if self._pressed:  # 눌리는 중 — 제자리에서 점점 납작해진다
+            self._press = min(1.0, self._press + 1.0 / PRESS_FRAMES)
+            self._vy *= 0.6
+            self._yoff *= 0.8
         self._vy += -SPRING_K * self._yoff
         self._vy *= 1 - SPRING_DAMP
         # 창 밖으로 안 튀게 — 도트 그림 높이를 빼고 남는 만큼만 올라간다
@@ -951,8 +923,11 @@ class SlimSkin(Skin):
         # 표정과 팔 — 콕 찔리면 놀라 만세, 출렁이면 눈웃음, 기지개도 만세
         front = ball = None
         legs = LEGS
-        if self._petting:  # 쓰다듬는 중 — 눈웃음 짓고 가만히 (하트는 따로 떠오른다)
-            expr, arms = "grin", (1, 1)
+        if self._pressed:  # 눌리는 중 — 눈을 질끈 감고 납작해진다
+            expr, arms = "blink", (0, 0)
+            sxk *= 1 + PRESS_FLAT * 0.75 * self._press
+            syk *= 1 - PRESS_FLAT * self._press
+            cy += 3.2 * self._press
         elif self._running > 0:  # 달려오는 중 — 발을 바꿔 가며 (놀란 눈은 아래에서)
             expr = "surprise" if self._surprise > 0 else "grin"
             arms = (-1, 0) if (self._running // RUN_BEAT) % 2 == 0 else (0, -1)
@@ -966,7 +941,7 @@ class SlimSkin(Skin):
             expr = "grin"
             arms = (-1 if up else 0, 0) if self._wave_dir < 0 else (0, -1 if up else 0)
         elif self._act == "type":  # 노트북에 열중 — **옆으로 돌아앉아** 왼쪽 화면을 본다
-            expr, front = "side", LAPTOP
+            expr, front = "side", DESK
             # 옆모습이라 **가까운 팔 하나만** 그린다 (None = 안 그림)
             arms = ((1, None) if (self._act_left // TYPE_BEAT) % 2 == 0 else (0, None))
         elif self._act == "nap":  # 낮잠 — 눈 감고 팔을 늘어뜨린 채 크게 숨쉰다
@@ -1000,7 +975,6 @@ class SlimSkin(Skin):
                                fill=P.amber, width=0, tags="mascot")
         self._draw_sparks(c)
         self._draw_zzz(c)
-        self._draw_hearts(c)
 
     def _sprite(self, expr: str, arms: tuple[int | None, int | None],
                 legs: tuple[str, ...],
@@ -1053,18 +1027,11 @@ class SlimSkin(Skin):
         for col, row in EYES[expr]:
             cell(col + eye_dx, row, bg)
         if front is not None:
-            # 앞에 놓인 것(노트북) — **맨 마지막에** 그려 다리를 가린다.
-            # 몸통이 없는 친구라, 다리 앞을 막아 줘야 '앉아서 뭘 하는' 모습으로 읽힌다.
-            # 색은 몸과 달라야 하고(같은 코랄이면 덩어리로 보인다), 가운데 한 줄은
-            # 밝게 파야 '켜진 화면'으로 읽힌다.
-            # ★ 노트북은 **기울이지 않는다**(tilt=0) — 책상 위 물건이라 고개를 따라
-            #   같이 기울면 통째로 미끄러진 것처럼 보인다.
-            paint(front, LAPTOP_Y, P.label, 0.0, LAPTOP_X)
-            # 화면은 **테두리와 가장 대비되는 색**(P.title)이다 — 어두운 테마에선 흰 화면,
-            # 밝은 테마에선 검은 화면이 되어 둘 다 '화면'으로 읽힌다.
-            # ★ 바탕색(P.bg)으로 파면 쐐기가 속 빈 삼각형이 되고, 호박색은 노래서 안 어울린다.
-            for col, row in LAPTOP_LIT:
-                cell(col, LAPTOP_Y + row, P.title, 1, 0.0, LAPTOP_X)
+            # 앞에 놓인 것(책상) — **맨 마지막에** 그린다.
+            # 색은 몸과 달라야 한다 (같은 코랄이면 몸에 붙은 덩어리로 보인다).
+            # ★ 앞에 놓인 것은 **기울이지 않는다**(tilt=0) — 바닥에 놓인 물건이라
+            #   고개를 따라 같이 기울면 통째로 미끄러진 것처럼 보인다.
+            paint(front, DESK_Y, P.label, 0.0, DESK_X)
 
     def _draw_sparks(self, c: tk.Canvas) -> None:
         """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
@@ -1077,18 +1044,6 @@ class SlimSkin(Skin):
                 x, y = sx + dx * u, sy + dy * u
                 c.create_rectangle(x - u / 2, y - u / 2, x + u / 2, y + u / 2,
                                    fill=MASCOT_COLOR, width=0, tags="mascot")
-
-    def _draw_hearts(self, c: tk.Canvas) -> None:
-        """쓰다듬을 때 떠오르는 하트 — 몸 색 그대로라 이 친구 것으로 읽힌다."""
-        for hx, hy, life in self._hearts:
-            u = MASCOT_U * (0.55 + 0.35 * (life / PET_LIFE))
-            for r, line in enumerate(PET_HEART):
-                for col, ch in enumerate(line):
-                    if ch != "#":
-                        continue
-                    x, y = hx + col * u, hy + r * u
-                    c.create_rectangle(x, y, x + u, y + u,
-                                       fill=MASCOT_COLOR, width=0, tags="mascot")
 
     def _draw_zzz(self, c: tk.Canvas) -> None:
         """낮잠 z — 머리 위로 비스듬히 떠오른다. 도트 3×3 이라 이 크기에서도 z 로 읽힌다."""
