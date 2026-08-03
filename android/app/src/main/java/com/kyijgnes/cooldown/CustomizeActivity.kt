@@ -201,7 +201,7 @@ class CustomizeActivity : Activity() {
                 movingMascot = WallpaperArt.hitsMascot(w, h, draft, mascot, x, y)
                 movingMeter = !movingMascot && WallpaperArt.hitsMeter(w, h, draft, x, y)
                 moved = false
-                if (movingMascot) mascot.press()   // 누른 채로 있으면 기를 모은다
+                if (movingMascot) mascot.press()   // 누르는 순간 반응한다(꾹 누르면 눌린다)
             }
 
             MotionEvent.ACTION_MOVE -> {
@@ -222,7 +222,7 @@ class CustomizeActivity : Activity() {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // 끌지 않았으면 여기서도 배경화면과 똑같이 논다 (콕 / 기 모아 뛰기)
+                // 끌지 않았으면 여기서도 배경화면과 똑같이 논다 (콕 / 박자 콤보 / 꾹 누르기)
                 if (movingMascot) if (moved) mascot.cancel() else mascot.release()
                 preview.parent?.requestDisallowInterceptTouchEvent(false)
             }

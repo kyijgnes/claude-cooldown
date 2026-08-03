@@ -3,7 +3,10 @@ package com.kyijgnes.cooldown
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
+import com.kyijgnes.cooldown.wallpaper.Mascot
 import com.kyijgnes.cooldown.wallpaper.WallpaperArt
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -26,6 +29,8 @@ class RenderPreviewTest {
 
     private val out = File("build/미리보기").apply { mkdirs() }
     private val now = 1_753_800_000_000L  // 고정 시각 — 그림이 매번 같게
+    private val W = 1080f                 // FHD+ 세로 (배경화면 그림 기준)
+    private val H = 2340f
 
     private fun snap(five: Float?, week: Float?, stale: Boolean = false) = Snapshot(
         five = Limit("5시간", five, now + 2 * 3600_000L + 7 * 60_000L),
@@ -42,10 +47,23 @@ class RenderPreviewTest {
     private fun wallpaper(
         ctx: android.content.Context, name: String,
         look: Look.Values = Look.DEFAULT, at: Long = now,
+        mascot: Mascot = Mascot(),
     ) {
         val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
-        WallpaperArt.render(ctx, Canvas(bmp), snap(37f, 62f), at, look, com.kyijgnes.cooldown.wallpaper.Mascot())
+        WallpaperArt.render(ctx, Canvas(bmp), snap(37f, 62f), at, look, mascot)
         save(bmp, "$name.png")
+    }
+
+    /**
+     * 클로디가 **딴짓·기절처럼 어쩌다 나오는 장면**에 있을 때의 그림.
+     * 그냥 렌더하면 늘 가만히 서 있는 한 장만 나와서, 장면을 세우고 몇 프레임 굴려 잡는다.
+     */
+    private fun claudi(ctx: android.content.Context, name: String, pose: String, frames: Int) {
+        val m = Mascot()
+        m.poseForPreview(pose)
+        val u = WallpaperArt.mascotCell(W)
+        repeat(frames) { m.step(Look.DEFAULT.mascotX * W, Look.DEFAULT.mascotY * H, u, W, H) }
+        wallpaper(ctx, name, mascot = m)
     }
 
     @Test
@@ -78,6 +96,14 @@ class RenderPreviewTest {
         // 라이브 배경화면 (FHD+ 세로) — 클로디가 있는 판과 없는 판 (클로디는 눌러서 논다)
         wallpaper(ctx, "배경화면")
         wallpaper(ctx, "배경화면_클로디없음", look = Look.DEFAULT.copy(mascot = false))
+
+        // 클로디가 어쩌다 하는 것들 — 오래 안 건드리면 나오는 딴짓과 기절.
+        // 데스크탑 위젯과 같은 장면이라, 여기 그림으로 **폰에서도 같은 친구인지** 본다.
+        claudi(ctx, "클로디_노트북", "type", 8)      // 옆으로 돌아앉아 두드린다
+        claudi(ctx, "클로디_낮잠", "nap", 45)         // 눈 감고 z 를 띄운다
+        claudi(ctx, "클로디_공놀이", "ball", 9)       // 공이 손을 떠나 있는 순간
+        claudi(ctx, "클로디_기절", "faint", 6)        // X_X + 별이 뱅뱅
+        claudi(ctx, "클로디_자리비움", "away", 1)     // 화면 아래로 내려가는 중
 
         // 꾸미기 — 고를 수 있는 것들을 한 장씩 (CustomizeActivity 의 선택지와 같은 순서)
         wallpaper(ctx, "꾸미기_링", look = Look.DEFAULT.copy(meter = Look.RINGS))
@@ -187,6 +213,44 @@ class RenderPreviewTest {
             )
             assert(bmp.byteCount < limit) { "${wDp}x$hDp → ${bmp.byteCount} 바이트" }
         }
+    }
+
+    /**
+     * 클로디와 노는 규칙(데스크탑과 같은 것) — **박자를 맞히면 단이 오르고 안 지치지만,
+     * 마구 두드리면 콤보가 아니라 기절에 먼저 닿는다.** 둘 중 하나만 어긋나도 놀이가 무너진다.
+     */
+    @Test
+    fun `박자를 맞히면 단이 오르고 마구 두드리면 뻗는다`() {
+        val u = WallpaperArt.mascotCell(W)
+        val cx = Look.DEFAULT.mascotX * W
+        val cy = Look.DEFAULT.mascotY * H
+
+        // 통통 튀다 바닥에 멎는 박자(약 14프레임 = 0.47초)에 맞춰 — 13번 맞히면 5단·폭죽.
+        // 첫 한 방은 제자리에서 치는 것이라 박자로 안 쳐 주므로 몇 번 넉넉히 둔다.
+        val onBeat = Mascot()
+        var sawTier = 0
+        var sawFinale = false
+        repeat(16) {
+            onBeat.press()
+            onBeat.release()
+            repeat(14) { onBeat.step(cx, cy, u, W, H) }
+            sawTier = maxOf(sawTier, onBeat.debug().combo)
+            sawFinale = sawFinale || onBeat.debug().finale
+        }
+        assertEquals(5, sawTier)
+        assertTrue("완주하면 축하 폭죽이 터져야 한다", sawFinale)
+        assertFalse("박자대로 놀면 안 지친다", onBeat.debug().fainted)
+
+        // 마구 두드리기 — 2초 안에 뻗는다
+        val mash = Mascot()
+        var fainted = false
+        repeat(30) {
+            mash.press()
+            mash.release()
+            repeat(2) { mash.step(cx, cy, u, W, H) }
+            fainted = fainted || mash.debug().fainted
+        }
+        assertTrue("마구 두드리면 기절한다", fainted)
     }
 
     @Test

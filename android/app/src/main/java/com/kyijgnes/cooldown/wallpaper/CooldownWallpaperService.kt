@@ -40,14 +40,15 @@ class CooldownWallpaperService : WallpaperService() {
             setTouchEventsEnabled(true)
         }
 
-        /** 클로디를 짚고 있는 중인가 — 누른 채로 기를 모으다가 떼면 뛴다. */
+        /** 클로디를 짚고 있는 중인가 — 누른 채로 있으면 납작해지고 떼면 튕겨 오른다. */
         private var holding = false
 
         /**
          * 빈 곳을 눌렀을 때만 온다(아이콘·위젯 위는 그쪽이 먹는다).
-         * **누르면 기를 모으고 떼면 뛴다** — 짧게 누르면 그냥 콕 찌른 것이다.
-         * ★ 런처가 길게 누르기를 자기 메뉴로 채 가면 UP 이 안 올 수 있어, 그때는
-         *   `onVisibilityChanged(false)` 에서 물린다(아래).
+         * ★ **반응은 누르는 순간 난다**(떼기를 기다리지 않는다) — 박자 콤보가 손끝과
+         *   맞아야 하고, 런처가 길게 누르기를 자기 메뉴로 채 가면 UP 이 아예 안 오기 때문.
+         *   그대로 누르고 있으면 눌려서 납작해지고, 떼면 눌린 만큼 튕겨 오른다.
+         *   UP 이 안 오는 경우는 `onVisibilityChanged(false)` 에서 물린다(아래).
          */
         override fun onTouchEvent(event: android.view.MotionEvent) {
             if (lastW <= 0f) return
@@ -74,7 +75,7 @@ class CooldownWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             showing = visible
             if (visible) {
-                mascot.rest()          // 오래 안 보다 왔다 — 지친 건 잊는다
+                mascot.rest()          // 오래 안 보다 왔다 — 지친 것도 하던 딴짓도 잊는다
                 drawFrame()
             } else {
                 if (holding) { holding = false; mascot.cancel() }   // 런처 메뉴가 채 갔다

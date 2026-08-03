@@ -22,7 +22,21 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "pc", "windows"))
 sys.path.insert(0, os.path.join(ROOT, "pc"))
 
-from skins.slim import ARM, EYES, HEAD, LEGS, LEGS_WIDE, MASCOT_COLOR  # noqa: E402
+from skins.slim import (  # noqa: E402
+    ARM,
+    EYES,
+    HEAD,
+    LAP_BASE,
+    LAP_LID,
+    LEGS,
+    LEGS_RUN,
+    LEGS_WIDE,
+    MASCOT_COLOR,
+    MASCOT_U,
+    NAP_Z,
+    TYPE_ARM,
+    TYPE_SHIFT,
+)
 
 OUT = os.path.join(ROOT, "android", "app", "src", "main", "res", "drawable", "ic_claudi.xml")
 OUT_KT = os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "kyijgnes",
@@ -123,6 +137,12 @@ def kt_cells(cells) -> str:
     return ", ".join("%d, %d" % (c, r) for c, r in cells)
 
 
+def kt_cellsf(cells) -> str:
+    """px 로 적힌 자리를 **칸 단위**로 옮긴다 — 폰은 칸 크기가 화면마다 달라서
+    px 를 그대로 쓰면 작은 화면에선 노트북만 커진다."""
+    return ", ".join("%gf" % (v / MASCOT_U) for v in cells)
+
+
 def write_kotlin() -> None:
     """배경화면 마스코트가 쓸 같은 표를 코틀린으로도 뽑는다 — PC·폰이 안 어긋나게."""
     eyes = "\n".join(
@@ -131,8 +151,13 @@ def write_kotlin() -> None:
     arms = "\n".join(
         "        %d to intArrayOf(%s)," % (k, kt_cells(v)) for k, v in sorted(ARM.items())
     )
+    type_arm = "\n".join("        intArrayOf(%s)," % kt_cells(pose) for pose in TYPE_ARM)
+    lid = kt_cellsf([v for point in LAP_LID for v in point])
     kt = KT_TEMPLATE.format(
-        head=kt_rows(HEAD), legs=kt_rows(LEGS), legs_wide=kt_rows(LEGS_WIDE), arms=arms, eyes=eyes,
+        head=kt_rows(HEAD), legs=kt_rows(LEGS), legs_wide=kt_rows(LEGS_WIDE),
+        legs_run=kt_rows(LEGS_RUN), nap_z=kt_rows(NAP_Z), arms=arms, eyes=eyes,
+        type_arm=type_arm, lap_base=kt_cellsf(LAP_BASE), lap_lid=lid,
+        type_shift="%gf" % (TYPE_SHIFT / MASCOT_U),
         last_head=len(HEAD) - 1, leg_row=len(HEAD), foot_row=len(HEAD) + 1,
     )
     with open(OUT_KT, "w", encoding="utf-8") as f:
@@ -164,6 +189,11 @@ object MascotSprite {{
         {legs_wide},
     )
 
+    /** 달려올 때 — 다리가 모였다. 평소 다리(`LEGS`)와 번갈아 쓰면 발을 바꾸는 것으로 보인다. */
+    val LEGS_RUN = arrayOf(
+        {legs_run},
+    )
+
     /** 팔 한 칸의 자리 — **왼팔 기준**, 오른팔은 `8 - col` 로 뒤집어 쓴다. -1 번쩍 / 0 옆 / 1 늘어뜨림 */
     val ARM = mapOf(
 {arms}
@@ -173,6 +203,34 @@ object MascotSprite {{
     val EYES = mapOf(
 {eyes}
     )
+
+    /**
+     * 노트북을 두드리는 **길게 뻗은 팔** 두 자세 (col, row 가 번갈아). 번갈아 그리면
+     * 손이 오르내린다. 기본 팔(`ARM`)은 한 칸뿐이라 노트북에 안 닿는다.
+     */
+    val TYPE_ARM = arrayOf(
+{type_arm}
+    )
+
+    /**
+     * 낮잠 z — ★ **3×3 으로 줄이지 말 것.** 가운데 칸이 정확히 한가운데라 대각선이
+     * 안 보여 I(工)로 읽힌다. 4×4 라야 z 가 된다(데스크탑에서 실제로 겪고 고쳤다).
+     */
+    val NAP_Z = arrayOf(
+        {nap_z},
+    )
+
+    // ── 노트북 (몸 한가운데 기준 **칸 단위**) ──
+    // ★★ 이것만은 도트 격자를 안 쓴다 — 그 해상도로는 무슨 모양을 해도 판때기였다.
+    //    **다각형 둘(왼쪽으로 기운 덮개 + 오른쪽으로 뻗는 얇은 받침)** 이면 바로 노트북이 된다.
+    /** 받침(키보드) — 왼쪽 x, 윗 y, 오른쪽 x, 아랫 y */
+    val LAP_BASE = floatArrayOf({lap_base})
+
+    /** 덮개 — 위가 왼쪽으로 기운 평행사변형 (x, y 가 번갈아) */
+    val LAP_LID = floatArrayOf({lap_lid})
+
+    /** 노트북까지 한 그림이 되게 몸을 오른쪽으로 물리는 양 (칸) */
+    const val TYPE_SHIFT = {type_shift}
 
     const val COLS = 9
     val ROWS = HEAD.size + LEGS.size

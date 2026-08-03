@@ -62,10 +62,14 @@ object WallpaperArt {
 
         drawMeter(ctx, c, w, h, snap, now, p, look)
 
-        // ★ 클로디는 **미터기 판 위에** 그린다 — 판 안쪽에 앉혀 두므로 뒤로 가면 가려진다
+        // ★ 클로디는 **미터기 판 위에** 그린다 — 판 안쪽에 앉혀 두므로 뒤로 가면 가려진다.
+        //   자리 비움·축하 폭죽이 화면 크기를 알아야 해서 `step` 에도 그릴 자리를 넘긴다.
         if (look.mascot && mascot != null) {
-            mascot.step()
-            mascot.draw(c, look.mascotX * w, look.mascotY * h, mascotCell(w), p.coral, p.bg, p.amber)
+            val cx = look.mascotX * w
+            val cy = look.mascotY * h
+            val u = mascotCell(w)
+            mascot.step(cx, cy, u, w, h)
+            mascot.draw(c, cx, cy, u, p.coral, p.bg, p.amber, p.label)
         }
     }
 
