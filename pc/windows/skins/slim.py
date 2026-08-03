@@ -67,14 +67,24 @@ MASCOT_U = 2    # 도트 한 칸 (px). 팔까지 가로 11칸(22px) · 세로 8�
 MASCOT_COLOR = "#d97757"  # 클로드 코랄 — 밝게/어둡게 양쪽에서 그대로 쓴다
 # **박자 맞히기** — 통통 튀다 **가장 아래로 내려앉는 순간** 콕 찌르면 박자가 맞은 것이다.
 # 이어 갈수록 콤보가 쌓여 더 높이 뛰고 반짝이도 화려해진다. 박자를 놓치면 처음부터.
-BEAT_AT = 1.5         # 제자리보다 이만큼 아래(px)로 내려갔을 때 치면 박자가 맞은 것
-BEAT_WINDOW = 60      # 이 프레임 안에 다시 맞혀야 콤보가 이어진다
-COMBO_MAX = 8
+# ★ **깐깐하게 잡는다** — 튀는 한 주기(약 13프레임)에서 **바닥에 멎는 3프레임**(≈0.14초)
+#   만 인정한다. 아래로 충분히 내려갔고(`BEAT_AT`) 그 자리에서 거의 멎어 있을 때
+#   (`|vy| <= BEAT_V`). 아무 때나 쳐도 되면 도전하는 맛이 없다.
+BEAT_AT = 4.5         # 제자리보다 이만큼 아래(px)까지 내려가야
+BEAT_V = 1.7          # 그 자리에서 이만큼 느려야 (되돌아 오르는 꼭짓점)
+BEAT_WINDOW = 20      # 이 프레임 안에 다시 맞혀야 이어진다 — 늦으면 끊긴다
+COMBO_MAX = 5         # 5단
 COMBO_JUMP = 0.45     # 콤보 한 번마다 조금 더 높이 (상한 MAX_VY 에 걸린다)
-# 콤보의 진짜 상 — 일정 콤보부터 **공중제비를 돌며 반짝이 꼬리**를 남긴다.
-FLIP_AT = 2           # 이 콤보부터 돈다
-FLIP_FRAMES = 10      # 한 바퀴 도는 데 걸리는 프레임 (튀는 주기와 맞춤)
-FLIP_TRAIL = 2        # 도는 동안 이 프레임마다 반짝이 하나씩 흘린다
+# **콤보 단마다 다른 재주.** 높이가 아니라 이 재주가 콤보의 상이다.
+#   1단 반짝이만 · 2단 앞구르기 · 3단 두 바퀴 · 4단 팽이돌기 · 5단 둘 다 + 폭죽
+# (프레임 수, 세로 회전 바퀴, 가로 회전 바퀴)
+TRICKS = {
+    2: (13, 1, 0),
+    3: (16, 2, 0),
+    4: (14, 0, 2),
+    5: (18, 2, 2),
+}
+TRICK_TRAIL = 2       # 재주 부리는 동안 이 프레임마다 반짝이 하나씩 흘린다
 FRAME_MS = 45  # 애니메이션 한 프레임 (약 22fps — 물리가 부드럽게 이어지게)
 # 눌림 반응은 용수철처럼 — 누를 때마다 위로 튀는 '속도'를 더한다. 연타하면 힘이
 # 쌓여 자연스럽게 출렁이고(뚝 끊기지 않고), 너무 많이 치면 기절한다.
@@ -108,7 +118,7 @@ SPRING_DAMP = 0.14    # 감쇠 (0=계속 튐, 1=즉시 멈춤)
 # 직접 콕 찌른 게 이만큼 쌓여야 기절 (딴 데 클릭은 안 쌓임). 한 번에 +2, 매 프레임
 # CLICK_DECAY 만큼 식으므로 **초당 1.3번보다 빠르게** 계속 찔러야 는다.
 # ★ 어쩌다 기절하면 놀라니까 높게 잡는다 — 작정하고 두드려야 뻗는다(약 12초 연타).
-FAINT_AT = 40.0
+FAINT_AT = 46.0
 CLICK_DECAY = 0.12    # 눌림 누적이 프레임마다 이만큼 식는다
 FAINT_FRAMES = 60     # 기절 지속 (약 2.7초)
 # 기절 땐 조금 부풀려 X_X 눈이 보이게 한다. ★ 1.35 는 딴 친구가 나타난 것처럼 커 보였다 —
@@ -645,7 +655,9 @@ class SlimSkin(Skin):
         self._running = 0             # 달려오는 남은 프레임
         self._combo = 0               # 박자를 이어 맞힌 횟수
         self._beat_at = -999          # 마지막으로 박자를 맞힌 프레임
-        self._flip = 0                # 공중제비 남은 프레임
+        self._trick = 0               # 재주 남은 프레임
+        self._trick_len = 1            # 재주 전체 프레임
+        self._flip_n = self._spin_n = 0  # 세로·가로 회전 바퀴 수
         self._launch = 0              # 이 동안은 창 밖까지 날아가도 안 가둔다
         self._next_gesture = random.randint(20, 60)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
@@ -680,7 +692,8 @@ class SlimSkin(Skin):
         if x is not None and self._hit(x, y):  # 콕! — 크게 놀란다
             # **박자 맞히기** — 가장 아래로 내려앉은 순간에 치면 콤보가 쌓인다.
             # 놓치면 처음부터. 이어 갈수록 더 높이 뛰고 반짝이도 화려해진다.
-            on_beat = self._yoff >= BEAT_AT
+            # 바닥에 멎은 그 짧은 순간에만 박자가 맞은 것으로 친다
+            on_beat = self._yoff >= BEAT_AT and abs(self._vy) <= BEAT_V
             if on_beat and self._t - self._beat_at <= BEAT_WINDOW:
                 self._combo = min(COMBO_MAX, self._combo + 1)
             else:
@@ -688,12 +701,13 @@ class SlimSkin(Skin):
             self._beat_at = self._t
             self._boost(JUMP_IMPULSE * POKE_MULT + self._combo * COMBO_JUMP)
             self._surprise = SURPRISE_FRAMES
-            self._clicks += 2.0  # 직접 찌른 것만 지치게 한다
-            if self._combo:  # 박자를 맞혔다 — 콤보만큼 화려하게
+            # ★ **박자를 맞히면 덜 지친다.** 그래야 '너무 빠르게 마구 누르면 콤보가 아니라
+            #   기절에 먼저 닿는다' 가 된다 (박자대로면 식는 속도를 못 이겨 안 뻗는다).
+            self._clicks += 1.0 if self._combo else 2.4
+            if self._combo:  # 박자를 맞혔다 — 단마다 다른 재주
                 self._spark_cool = 0
-                self._burst(SPARK_POKE + self._combo * 2, 1.0 + self._combo * 0.16)
-                if self._combo >= FLIP_AT:  # 콤보가 붙으면 공중제비까지
-                    self._flip = FLIP_FRAMES
+                self._burst(SPARK_POKE + self._combo * 3, 1.0 + self._combo * 0.25)
+                self._begin_trick(self._combo)
             else:  # 아무 때나 친 것 — 발밑에 먼지만
                 self._burst(SPARK_DUST, 1.0, foot=True)
             if self._clicks >= FAINT_AT:  # 과부하 — 뻗는다
@@ -727,6 +741,23 @@ class SlimSkin(Skin):
             # 일부러 만든 순간이라 쿨다운과 무관하게 터뜨린다
             self._spark_cool = 0
             self._burst(SPARK_POKE + int(8 * press), 1.2 + press * 0.8)
+
+    def _begin_trick(self, combo: int) -> None:
+        """콤보 단에 맞는 재주를 시작한다. 1단은 반짝이뿐, 5단은 앞구르기+팽이돌기+폭죽."""
+        spec = TRICKS.get(combo)
+        if spec is None:
+            return
+        self._trick = self._trick_len = spec[0]
+        self._flip_n, self._spin_n = spec[1], spec[2]
+        if combo >= COMBO_MAX:  # 마지막 단 — 사방으로 크게 한 번 더
+            for _ in range(10):
+                a = random.uniform(0, math.tau)
+                self._sparks.append([
+                    self.mascot_cx + math.cos(a) * 4,
+                    self.h / 2 + self._yoff + math.sin(a) * 4,
+                    math.cos(a) * 0.9, math.sin(a) * 0.7 - 0.2,
+                    SPARK_LIFE * random.uniform(0.7, 1.0),
+                ])
 
     def _boost(self, power: float, launch: bool = False) -> None:
         """위로 튀어오르게 한다. `launch` 면 잠시 **창 밖으로** 나가도록 가둠을 푼다 —
@@ -840,9 +871,9 @@ class SlimSkin(Skin):
             self._clicks = max(0.0, self._clicks - CLICK_DECAY)
         if self._combo and self._t - self._beat_at > BEAT_WINDOW:
             self._combo = 0   # 박자가 끊겼다
-        if self._flip > 0:  # 공중제비 — 도는 동안 반짝이 꼬리를 흘린다
-            self._flip -= 1
-            if self._flip % FLIP_TRAIL == 0:
+        if self._trick > 0:  # 재주 — 부리는 동안 반짝이 꼬리를 흘린다
+            self._trick -= 1
+            if self._trick % TRICK_TRAIL == 0:
                 self._sparks.append([
                     self.mascot_cx + random.uniform(-4, 4),
                     self.h / 2 + self._yoff + random.uniform(-4, 4),
@@ -977,10 +1008,14 @@ class SlimSkin(Skin):
         squash = max(SQUASH_MIN, min(SQUASH_MAX, -self._vy * SQUASH))
         sxk *= 1 - squash * 0.55
         syk *= 1 + squash
-        # 공중제비 — 가로축을 중심으로 한 바퀴. `syk` 를 음수까지 돌리면 도트를 그대로
-        # 뒤집어 그리므로(=`uy` 가 음수) 획이 안 뭉개진다.
-        if self._flip > 0:
-            syk *= math.cos((1 - self._flip / FLIP_FRAMES) * math.tau)
+        # 재주 — 앞구르기(세로 회전)와 팽이돌기(가로 회전). `syk`/`sxk` 를 음수까지 돌리면
+        # 도트를 그대로 뒤집어 그리므로(=`uy`/`ux` 가 음수) 획이 안 뭉개진다.
+        if self._trick > 0:
+            pr = (1 - self._trick / self._trick_len) * math.tau
+            if self._flip_n:
+                syk *= math.cos(pr * self._flip_n)
+            if self._spin_n:
+                sxk *= math.cos(pr * self._spin_n)
         spring_scale = 1.0 + max(0.0, -self._yoff) * 0.02  # 위로 뜰수록 살짝 커짐
         # 낮잠 중엔 더 크고 느리게 숨쉰다
         breathe = (1 + 0.10 * math.sin(t * 0.05)) if self._act == "nap" else (
