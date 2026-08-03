@@ -60,9 +60,16 @@ class Mascot {
     private var quiet = 0            // 마지막 반응 뒤 흐른 프레임 (딴짓 중에는 안 센다)
     private var act = ""             // "" / "type"(노트북) / "nap"(낮잠) / "ball"(공 놀이)
     private var actLeft = 0
+    // ★★ **딴짓은 곧바로 지우지 않는다 — 접는 동안(`ACT_EXIT`)을 둔다.** 한 프레임에
+    //   갈아 끼우면 몸이 옆으로 튀고 노트북·공이 허공에서 사라진다(데스크탑에서 겪은 것).
+    private var exit = 0             // 접는 중인 남은 프레임
+    private var exitAct = ""         // 접는 중인 것이 무엇이었나 (소품을 치워야 한다)
+    private var ballAt = floatArrayOf(0f, 0f)   // 공이 마지막으로 있던 자리 (px)
     private var away = 0
     private var awayTotal = 0
-    private var rise = SINK_FRAMES   // 올라오는 데 걸리는 프레임 (부르면 RUSH_BACK 로 줄인다)
+    // 올라오는 데 걸리는 프레임. **실수다** — 부르면 '지금 내려가 있는 만큼'에서 잇느라
+    // RUSH_BACK / 지금sink 로 잡힌다(정수로 자르면 그 자리에서 튄다).
+    private var rise = SINK_FRAMES.toFloat()
     private var rushing = false      // 불려서 호다닥 올라오는 중인가
     private var runx = 0f            // 달려오는 중의 가로 어긋남 (칸, 0 이면 제자리)
     private var running = 0
@@ -86,7 +93,17 @@ class Mascot {
     private var trickLen = 1
     private var flipN = 0            // 세로 회전(앞구르기) 바퀴
     private var spinN = 0            // 가로 회전(팽이돌기) 바퀴
-    private var finale = 0           // 완주 축하 폭죽 남은 프레임
+    // 완주 축하 — **폭죽을 쏘는 동안(`finale`)이 아니라 반짝이가 다 사그라들 때까지(`party`)**
+    // 가 한 장면이다. `finale` 로만 재면 화면엔 폭죽이 한창인데 클로디만 먼저 평소로 돌아가
+    // 누르는 것에 반응한다(데스크탑에서 실제로 그랬다).
+    private var finale = 0           // 폭죽을 **쏘는** 남은 프레임
+    private var party = false        // 축하가 흐르는 중 (폭죽 + 사그라드는 꼬리까지)
+    private val shells = ArrayList<Shell>()   // 쏘아 올린 폭죽
+    private var shot = 0             // 쏘고 나서 팔을 든 채 늘어나 있는 프레임
+    private var hopIn = 0            // 다음 폴짝(=쏘는 박자)까지 남은 프레임
+    private var popSide = -1         // 파티 폭죽을 든 손 (겨누는 쪽)
+    private var popMouth = floatArrayOf(0f, 0f)   // 그 크래커 입 자리(칸) — 알은 여기서 나간다
+    private var popDrop = 0          // 다 쏘고 크래커를 아래로 치우는 프레임
 
     /** 뿜은 반짝이. 자리는 **몸 한가운데 기준 칸**이다. */
     private val sparks = ArrayList<Spark>()
@@ -99,10 +116,20 @@ class Mascot {
     private var edgeT = -20f
     private var edgeB = 20f
 
+    // 마지막으로 그린 자리(px) — 크래커 입처럼 **px 로 셈한 것을 다시 칸으로** 옮길 때 쓴다
+    private var lastCx = 0f
+    private var lastCy = 0f
+
     /** 반짝이 한 알. 색은 **번호로만** 들고 있다 — 팔레트는 그리는 쪽에만 있다. */
     private class Spark(
         var x: Float, var y: Float, var vx: Float, var vy: Float,
         var life: Float, val born: Float, val ink: Int,
+    )
+
+    /** 쏘아 올린 폭죽 한 알 — 자리에 닿으면 거기서 터진다. 자리는 칸. */
+    private class Shell(
+        var x: Float, var y: Float, val vx: Float, val vy: Float,
+        var left: Int, val ink: Int,
     )
 
     /**
@@ -124,6 +151,7 @@ class Mascot {
     /** 용수철 한 걸음. 눌림으로 생긴 속도를 제자리(0)로 부드럽게 당긴다. */
     private fun stepPhysics() {
         stepFloaters()
+        if (exit > 0) exit--                   // 하던 딴짓을 접는 중 (기절해도 흘러야 끝난다)
         if (faint > 0) {                       // 기절 — 늘어졌다가 깨어난다
             faint--
             vy *= 0.8f; yoff *= 0.85f
@@ -160,9 +188,22 @@ class Mascot {
         if (surprise > 0) surprise--
         if (clicks > 0f) clicks = max(0f, clicks - CLICK_DECAY)
         if (combo > 0 && t - beatAt > BEAT_WINDOW) { combo = 0; beats = 0 }   // 박자가 끊겼다
-        if (finale > 0) {                      // 완주 축하 — 화면 전체에 폭죽이 이어진다
-            finale--
-            if (finale % FINALE_EVERY == 0) firework()
+        if (party) {                           // 완주 축하 — 크래커를 뻥, 다 사그라들 때까지
+            if (finale > 0) finale--
+            else if (sparks.isEmpty() && shells.isEmpty()) party = false   // 이제 축하 끝
+            if (shot > 0) shot--
+            if (hopIn <= 0) {                  // 한 박자 — 웅크렸다 폴짝 뛰며 뻥
+                hopIn = FINALE_HOP
+                boost(JUMP * FINALE_POP)
+                if (finale > 0) {
+                    shot = SHOT_FRAMES
+                    repeat(rndInt(SHELL_SHOTS_MIN, SHELL_SHOTS_MAX + 1)) { shoot() }
+                    aim()                      // 다음 박자에 겨눌 쪽 (미리 그쪽으로 들고 있게)
+                }
+            }
+            hopIn--
+            if (finale <= 0 && popDrop < POP_DROP) popDrop++   // 크래커를 아래로 치운다
+            stepShells()
         }
         if (trick > 0) {                       // 재주 — 부리는 동안 반짝이 꼬리를 흘린다
             trick--
@@ -206,7 +247,7 @@ class Mascot {
             if (wave > 0) wave--
             if (away == 0 && rushing) {        // 불려서 올라왔다 — 허둥지둥 달려온다
                 rushing = false
-                rise = SINK_FRAMES
+                rise = SINK_FRAMES.toFloat()
                 runx = -RUN_DIST
                 running = RUN_FRAMES
                 surprise = SURPRISE_FRAMES * 5
@@ -219,7 +260,7 @@ class Mascot {
                 zzz.add(floatArrayOf(1.5f, -4.5f, NAP_LIFE))
             }
             if (actLeft <= 0) {
-                act = ""
+                endAct()    // 혼자 끝날 때도 접는 동안을 거친다 (누른 것과 같은 결)
                 quiet = 0   // 하나가 끝나자마자 다음 것이 이어지지 않게 되감는다
             }
             return
@@ -230,7 +271,8 @@ class Mascot {
         if (tilt > 0) tilt--
         if (stretch > 0) stretch--
         if (wave > 0) wave--
-        val busy = blink > 0 || look > 0 || tilt > 0 || stretch > 0 || wave > 0
+        val busy = blink > 0 || look > 0 || tilt > 0 || stretch > 0 || wave > 0 ||
+            exit > 0 || party
         val moving = abs(vy) + abs(yoff) > 0.5f
         if (quiet > DEEP_IDLE && !busy && !moving && !touching) {
             beginAbsorbed()
@@ -268,7 +310,7 @@ class Mascot {
             pick < 7 -> startAct("nap")
             pick < 10 -> startAct("ball")
             else -> {                          // 손 한 번 흔들고 아래로 쏙 내려갔다 돌아온다
-                rise = SINK_FRAMES
+                rise = SINK_FRAMES.toFloat()
                 rushing = false
                 awayTotal = AWAY_LEAD + rndInt(AWAY_MIN, AWAY_MAX)
                 away = awayTotal
@@ -280,6 +322,18 @@ class Mascot {
     private fun startAct(name: String) {
         act = name
         actLeft = rndInt(ACT_MIN, ACT_MAX)
+    }
+
+    /**
+     * 딴짓을 **접는 동안**을 둔다 — 곧바로 지우면 자세도 소품도 한 프레임에 갈려 튄다
+     * (노트북 두드리다 누르면 몸이 옆으로 뛰고 노트북이 사라졌다).
+     * `exit` 가 도는 동안 `draw` 가 몸을 제자리로 되돌리며 소품을 치운다.
+     */
+    private fun endAct() {
+        if (act.isEmpty()) return
+        exitAct = act
+        exit = ACT_EXIT
+        act = ""
     }
 
     /** 자리 비움에서 얼마나 내려가 있나 (0=제자리, 1=화면 아래로 완전히). */
@@ -300,19 +354,30 @@ class Mascot {
      */
     fun press() {
         quiet = 0
-        act = ""
-        zzz.clear()
+        endAct()          // 하던 딴짓은 곧바로 지우지 않고 접는다 (한 프레임에 안 갈리게)
         touching = true
         holdF = 0
         if (away > 0) {
-            // 자리를 비웠는데 불렀다 — **호다닥 올라와서 허둥지둥**한다
-            rise = RUSH_BACK
-            away = min(away, RUSH_BACK)
-            rushing = true
+            // 자리를 비웠는데 불렀다 — **호다닥 올라와서 허둥지둥**한다.
+            // ★★ **달려오는 연출은 완전히 숨었을 때만 시작한다.** 보이는 채로 왼쪽에 옮겨
+            //   놓으면 그 순간 옆으로 순간이동한다 — '올라오다 갑자기 왼쪽에서 튀어나오는'
+            //   것이 그것이었다. 안 보이는 동안 미리 옮겨 두면 한 동작으로 이어진다.
+            val now = sinkAmount()
+            if (!rushing) {
+                rushing = now >= 1f
+                if (rushing) runx = -RUN_DIST
+            }
+            // ★ 올라오기는 **지금 내려가 있는 만큼**에서 잇는다 — `away` 만 갈아 끼우면
+            //   내려가는 도중에 부른 경우 아래로 뚝 떨어졌다가 올라온다.
+            away = RUSH_BACK
+            rise = RUSH_BACK / max(now, 0.001f)
             wave = 0
+            if (rushing) surprise = SURPRISE_FRAMES * 5
             return
         }
-        if (faint > 0) return
+        // 기절했거나 **완주 축하가 흐르는 동안은 안 받는다** — 끼어들면 축하가 도로
+        // 반응 놀이가 된다. `finale`(쏘는 동안)이 아니라 `party`(폭죽이 다 질 때까지)다.
+        if (faint > 0 || party) return
 
         // **박자 맞히기** — 통통 튀다 **바닥에 멎는 그 순간**에만 맞은 것으로 친다.
         // 한 주기(약 18프레임)에 4프레임(≈0.13초)뿐이다 — 아무 때나 쳐도 되면 맛이 없다.
@@ -330,8 +395,14 @@ class Mascot {
             if (TIER_UP.contains(beats)) {     // 이 한 방으로 단이 올랐다 — 재주가 나온다
                 burst(SPARK_POKE + combo * 3, 1f + combo * 0.25f)
                 beginTrick(combo)
-                if (combo >= COMBO_MAX) {      // 완주 — 화면 전체에 축하 폭죽
+                if (combo >= COMBO_MAX) {      // 완주 — 크래커를 들고 축하 폭죽
                     finale = FINALE_FRAMES
+                    party = true
+                    popDrop = 0
+                    aim()
+                    // ★ 첫 발은 **한 프레임 뒤**다 — 크래커를 한 번 그려 봐야 입이
+                    //   어디인지 알고(`popMouth`), 거기서 알이 나간다.
+                    hopIn = 1
                     beats = 0
                     combo = 0
                 }
@@ -392,9 +463,16 @@ class Mascot {
         cancel()
         quiet = 0
         act = ""
+        exit = 0
         away = 0
+        rushing = false
         running = 0
         runx = 0f
+        party = false
+        finale = 0
+        shells.clear()
+        shot = 0
+        popDrop = 0
         zzz.clear()
     }
 
@@ -422,18 +500,68 @@ class Mascot {
     }
 
     /**
-     * 축하 폭죽 한 발 — **마스코트 자리가 아니라 화면 아무 데나** 터진다.
-     * (완주는 판 전체가 축하할 일이다)
+     * 이번 박자에 크래커를 겨누는 쪽을 고른다 — **넓은 쪽이 자주 걸리게.**
+     * (클로디가 화면 어디에 앉아 있느냐에 따라 한쪽이 좁다)
      */
-    private fun firework() {
-        val ink = intArrayOf(INK_BODY, INK_STAR, INK_PROP)[rndInt(0, 3)]
-        val fx = rnd(edgeL + 2f, edgeR - 2f)
-        val fy = rnd(edgeT + 3f, edgeB - 3f)
-        for (k in 0 until FINALE_PER) {
+    private fun aim() {
+        val left = max(1f, -edgeL)
+        val right = max(1f, edgeR)
+        popSide = if (rnd() < left / (left + right)) -1 else 1
+    }
+
+    /**
+     * **크래커 입에서 폭죽 한 알이 나간다.** 겨눈 쪽으로 쏘고, 날아간 알은
+     * `stepShells` 가 자리에 닿는 순간 터뜨린다.
+     *
+     * ★★ **'몇 프레임에 도착'으로 잡지 말 것** — 화면 끝까지가 수십 칸이라 몇 프레임이면
+     * 한 프레임에 제 몸을 몇 개씩 건너뛴다. 그걸 점 하나로 그리면 **아예 안 보인다**
+     * (데스크탑에서 '이펙트만 뜨고 물체가 안 나온다' 였다). **속도**로 잡고 그리는 것도
+     * 점이 아니라 **지나온 자리를 잇는 줄기**다(`drawShells`).
+     */
+    private fun shoot() {
+        val sx = popMouth[0]
+        val sy = popMouth[1]
+        val fx = if (popSide < 0) rnd(edgeL + 1f, min(-2f, edgeL + 2f))
+        else rnd(max(2f, edgeR - 2f), edgeR - 1f)
+        val fy = rnd(edgeT + 2f, -3f)          // 위쪽에서 터진다
+        val ink = FIREWORK_INKS[rndInt(0, FIREWORK_INKS.size)]
+        val dist = kotlin.math.hypot(fx - sx, fy - sy)
+        val fly = (dist / SHELL_SPEED).toInt().coerceIn(SHELL_MIN, SHELL_MAX)
+        shells.add(Shell(sx, sy, (fx - sx) / fly, (fy - sy) / fly, fly, ink))
+        // 뻥 — 입에서 색종이가 흩어진다 (터지는 건 저 위지만 쏜 자리도 티가 나야 한다)
+        for (k in 0 until POP_CONFETTI) {
+            val a = MascotSprite.POP_TILT + rnd(-0.55f, 0.55f)
+            val sp = rnd(0.18f, 0.42f)
+            sparks.add(spark(sx, sy, cos(a) * sp * popSide, sin(a) * sp,
+                SPARK_LIFE * rnd(0.4f, 0.7f), FIREWORK_INKS[rndInt(0, FIREWORK_INKS.size)]))
+        }
+    }
+
+    /** 쏘아 올린 알 한 걸음 — 꼬리를 흘리며 날아가다 자리에 닿으면 거기서 터진다. */
+    private fun stepShells() {
+        var i = 0
+        while (i < shells.size) {
+            val s = shells[i]
+            s.x += s.vx; s.y += s.vy; s.left--
+            sparks.add(spark(s.x, s.y, s.vx * 0.12f, s.vy * 0.12f + 0.02f,
+                SPARK_LIFE * SHELL_TRAIL, s.ink))
+            if (s.left <= 0) { pop(s.x, s.y, s.ink); shells.removeAt(i) } else i++
+        }
+    }
+
+    /**
+     * 쏘아 올린 알이 터진다 — 그 자리에서 사방으로 흩뿌린다.
+     * ★ **발마다 퍼지는 정도가 다르다** — 다 같으면 한 발을 복사해 놓은 것처럼 보인다.
+     */
+    private fun pop(fx: Float, fy: Float, ink: Int) {
+        val spread = rnd(FINALE_SPREAD_MIN, FINALE_SPREAD_MAX)
+        val core = if (rnd() < 0.5f) INK_STAR else ink
+        val n = rndInt(FINALE_PER_MIN, FINALE_PER_MAX + 1)
+        for (k in 0 until n) {
             val a = rnd(0f, TAU)
-            val r = rnd(0.17f, 0.34f)
+            val r = rnd(0.12f, 0.34f) * spread
             sparks.add(spark(fx, fy, cos(a) * r, sin(a) * r - 0.05f,
-                SPARK_LIFE * rnd(1.3f, 2.0f), ink))
+                SPARK_LIFE * rnd(1.3f, 2.0f), if (k % 4 == 0) core else ink))
         }
     }
 
@@ -496,12 +624,17 @@ class Mascot {
     fun draw(
         c: Canvas, cx: Float, cy: Float, u: Float,
         color: Int, bg: Int, star: Int = color, prop: Int = star,
+        green: Int = star, red: Int = color, glow: Int = star,
     ) {
+        lastCx = cx
+        lastCy = cy
         val body = Paint().apply { this.color = color }
         val hole = Paint().apply { this.color = bg }
-        // 반짝이 색은 셋뿐이라 붓도 셋만 만든다 — 알마다 만들면 30fps 에서 GC 가 쉴 틈이 없다
+        // 붓은 색 수만큼만 만든다 — 알마다 만들면 30fps 에서 GC 가 쉴 틈이 없다.
+        // 뒤 셋(초록·빨강·흰빛)은 **축하 폭죽 전용**이다(평소 반짝이는 몸 색뿐).
         val inks = arrayOf(body, Paint().apply { this.color = star },
-            Paint().apply { this.color = prop })
+            Paint().apply { this.color = prop }, Paint().apply { this.color = green },
+            Paint().apply { this.color = red }, Paint().apply { this.color = glow })
 
         if (faint > 0) {
             drawSprite(c, cx, cy + u, u * FAINT_SCALE, u * FAINT_SCALE,
@@ -565,20 +698,77 @@ class Mascot {
         var armL: Int?
         var armR: Int?
         var legs = MascotSprite.LEGS
-        var laptop = false
+        var lap: FloatArray? = null            // 노트북 자리 (몸과 따로 움직인다)
         var ball: FloatArray? = null
         var extra: IntArray? = null
+        var popper: FloatArray? = null         // 파티 폭죽 자리 [x, y]
         if (pressed) {                         // 눌리는 중 — 눈을 질끈 감고 납작해진다
             expr = "blink"; armL = 0; armR = 0
             sxk *= 1f + PRESS_FLAT * 0.75f * press
             syk *= 1f - PRESS_FLAT * press
             py += 1.6f * press * u
-        } else if (running > 0) {              // 달려오는 중 — 발을 바꿔 가며
+        } else if (running > 0 || rushing) {   // 달려오는 중 (불려서 올라오는 동안부터)
+            // ★ 발 박자는 `t` 로 센다 — **올라오는 중과 달리는 중이 같은 걸음으로 이어진다**
+            //   (`running` 으로 세면 땅에 닿는 순간 걸음이 처음으로 되감긴다).
             expr = if (surprise > 0) "surprise" else "grin"
-            val step = (running / RUN_BEAT) % 2 == 0
+            val step = (t / RUN_BEAT) % 2 == 0
             armL = if (step) -1 else 0
             armR = if (step) 0 else -1
             legs = if (step) MascotSprite.LEGS else MascotSprite.LEGS_RUN
+        } else if (exit > 0) {                 // 하던 걸 접고 돌아앉는 중 — 소품을 치운다
+            val k = exit / ACT_EXIT.toFloat()  // 1 → 0
+            sxk *= 1f - 0.5f * sin((1f - k) * PI)   // 가운데서 납작 = 돌아앉는 결
+            val done = if (surprise > 0) "surprise" else "idle"
+            when (exitAct) {
+                "type" -> {
+                    px += MascotSprite.TYPE_SHIFT * u * k   // 물렸던 몸이 제자리로
+                    expr = if (k > 0.5f) "side" else done
+                    armL = if (k > 0.5f) null else 0
+                    armR = armL
+                    extra = if (k > 0.5f) MascotSprite.TYPE_ARM[1] else null
+                    // 노트북은 몸을 안 따라간다 — 제자리에서 화면 밖으로 떨어진다
+                    lap = floatArrayOf(cx + MascotSprite.TYPE_SHIFT * u,
+                        py + (1f - k) * (1f - k) * (edgeB + MascotSprite.ROWS) * u)
+                }
+                "nap" -> {                     // 자다 깼다 — 눈을 뜨며 일어난다
+                    py += 0.75f * u * k
+                    expr = if (k > 0.5f) "blink" else done
+                    armL = if (k > 0.5f) 1 else 0
+                    armR = armL
+                }
+                else -> {                      // 공 놀이 — 던져 둔 공은 아래로 떨어져 나간다
+                    expr = done; armL = 0; armR = 0
+                    ball = floatArrayOf(ballAt[0],
+                        ballAt[1] + (1f - k) * (1f - k) * (edgeB + MascotSprite.ROWS) * u)
+                }
+            }
+        } else if (party) {                    // 완주 축하 — 크래커를 겨눴다 뻥, 폴짝, 만세
+            expr = "grin"
+            if (shot > 0) {                    // 막 터뜨렸다 — 팔을 든 채 몸이 늘고 밀린다
+                armL = -1; armR = -1
+                val s = shot / SHOT_FRAMES.toFloat()
+                syk *= 1f + SHOT_STRETCH * s
+                sxk *= 1f - SHOT_STRETCH * 0.4f * s
+                px -= popSide * POP_KICK * s * u
+            } else if (finale > 0 && hopIn <= SHOT_WIND) {   // 쏘기 직전 — 웅크린다
+                armL = 0; armR = 0
+                syk *= 1f - SHOT_CROUCH
+                sxk *= 1f + SHOT_CROUCH * 0.6f
+                py += 0.8f * u
+            } else {                           // 그 사이엔 뜬 동안만 만세
+                armL = if (yoff < -FINALE_CHEER) -1 else 0
+                armR = armL
+            }
+            // 크래커는 **겨눈 쪽 손**에 들려 있다. 팔이 오르내리면 같이 따라간다.
+            if (popDrop < POP_DROP) {
+                val row = if (armL == -1) 3 else 4
+                var hy = py + (row + 0.5f - 4f) * u * syk
+                if (popDrop > 0) {             // 다 쏘면 손에서 놓아 아래로 치운다
+                    val k = popDrop / POP_DROP.toFloat()
+                    hy += k * k * (edgeB + MascotSprite.ROWS) * u
+                }
+                popper = floatArrayOf(px + popSide * MascotSprite.POP_HAND * u * sxk, hy)
+            }
         } else if (surprise > 0) {
             expr = "surprise"; armL = -1; armR = -1
         } else if (speed > 0.6f) {
@@ -593,8 +783,8 @@ class Mascot {
             // 옆모습이라 기본 팔은 안 그리고(null), **노트북까지 뻗은 긴 팔**을 대신 그린다
             armL = null; armR = null
             extra = MascotSprite.TYPE_ARM[(actLeft / TYPE_BEAT) % 2]
-            laptop = true
             px += MascotSprite.TYPE_SHIFT * u  // 노트북까지 한 그림이 되게 몸을 오른쪽으로
+            lap = floatArrayOf(px, py)         // 접을 땐 몸만 돌아가고 이건 제자리에 남는다
         } else if (act == "nap") {             // 낮잠 — 눈 감고 팔을 늘어뜨린 채 크게 숨쉰다
             expr = "blink"; armL = 1; armR = 1
             py += 0.75f * u
@@ -604,6 +794,7 @@ class Mascot {
                 cx + sin(frac * TAU) * 2f * u,
                 py - 4.4f * u - sin(frac * PI) * BALL_H * u,
             )
+            ballAt = ball                      // 접을 때 공이 여기서부터 떨어진다
             val flying = frac > 0.12f && frac < 0.88f
             expr = if (flying) "grin" else "surprise"
             armL = if (flying) -1 else 0
@@ -618,13 +809,15 @@ class Mascot {
         }
 
         drawSprite(c, px, py, u * sxk, u * syk, lean, expr, armL, armR, legs, body, hole, extra, eyeDx)
-        if (laptop) drawLaptop(c, px, py, u, inks[INK_PROP])
+        if (lap != null) drawLaptop(c, lap[0], lap[1], u, inks[INK_PROP])
+        if (popper != null) drawPopper(c, popper[0], popper[1], u, inks)
         if (ball != null) {
             // ★ 공을 몸 색으로 그리면 **몸에 붙은 혹**처럼 보인다 — 호박색 장난감으로 둔다
             val r = BALL_R * u
             c.drawRect(ball[0] - r, ball[1] - r, ball[0] + r, ball[1] + r, inks[INK_STAR])
         }
         drawSparks(c, cx, cy, u, inks)
+        drawShells(c, cx, cy, u, inks)   // 날아가는 폭죽은 반짝이보다 앞에
         drawZzz(c, cx, cy, u, inks[INK_PROP])
     }
 
@@ -703,6 +896,55 @@ class Mascot {
         c.drawPath(path, p)
     }
 
+    /**
+     * 파티 폭죽(크래커) — 쥔 쪽은 좁고 입은 넓은 원뿔을 겨눈 쪽으로 기울여 든다.
+     * 입 자리를 `popMouth` 에 남겨 뒀다가 **다음 발이 거기서 나가게** 한다.
+     *
+     * ★ 노트북과 같이 **다각형**이다(도트 격자로는 이 크기에 원뿔이 안 나온다).
+     * ★ 몸과 같은 색으로 그리면 **몸에 붙은 혹**처럼 보인다 — 밝은 색 물건으로 둔다.
+     */
+    private fun drawPopper(c: Canvas, hx: Float, hy: Float, u: Float, inks: Array<Paint>) {
+        val dx = cos(MascotSprite.POP_TILT) * popSide
+        val dy = sin(MascotSprite.POP_TILT)
+        val px = -dy * popSide                 // 축에 수직인 방향
+        val py = dx * popSide
+        val mx = hx + dx * MascotSprite.POP_LEN * u
+        val my = hy + dy * MascotSprite.POP_LEN * u
+        popMouth = floatArrayOf((mx - lastCx) / u, (my - lastCy) / u)
+        val b = MascotSprite.POP_BASE * u
+        val m = MascotSprite.POP_MOUTH * u
+        val path = Path()
+        path.moveTo(hx + px * b, hy + py * b)
+        path.lineTo(mx + px * m, my + py * m)
+        path.lineTo(mx - px * m, my - py * m)
+        path.lineTo(hx - px * b, hy - py * b)
+        path.close()
+        c.drawPath(path, inks[INK_GLOW])
+        // 입에 두른 띠 한 줄 — 원뿔이 통짜 세모로 안 보이게 (호박색 = 잔치 물건)
+        val band = Paint().apply {
+            color = inks[INK_STAR].color
+            strokeWidth = u * 0.5f
+        }
+        c.drawLine(mx + px * m, my + py * m, mx - px * m, my - py * m, band)
+    }
+
+    /**
+     * 쏘아 올려 날아가는 중인 폭죽.
+     * ★★ **점 하나로 그리지 말 것** — 한 프레임에 제 몸을 몇 개씩 지나므로 눈에 안 걸린다
+     * (데스크탑에서 '이펙트만 뜨고 물체가 안 나온다' 였다). **지나온 자리를 잇는 줄기**로
+     * 그린다 — 머리가 제일 크고 꼬리로 갈수록 작아져 솟아오르는 결이 남는다.
+     */
+    private fun drawShells(c: Canvas, cx: Float, cy: Float, u: Float, inks: Array<Paint>) {
+        for (s in shells) {
+            val n = max(2, (kotlin.math.hypot(s.vx, s.vy) / SHELL_STEP).toInt())
+            for (i in 0 until n) {
+                val k = i / n.toFloat()        // 0 = 머리(지금 자리), 1 = 꼬리 끝
+                plus(c, cx + (s.x - s.vx * k) * u, cy + (s.y - s.vy * k) * u,
+                    u * (0.5f - 0.28f * k), inks[s.ink])
+            }
+        }
+    }
+
     /** 낮잠 z — 머리 위로 비스듬히 떠오른다(멀어질수록 커진다). */
     private fun drawZzz(c: Canvas, cx: Float, cy: Float, u: Float, p: Paint) {
         for (z in zzz) {
@@ -760,7 +1002,7 @@ class Mascot {
      * 테스트가 노는 규칙을 확인할 때 들여다보는 창구 — **화면에는 안 쓴다.**
      * (박자를 맞히면 단이 오르고 안 지치는가 / 마구 두드리면 뻗는가)
      */
-    fun debug() = Debug(combo, faint > 0, finale > 0, clicks)
+    fun debug() = Debug(combo, faint > 0, party, clicks)
 
     data class Debug(val combo: Int, val fainted: Boolean, val finale: Boolean, val tired: Float)
 
@@ -772,6 +1014,8 @@ class Mascot {
             "faint" -> faint = FAINT_FRAMES / 2
             // 반쯤 내려간 순간 — 다 내려가면 화면 밖이라 그림에 아무것도 안 남는다
             "away" -> { awayTotal = AWAY_MIN; away = AWAY_MIN - AWAY_LEAD - SINK_FRAMES / 2 }
+            // 완주 축하 — 크래커를 들고 쏘는 장면 (몇 프레임 굴려야 폭죽이 뜬다)
+            "party" -> { finale = FINALE_FRAMES; party = true; popDrop = 0; aim(); hopIn = 1 }
         }
     }
 
@@ -821,9 +1065,39 @@ class Mascot {
             intArrayOf(24, 2, 2),        // 5단 둘 다 + 폭죽
         )
         const val TRICK_TRAIL = 3        // 재주 부리는 동안 이 프레임마다 반짝이 하나
-        const val FINALE_FRAMES = 70     // 완주 폭죽이 이어지는 프레임
-        const val FINALE_EVERY = 5
-        const val FINALE_PER = 10
+
+        // ── 완주 축하 (데스크탑 `slim.py` 의 `FINALE_*`·`SHELL_*`·`SHOT_*` 를 옮긴 것) ──
+        // ★★ 축하하는 동안은 **누르는 걸 안 받는다**(`party`). 그 '동안' 은 쏘는 프레임이
+        //   아니라 **반짝이가 다 사그라들 때까지**다 — 안 그러면 화면엔 폭죽이 한창인데
+        //   클로디만 먼저 평소로 돌아가 클릭에 반응한다.
+        const val FINALE_FRAMES = 49     // 폭죽을 쏘아 올리는 프레임 (약 1.6초)
+        const val FINALE_PER_MIN = 9     // 한 발에 뿜는 반짝이 (발마다 다르게)
+        const val FINALE_PER_MAX = 14
+        const val FINALE_SPREAD_MIN = 0.55f   // 발마다 퍼지는 정도도 다르다
+        const val FINALE_SPREAD_MAX = 1.35f
+        // ★ 폴짝은 **누를 때보다 작고 잦게**(춤추듯). 크게 한 번씩 뛰면 눌러서 튄 것과
+        //   똑같아 보인다 — '축하 중에 누르면 계속 점프한다' 로 읽힌다(데스크탑에서 겪음).
+        const val FINALE_HOP = 12        // 이 프레임마다 한 박자 (웅크렸다 쏘며 폴짝)
+        const val FINALE_POP = 1.25f     // 그 폴짝의 힘 (`JUMP` 배수) — 콕 찌른 것보다 작게
+        const val FINALE_CHEER = 0.5f    // 이만큼(칸) 떠 있으면 두 팔 번쩍
+
+        // 파티 폭죽(크래커)으로 쏘아 올리는 알 — 모양은 `MascotSprite.POP_*`
+        const val SHELL_SPEED = 3.0f     // 날아가는 속도 (칸/프레임)
+        const val SHELL_MIN = 6          // 아무리 가까워도 이만큼은 날아간다 (프레임)
+        const val SHELL_MAX = 19         // 아무리 멀어도 이만큼 안에 닿는다 (안 늘어지게)
+        const val SHELL_SHOTS_MIN = 2    // 한 박자에 이만큼 쏜다
+        const val SHELL_SHOTS_MAX = 3
+        const val SHELL_STEP = 0.8f      // 줄기를 이만큼(칸)마다 한 알씩 찍어 잇는다
+        const val SHELL_TRAIL = 0.8f     // 지나온 자리에 남기는 연기 (반짝이 수명 배수)
+        const val POP_CONFETTI = 6       // 쏠 때 입에서 흩어지는 색종이
+        const val POP_KICK = 1.1f        // 쏜 반동으로 몸이 뒤로 밀리는 정도 (칸)
+        const val POP_DROP = 12          // 다 쏘고 나면 이만큼에 걸쳐 아래로 치운다
+        // 던지는 몸짓 — **웅크렸다가 쭉 펴며 쏜다.** 그냥 통통 튀면 누른 것에 반응하는
+        // 것과 구별이 안 된다.
+        const val SHOT_WIND = 4          // 쏘기 전에 이만큼 웅크린다
+        const val SHOT_CROUCH = 0.18f
+        const val SHOT_FRAMES = 8        // 쏘고 나서 이만큼은 팔을 든 채 몸이 늘어난다
+        const val SHOT_STRETCH = 0.20f
 
         const val SURPRISE_FRAMES = 10
         // ★ 어쩌다 기절하면 놀라니까 높게 잡는다 — 작정하고 두드려야 뻗는다.
@@ -845,6 +1119,16 @@ class Mascot {
         const val INK_BODY = 0
         const val INK_STAR = 1
         const val INK_PROP = 2
+        // 아래 셋은 **축하 폭죽·크래커 전용** — 평소 반짝이는 몸 색뿐이다
+        const val INK_GREEN = 3
+        const val INK_RED = 4
+        const val INK_GLOW = 5           // 크래커 몸통 (바탕과 최대 대비)
+        // ★ **폭죽 색에 `INK_GLOW`(제목색)를 넣지 말 것** — 밝은 테마에서 거의 검정이라
+        //   **까만 폭죽**이 날아간다(미리보기에서 확인). 그건 물건 색이지 불꽃 색이 아니다.
+        val FIREWORK_INKS = intArrayOf(INK_BODY, INK_STAR, INK_GREEN, INK_RED)
+
+        /** 딴짓을 접는 데 걸리는 프레임 — 곧바로 지우면 한 프레임에 딴 그림으로 갈린다. */
+        const val ACT_EXIT = 11
 
         // ── 딴짓 (오래 심심할 때) ──
         // ★ 자주 하면 산만하다 — `DEEP_IDLE` 은 넉넉히 잡고, **딴짓 중에는 `quiet` 를 안 센다.**

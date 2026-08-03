@@ -86,6 +86,19 @@ object MascotSprite {
     /** 노트북까지 한 그림이 되게 몸을 오른쪽으로 물리는 양 (칸) */
     const val TYPE_SHIFT = 4f
 
+    // ── 파티 폭죽(크래커) — 완주 축하 때 손에 들고 쏘는 물건. 칸 단위 ──
+    // ★ 노트북과 같이 **도트가 아니라 다각형**이다(이 크기에 원뿔이 안 나온다).
+    /** 길이 · 쥔 쪽 반폭 · 터지는 쪽(입) 반폭 */
+    const val POP_LEN = 4.5f
+    const val POP_BASE = 0.65f
+    const val POP_MOUTH = 1.6f
+
+    /** 겨누는 각도 (라디안, 위로) */
+    const val POP_TILT = -0.62f
+
+    /** 크래커를 쥔 손이 몸 한가운데에서 떨어진 칸 수 */
+    const val POP_HAND = 5f
+
     const val COLS = 9
     val ROWS = HEAD.size + LEGS.size
 }

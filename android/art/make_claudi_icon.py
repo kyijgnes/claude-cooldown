@@ -34,6 +34,11 @@ from skins.slim import (  # noqa: E402
     MASCOT_COLOR,
     MASCOT_U,
     NAP_Z,
+    POP_BASE,
+    POP_HAND,
+    POP_LEN,
+    POP_MOUTH,
+    POP_TILT,
     TYPE_ARM,
     TYPE_SHIFT,
 )
@@ -158,6 +163,10 @@ def write_kotlin() -> None:
         legs_run=kt_rows(LEGS_RUN), nap_z=kt_rows(NAP_Z), arms=arms, eyes=eyes,
         type_arm=type_arm, lap_base=kt_cellsf(LAP_BASE), lap_lid=lid,
         type_shift="%gf" % (TYPE_SHIFT / MASCOT_U),
+        # 파티 폭죽 — 길이·반폭은 px 라 칸으로 옮기고, 각도와 손 자리는 이미 칸/라디안이다
+        pop_len="%gf" % (POP_LEN / MASCOT_U), pop_base="%gf" % (POP_BASE / MASCOT_U),
+        pop_mouth="%gf" % (POP_MOUTH / MASCOT_U), pop_tilt="%gf" % POP_TILT,
+        pop_hand="%gf" % POP_HAND,
         last_head=len(HEAD) - 1, leg_row=len(HEAD), foot_row=len(HEAD) + 1,
     )
     with open(OUT_KT, "w", encoding="utf-8") as f:
@@ -231,6 +240,19 @@ object MascotSprite {{
 
     /** 노트북까지 한 그림이 되게 몸을 오른쪽으로 물리는 양 (칸) */
     const val TYPE_SHIFT = {type_shift}
+
+    // ── 파티 폭죽(크래커) — 완주 축하 때 손에 들고 쏘는 물건. 칸 단위 ──
+    // ★ 노트북과 같이 **도트가 아니라 다각형**이다(이 크기에 원뿔이 안 나온다).
+    /** 길이 · 쥔 쪽 반폭 · 터지는 쪽(입) 반폭 */
+    const val POP_LEN = {pop_len}
+    const val POP_BASE = {pop_base}
+    const val POP_MOUTH = {pop_mouth}
+
+    /** 겨누는 각도 (라디안, 위로) */
+    const val POP_TILT = {pop_tilt}
+
+    /** 크래커를 쥔 손이 몸 한가운데에서 떨어진 칸 수 */
+    const val POP_HAND = {pop_hand}
 
     const val COLS = 9
     val ROWS = HEAD.size + LEGS.size

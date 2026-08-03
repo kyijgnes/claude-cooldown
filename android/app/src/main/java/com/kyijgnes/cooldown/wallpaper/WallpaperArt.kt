@@ -69,7 +69,9 @@ object WallpaperArt {
             val cy = look.mascotY * h
             val u = mascotCell(w)
             mascot.step(cx, cy, u, w, h)
-            mascot.draw(c, cx, cy, u, p.coral, p.bg, p.amber, p.label)
+            // 뒤 셋(초록·빨강·흰빛)은 완주 축하 폭죽에만 쓴다
+            mascot.draw(c, cx, cy, u, p.coral, p.bg, p.amber, p.label,
+                p.green, p.red, p.title)
         }
     }
 

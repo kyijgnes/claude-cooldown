@@ -104,6 +104,8 @@ class RenderPreviewTest {
         claudi(ctx, "클로디_공놀이", "ball", 9)       // 공이 손을 떠나 있는 순간
         claudi(ctx, "클로디_기절", "faint", 6)        // X_X + 별이 뱅뱅
         claudi(ctx, "클로디_자리비움", "away", 1)     // 화면 아래로 내려가는 중
+        // 완주 축하 — 크래커를 들고 쏘는 중(날아가는 알 + 터진 것이 같이 보이는 즈음)
+        claudi(ctx, "클로디_축하", "party", 26)
 
         // 꾸미기 — 고를 수 있는 것들을 한 장씩 (CustomizeActivity 의 선택지와 같은 순서)
         wallpaper(ctx, "꾸미기_링", look = Look.DEFAULT.copy(meter = Look.RINGS))
