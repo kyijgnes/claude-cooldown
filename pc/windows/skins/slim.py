@@ -158,6 +158,10 @@ SPARK_GRAV = 0.035    # 떠오르던 것이 처지는 정도
 #   (안 그러면 하나가 끝나자마자 다음 것이 곧바로 이어진다).
 DEEP_IDLE = 1500      # 이만큼(프레임 ≈ 68초) 아무 반응이 없으면 딴짓을 시작한다
 ACT_MIN, ACT_MAX = 200, 400      # 한 가지 딴짓 지속 (9~18초)
+# ★★ **딴짓은 곧바로 지우지 않는다 — 접는 동안(`ACT_EXIT`)을 둔다.** 한 프레임에 갈아
+#   끼우면 몸이 `TYPE_SHIFT`(8px) 옆으로 튀고 노트북·공이 허공에서 사라진다(실제로 그랬다).
+#   이 동안 소품을 치우고 몸을 제자리로 미끄러뜨리며 **가로로 납작해졌다 펴져** 돌아앉는다.
+ACT_EXIT = 8          # 하던 걸 접고 돌아앉는 데 걸리는 프레임 (약 0.36초)
 AWAY_MIN, AWAY_MAX = 170, 340    # 자리 비움 지속 (8~15초)
 AWAY_LEAD = 20        # 내려가기 전에 손 흔드는 프레임 (인사하고 간다)
 SINK_FRAMES = 10      # 아래로 내려가는 데 걸리는 프레임
@@ -653,6 +657,9 @@ class SlimSkin(Skin):
         self._quiet = 0               # 마지막 반응 뒤 흐른 프레임 (딴짓 중에는 안 센다)
         self._act = ""                # "" / "type"(노트북) / "nap"(낮잠) / "ball"(공 놀이)
         self._act_left = 0
+        self._exit = 0                # 하던 딴짓을 접는 중인 남은 프레임
+        self._exit_act = ""           # 접는 중인 것이 무엇이었나 (소품을 치워야 한다)
+        self._ball_at = (0.0, 0.0)    # 공이 마지막으로 있던 자리 (접을 때 여기서 떨어진다)
         self._zzz: list[list[float]] = []   # 낮잠 z [x, y, life]
         self._away = 0                # 자리 비움 남은 프레임
         self._away_total = 0
@@ -696,16 +703,27 @@ class SlimSkin(Skin):
         **딴 데 클릭은 잔잔히 통통만 하고 기절엔 안 쌓인다.**
         딴짓 중이었으면 그만두고 돌아온다."""
         self._quiet = 0
-        self._act = ""
+        self._end_act()  # 하던 딴짓은 곧바로 지우지 않고 접는다 (한 프레임에 안 갈리게)
         # 마스코트를 누른 것이면 '논 것' 이지 새로고침 요청이 아니다 (absorbed 참고)
         self._played = x is not None and self._near(x, y)
         if self._away > 0:
-            # 자리를 비웠는데 불렀다 — **호다닥 올라와서 허둥지둥**한다
-            # (올라오는 시간을 RUSH_BACK 로 줄이고, 도착하면 펄쩍 + 부르르 + 놀란 눈)
-            self._rise = RUSH_BACK
-            self._away = min(self._away, RUSH_BACK)
-            self._rushing = True
+            # 자리를 비웠는데 불렀다 — **호다닥 올라와서 허둥지둥**한다.
+            # ★ **달려오는 연출은 완전히 숨었을 때만 시작한다.** 보이는 채로 왼쪽에 옮겨
+            #   놓으면 그 순간 옆으로 순간이동한다 — '아래에서 올라오다 갑자기 왼쪽에서
+            #   튀어나오던' 것이 그것이었다. 안 보이는 동안 미리 옮겨 두면 **왼쪽에서
+            #   올라와 그대로 달려오는** 한 동작이 된다.
+            now = self._sink_amount()
+            if not self._rushing:
+                self._rushing = now >= 1.0
+                if self._rushing:
+                    self._runx = -RUN_DIST
+            # ★ 올라오기는 **지금 내려가 있는 만큼**에서 잇는다 — `_away` 만 RUSH_BACK 로
+            #   갈아 끼우면 내려가는 도중에 부른 경우 **아래로 뚝 떨어졌다가** 올라온다.
+            self._away = RUSH_BACK
+            self._rise = RUSH_BACK / max(now, 1e-3)  # RUSH_BACK 프레임 만에 now → 0
             self._wave = 0
+            if self._rushing:
+                self._surprise = SURPRISE_FRAMES * 5
             return
         if self._faint > 0:
             return
@@ -881,6 +899,8 @@ class SlimSkin(Skin):
     def _step_physics(self) -> None:
         """용수철 한 걸음. 눌림으로 생긴 속도를 제자리(0)로 부드럽게 당긴다."""
         self._step_sparks()
+        if self._exit > 0:  # 하던 딴짓을 접는 중 (기절해도 흘러야 접히다 만 채로 안 멈춘다)
+            self._exit -= 1
         if self._faint > 0:  # 기절 중 — 서서히 늘어졌다가 깨어난다
             self._faint -= 1
             self._vy *= 0.8; self._yoff *= 0.85
@@ -943,12 +963,12 @@ class SlimSkin(Skin):
             self._away -= 1
             if self._wave > 0:
                 self._wave -= 1
-            if self._away == 0 and self._rushing:  # 불려서 올라왔다 — 허둥지둥
+            if self._away == 0 and self._rushing:  # 다 올라왔다 — 이제 제자리로 달린다
                 self._rushing = False
                 self._rise = SINK_FRAMES
-                # **허겁지겁 달려온다** — 왼쪽에서 발을 바꿔 가며 제자리로,
-                # 눈은 동그래진 채. (그냥 튀어오르기만 하면 '불려 왔다' 로 안 읽힌다)
-                self._runx = -RUN_DIST
+                # **허겁지겁 달려온다** — 왼쪽에서 발을 바꿔 가며 제자리로, 눈은 동그래진 채.
+                # ★ `_runx` 는 부를 때(`react`) 이미 여기로 옮겨 뒀다 — **올라온 그 자리에서
+                #   그대로 이어 달린다**(여기서 옮기면 다 올라온 순간 옆으로 튄다).
                 self._running = RUN_FRAMES
                 self._surprise = SURPRISE_FRAMES * 5
             return
@@ -957,7 +977,7 @@ class SlimSkin(Skin):
             if self._act == "nap" and self._act_left % NAP_EVERY == 0:
                 self._zzz.append([self.mascot_cx + 3.0, self.h / 2 - 9.0, NAP_LIFE])
             if self._act_left <= 0:
-                self._act = ""
+                self._end_act()  # 혼자 끝날 때도 접는 동안을 거친다 (누른 것과 같은 결)
                 self._quiet = 0  # 하나가 끝나자마자 다음 것이 이어지지 않게 되감는다
             return
         self._quiet += 1
@@ -966,7 +986,7 @@ class SlimSkin(Skin):
             if v > 0:
                 setattr(self, key, v - 1)
         busy = (self._blink or self._look or self._tilt or self._stretch
-                or self._wiggle or self._wave)
+                or self._wiggle or self._wave or self._exit)
         moving = abs(self._vy) + abs(self._yoff) > 0.8
         if self._quiet > DEEP_IDLE and not busy and not moving:
             self._begin_absorbed()
@@ -990,6 +1010,15 @@ class SlimSkin(Skin):
         else:
             self._act = pick
             self._act_left = random.randint(ACT_MIN, ACT_MAX)
+
+    def _end_act(self) -> None:
+        """딴짓을 **접는 동안**을 둔다 — 곧바로 지우면 자세도 소품도 한 프레임에 갈려
+        튄다(노트북 두드리다 누르면 몸이 옆으로 뛰고 노트북이 사라졌다).
+        `_exit` 가 도는 동안 `_draw_mascot` 이 몸을 제자리로 되돌리며 소품을 치운다."""
+        if not self._act:
+            return
+        self._exit_act, self._exit = self._act, ACT_EXIT
+        self._act = ""
 
     def _sink_amount(self) -> float:
         """자리 비움에서 얼마나 내려가 있나 (0=제자리, 1=작업표시줄 아래로 완전히)."""
@@ -1083,17 +1112,40 @@ class SlimSkin(Skin):
         speed = abs(self._vy) + abs(self._yoff)                   # 출렁이는 중이면 신났다
 
         # 표정과 팔 — 콕 찔리면 놀라 만세, 출렁이면 눈웃음, 기지개도 만세
-        front = ball = extra = None
+        lap = ball = extra = None
         legs = LEGS
         if self._pressed:  # 눌리는 중 — 눈을 질끈 감고 납작해진다
             expr, arms = "blink", (0, 0)
             sxk *= 1 + PRESS_FLAT * 0.75 * self._press
             syk *= 1 - PRESS_FLAT * self._press
             cy += 3.2 * self._press
-        elif self._running > 0:  # 달려오는 중 — 발을 바꿔 가며 (놀란 눈은 아래에서)
+        elif self._running > 0 or self._rushing:  # 달려오는 중 (불려서 올라오는 동안부터)
+            # ★ 발 박자는 `_t` 로 센다 — **올라오는 중과 달리는 중이 같은 걸음으로 이어진다**
+            #   (`_running` 으로 세면 땅에 닿는 순간 걸음이 처음으로 되감긴다).
             expr = "surprise" if self._surprise > 0 else "grin"
-            arms = (-1, 0) if (self._running // RUN_BEAT) % 2 == 0 else (0, -1)
-            legs = LEGS if (self._running // RUN_BEAT) % 2 == 0 else LEGS_RUN
+            step = (self._t // RUN_BEAT) % 2 == 0
+            arms = (-1, 0) if step else (0, -1)
+            legs = LEGS if step else LEGS_RUN
+        elif self._exit > 0:  # 하던 걸 접고 돌아앉는 중 — 소품을 치우고 몸을 제자리로
+            k = self._exit / ACT_EXIT                     # 1 → 0
+            sxk *= 1 - 0.5 * math.sin((1 - k) * math.pi)  # 가운데서 납작 = 돌아앉는 결
+            done = "surprise" if self._surprise > 0 else "idle"
+            if self._exit_act == "type":
+                cx += TYPE_SHIFT * k       # 노트북 쪽으로 물렸던 몸이 제자리로 미끄러진다
+                expr = "side" if k > 0.5 else done
+                arms = (None, None) if k > 0.5 else (0, 0)
+                extra = TYPE_ARM[1] if k > 0.5 else None   # 손은 이미 자판에서 뗐다
+                # 노트북은 몸을 따라가지 않는다 — 제자리에서 아래로 치워진다.
+                # ★ 내려가는 거리는 창 높이만큼 — **마지막 프레임에 창 밖으로 다 나가야**
+                #   한다(모자라면 조각이 남은 채로 사라진다).
+                lap = (self.mascot_cx + TYPE_SHIFT, cy + (1 - k) ** 2 * self.h)
+            elif self._exit_act == "nap":  # 자다 깼다 — 눈을 뜨며 일어난다
+                cy += 1.5 * k
+                expr = "blink" if k > 0.5 else done
+                arms = (1, 1) if k > 0.5 else (0, 0)
+            else:  # 공 놀이 — 던져 둔 공은 아래로 떨어져 나간다
+                expr, arms = done, (0, 0)
+                ball = (self._ball_at[0], self._ball_at[1] + (1 - k) ** 2 * self.h)
         elif self._surprise > 0:
             expr, arms = "surprise", (-1, -1)
         elif speed > 1.2:
@@ -1103,11 +1155,12 @@ class SlimSkin(Skin):
             expr = "grin"
             arms = (-1 if up else 0, 0) if self._wave_dir < 0 else (0, -1 if up else 0)
         elif self._act == "type":  # 노트북에 열중 — **옆으로 돌아앉아** 왼쪽 화면을 본다
-            expr, front = "side", True
+            expr = "side"
             # 옆모습이라 기본 팔은 안 그리고(None), **노트북까지 뻗은 긴 팔**을 대신 그린다
             arms = (None, None)
             extra = TYPE_ARM[(self._act_left // TYPE_BEAT) % 2]
             cx += TYPE_SHIFT  # 노트북까지 한 그림이 되게 몸을 오른쪽으로
+            lap = (cx, cy)    # 노트북 자리 — 접을 땐 몸만 돌아가고 이건 제자리에 남는다
         elif self._act == "nap":  # 낮잠 — 눈 감고 팔을 늘어뜨린 채 크게 숨쉰다
             expr, arms = "blink", (1, 1)
             cy += 1.5
@@ -1117,6 +1170,7 @@ class SlimSkin(Skin):
                 self.mascot_cx + math.sin(frac * math.tau) * 4.0,
                 cy - 4.4 * MASCOT_U - math.sin(frac * math.pi) * BALL_H,
             )
+            self._ball_at = ball  # 접을 때 공이 여기서부터 떨어진다
             # 손을 떠나 있는 동안만 팔을 번쩍 (받는 순간엔 내린다)
             flying = 0.12 < frac < 0.88
             expr = "grin" if flying else "surprise"
@@ -1131,8 +1185,8 @@ class SlimSkin(Skin):
 
         self._sprite(expr, arms, legs, cx, cy,
                      MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx, None, extra)
-        if front:  # 노트북은 도트가 아니라 다각형이라 스프라이트 뒤에 따로 그린다
-            self._draw_laptop(c, cx, cy)
+        if lap is not None:  # 노트북은 도트가 아니라 다각형이라 스프라이트 뒤에 따로 그린다
+            self._draw_laptop(c, *lap)
         if ball is not None:
             # 공은 몸 위에 그린다(손보다 앞). **몸 색으로 그리면 몸에 붙은 혹처럼 보인다** —
             # 호박색 장난감으로 둔다(알림 색과 자리가 겹치지 않아 헷갈릴 일이 없다).
