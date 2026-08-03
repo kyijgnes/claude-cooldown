@@ -92,8 +92,11 @@ TRICK_TRAIL = 2       # 재주 부리는 동안 이 프레임마다 반짝이 �
 # 5단까지 다 채우면 **슬림 바 전체에 축하 폭죽**을 터뜨리고 콤보를 끝낸다.
 # ★★ 그동안은 **누르는 걸 안 받는다**(`react`·`hold` 무시) — 완주는 짧은 장면이라
 #   중간에 끼어들면 축하가 반응 놀이로 되돌아간다. 대신 **클로디도 가만있지 않고
-#   폴짝폴짝 만세를 부르며 같이 축하한다**(`_finale` 가지).
-FINALE_FRAMES = 68    # 폭죽·축하가 이어지는 프레임 (약 3초)
+#   폴짝폴짝 만세를 부르며 같이 축하한다**.
+# ★★ **축하는 `_party` 로 잰다 — 마지막 발을 쏜 뒤가 아니라 반짝이가 다 사그라들 때까지.**
+#   `_finale`(쏘는 동안)만 잠그면 **화면엔 폭죽이 한창인데 클로디만 먼저 평소로 돌아가**
+#   클릭에 반응한다(실제로 그랬다). 마지막 발의 반짝이는 2초 넘게 더 흐른다.
+FINALE_FRAMES = 46    # 폭죽을 쏘는 프레임 (약 2초). 꼬리까지 하면 축하는 4초 남짓
 FINALE_EVERY = 4      # 이 프레임마다 한 발
 FINALE_DOUBLE = 2     # 이 배수 발마다 **두 발이 겹쳐** 터진다
 FINALE_PER = (9, 15)  # 한 발에 뿜는 반짝이 (발마다 다르게)
@@ -682,7 +685,8 @@ class SlimSkin(Skin):
         self._played = False          # 마지막 누르기를 마스코트가 가져갔나
         self._combo = 0               # 지금 단 (0~COMBO_MAX)
         self._hits = 0                # 이 판에서 박자를 맞힌 횟수
-        self._finale = 0              # 완주 축하 폭죽 남은 프레임
+        self._finale = 0              # 완주 축하 폭죽을 **쏘는** 남은 프레임
+        self._party = False           # 축하가 흐르는 중 (폭죽 + 사그라드는 꼬리까지)
         self._beat_at = -999          # 마지막으로 박자를 맞힌 프레임
         self._trick = 0               # 재주 남은 프레임
         self._trick_len = 1            # 재주 전체 프레임
@@ -737,7 +741,8 @@ class SlimSkin(Skin):
             return
         # 기절했거나 **완주 축하가 흐르는 동안은 안 받는다** — 그 사이 누른 것은
         # 마스코트가 가져가되(위 `_played`) 아무 일도 일으키지 않는다.
-        if self._faint > 0 or self._finale > 0:
+        # ★ `_finale` 이 아니라 `_party` 다 — 다 쏜 뒤에도 반짝이가 흐르는 동안은 축하 중이다.
+        if self._faint > 0 or self._party:
             return
         if x is not None and self._hit(x, y):  # 콕! — 크게 놀란다
             # **박자 맞히기** — 가장 아래로 내려앉은 순간에 치면 콤보가 쌓인다.
@@ -762,6 +767,7 @@ class SlimSkin(Skin):
                     self._begin_trick(self._combo)
                     if self._combo >= COMBO_MAX:  # 완주 — 바 전체에 축하 폭죽
                         self._finale = FINALE_FRAMES
+                        self._party = True
                         self._hits = self._combo = 0
                 else:  # 아직 올라가는 중 — 소박하게
                     self._burst(2 + self._combo, 0.6 + self._combo * 0.08)
@@ -781,7 +787,7 @@ class SlimSkin(Skin):
         ★ 여기에 '기 모아 뛰기'·'기 모아 쏘기'·'쓰다듬기(하트)' 를 차례로 붙여 봤다가
         전부 뺐다. 소품이나 기호를 얹으면 게임 같거나 유치했다 — **누르니까 눌린다.**
         """
-        if (self._faint > 0 or self._finale > 0 or self._away > 0
+        if (self._faint > 0 or self._party or self._away > 0
                 or not self._hit(x, y)):
             return
         self._pressed = True
@@ -959,13 +965,16 @@ class SlimSkin(Skin):
             self._clicks = max(0.0, self._clicks - CLICK_DECAY)
         if self._combo and self._t - self._beat_at > BEAT_WINDOW:
             self._combo = self._hits = 0   # 박자가 끊겼다
-        if self._finale > 0:  # 완주 축하 — 바 전체에 폭죽이 이어지고 같이 폴짝거린다
-            self._finale -= 1
-            if self._finale % FINALE_EVERY == 0:
-                self._firework()
-                if (self._finale // FINALE_EVERY) % FINALE_DOUBLE == 0:
-                    self._firework()  # 두 발이 겹쳐 터진다
-            if self._finale % FINALE_HOP == 0:  # 클로디도 신나서 폴짝
+        if self._party:  # 완주 축하 — 바 전체에 폭죽이 이어지고 같이 폴짝거린다
+            if self._finale > 0:  # 아직 쏘는 중
+                self._finale -= 1
+                if self._finale % FINALE_EVERY == 0:
+                    self._firework()
+                    if (self._finale // FINALE_EVERY) % FINALE_DOUBLE == 0:
+                        self._firework()  # 두 발이 겹쳐 터진다
+            elif not self._sparks:  # 마지막 알까지 사그라들었다 — 이제 축하 끝
+                self._party = False
+            if self._party and self._t % FINALE_HOP == 0:  # 클로디도 신나서 폴짝
                 self._boost(JUMP_IMPULSE * FINALE_POP)
         if self._trick > 0:  # 재주 — 부리는 동안 반짝이 꼬리를 흘린다
             self._trick -= 1
@@ -1010,7 +1019,7 @@ class SlimSkin(Skin):
             if v > 0:
                 setattr(self, key, v - 1)
         busy = (self._blink or self._look or self._tilt or self._stretch
-                or self._wiggle or self._wave or self._exit or self._finale)
+                or self._wiggle or self._wave or self._exit or self._party)
         moving = abs(self._vy) + abs(self._yoff) > 0.8
         if self._quiet > DEEP_IDLE and not busy and not moving:
             self._begin_absorbed()
@@ -1170,7 +1179,7 @@ class SlimSkin(Skin):
             else:  # 공 놀이 — 던져 둔 공은 아래로 떨어져 나간다
                 expr, arms = done, (0, 0)
                 ball = (self._ball_at[0], self._ball_at[1] + (1 - k) ** 2 * self.h)
-        elif self._finale > 0:  # 완주 축하 — 폭죽이 터지는 동안 같이 폴짝폴짝 만세
+        elif self._party:  # 완주 축하 — 폭죽이 흐르는 동안 내내 같이 폴짝폴짝 만세
             expr = "grin"
             arms = (-1, -1) if self._yoff < -FINALE_CHEER else (0, 0)
         elif self._surprise > 0:
