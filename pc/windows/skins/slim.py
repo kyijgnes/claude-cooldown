@@ -96,12 +96,15 @@ TRICK_TRAIL = 2       # 재주 부리는 동안 이 프레임마다 반짝이 �
 # ★★ **축하는 `_party` 로 잰다 — 마지막 발을 쏜 뒤가 아니라 반짝이가 다 사그라들 때까지.**
 #   `_finale`(쏘는 동안)만 잠그면 **화면엔 폭죽이 한창인데 클로디만 먼저 평소로 돌아가**
 #   클릭에 반응한다(실제로 그랬다). 마지막 발의 반짝이는 2초 넘게 더 흐른다.
-FINALE_FRAMES = 44    # 폭죽을 쏘아 올리는 프레임 (약 2초). 꼬리까지 하면 축하는 4초 남짓
-FINALE_PER = (11, 17)  # 한 발에 뿜는 반짝이 (발마다 다르게)
+FINALE_FRAMES = 36    # 폭죽을 쏘아 올리는 프레임 (약 1.6초). 꼬리까지 하면 축하는 4초 남짓
+FINALE_PER = (9, 14)  # 한 발에 뿜는 반짝이 (발마다 다르게)
 FINALE_SPREAD = (0.55, 1.35)  # 발마다 퍼지는 정도도 다르다 — 같으면 한 발을 복사한 듯하다
-FINALE_BIG = (1.4, 2.4)  # 축하 반짝이는 수명을 길게 줘 더 크고 오래 남는다
-FINALE_HOP = 11       # 축하하는 동안 이 프레임마다 폴짝 (통통 튀는 주기와 맞는 값)
-FINALE_POP = 1.9      # 그 폴짝의 힘 (`JUMP_IMPULSE` 배수). 0.95 는 4px 라 뛰는 줄 몰랐다
+FINALE_BIG = (1.3, 2.0)  # 축하 반짝이는 수명을 길게 줘 더 크고 오래 남는다
+# ★ 폴짝은 **누를 때보다 작고 잦게**(춤추듯). 크게 한 번씩 뛰면 눌러서 튄 것과 똑같아
+#   보인다 — 실제로 '축하 중에 클릭하면 계속 점프한다' 로 읽혔다. 던지는 몸짓
+#   (`SHOT_WIND`/`SHOT_FRAMES`)이 붙어야 '제가 하는 일'로 읽힌다.
+FINALE_HOP = 9        # 축하하는 동안 이 프레임마다 한 박자 (웅크렸다 던지며 폴짝)
+FINALE_POP = 1.25     # 그 폴짝의 힘 (`JUMP_IMPULSE` 배수) — 콕 찔렸을 때(2.6)보다 작게
 # ★ **만세는 프레임 수로 세지 않고 '떠 있으면 든다'** — 뛰는 것과 팔이 따로 놀면
 #   신난 게 아니라 헛도는 것으로 보인다. 뜬 김에 들고 내려앉으면 내린다.
 FINALE_CHEER = 1.0    # 이만큼(px) 떠 있으면 두 팔 번쩍
@@ -110,12 +113,23 @@ FINALE_CHEER = 1.0    # 이만큼(px) 떠 있으면 두 팔 번쩍
 #   (그냥 아무 데서나 터지면 클로디는 구경꾼이다). 쓰는 사람이 청해서 넣었다(2026-08-04).
 # ★ **소품을 새로 그리지 않는다** — 대포도 화살표도 없고 **반짝이 한 알이 날아갈 뿐**이다.
 #   그래서 옛날에 빼 버린 '기 모아 쏘기'(평소 놀이에 얹은 발사체)와는 다르다.
-SHELL_FLY = 7         # 쏘아 올린 것이 자리에 닿기까지 (프레임)
+# ★★ **'몇 프레임에 도착'으로 잡지 말 것** — 바 끝까지가 360px 이라 7프레임이면 한
+#   프레임에 50px 씩 건너뛴다. 그걸 점 하나로 그리면 **아예 안 보인다**(실제로
+#   '이펙트만 뜨고 물체가 안 나온다' 였다). **속도를 정하고** 먼 데는 오래 걸리게 하며,
+#   그리는 것도 점이 아니라 **지나온 자리를 잇는 줄기**다(`_draw_shells`).
+SHELL_SPEED = 15.0    # 날아가는 속도 (px/프레임)
+SHELL_MIN = 4         # 아무리 가까워도 이만큼은 날아간다 (프레임)
+SHELL_MAX = 14        # 아무리 멀어도 이만큼 안에 닿는다 — 축하가 늘어지지 않게
 SHELL_SHOTS = (2, 3)  # 한 번 뛸 때 이만큼 쏜다
-SHELL_TRAIL = 0.45    # 날아가며 흘리는 꼬리 (반짝이 수명 배수)
+SHELL_STEP = 3.0      # 줄기를 이만큼(px)마다 한 알씩 찍어 잇는다
+SHELL_TRAIL = 0.8     # 지나온 자리에 남기는 연기 (반짝이 수명 배수)
 SHELL_HAND = 9.0      # 손끝이 몸 한가운데에서 이만큼 떨어져 있다 (px)
+# 던지는 몸짓 — **웅크렸다가 쭉 펴며 던진다.** 그냥 통통 튀기만 하면 **누른 것에 반응하는
+# 것과 구별이 안 된다**(실제로 '축하 중인데 클릭 때마다 점프한다' 로 읽혔다).
+SHOT_WIND = 3         # 던지기 전에 이만큼 웅크린다
+SHOT_CROUCH = 0.18    # 웅크릴 때 눌리는 정도
 SHOT_FRAMES = 6       # 쏘고 나서 이만큼은 팔을 든 채 몸이 쭉 늘어난다
-SHOT_STRETCH = 0.18   # 그때 늘어나는 정도
+SHOT_STRETCH = 0.20   # 그때 늘어나는 정도
 FRAME_MS = 45  # 애니메이션 한 프레임 (약 22fps — 물리가 부드럽게 이어지게)
 # 눌림 반응은 용수철처럼 — 누를 때마다 위로 튀는 '속도'를 더한다. 연타하면 힘이
 # 쌓여 자연스럽게 출렁이고(뚝 끊기지 않고), 너무 많이 치면 기절한다.
@@ -851,8 +865,11 @@ class SlimSkin(Skin):
         side = -1 if fx < self.mascot_cx else 1       # 겨눈 쪽 손으로
         sx = self.mascot_cx + side * SHELL_HAND
         sy = self.h / 2 + self._yoff - 4.0            # 번쩍 든 손 위
+        # 걸리는 시간은 **거리에서 나온다** — 먼 데는 오래 날아간다(위 ★★ 참고)
+        fly = min(SHELL_MAX,
+                  max(SHELL_MIN, round(math.hypot(fx - sx, fy - sy) / SHELL_SPEED)))
         self._shells.append([
-            sx, sy, (fx - sx) / SHELL_FLY, (fy - sy) / SHELL_FLY, SHELL_FLY,
+            sx, sy, (fx - sx) / fly, (fy - sy) / fly, fly,
             random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title)),
         ])
 
@@ -1221,13 +1238,19 @@ class SlimSkin(Skin):
             else:  # 공 놀이 — 던져 둔 공은 아래로 떨어져 나간다
                 expr, arms = done, (0, 0)
                 ball = (self._ball_at[0], self._ball_at[1] + (1 - k) ** 2 * self.h)
-        elif self._party:  # 완주 축하 — 폴짝 뛰며 쏘아 올리고 내내 만세를 부른다
+        elif self._party:  # 완주 축하 — 웅크렸다 던지며 폴짝, 내내 만세
             expr = "grin"
-            # 쏜 직후엔 **팔을 든 채 몸이 쭉 늘어난다**(던진 결). 그 뒤엔 뜬 동안만 만세.
-            arms = ((-1, -1) if self._shot > 0 or self._yoff < -FINALE_CHEER
-                    else (0, 0))
-            if self._shot > 0:
+            if self._shot > 0:  # 막 던졌다 — 팔을 든 채 몸이 쭉 늘어난다
+                arms = (-1, -1)
                 syk *= 1 + SHOT_STRETCH * (self._shot / SHOT_FRAMES)
+                sxk *= 1 - SHOT_STRETCH * 0.4 * (self._shot / SHOT_FRAMES)
+            elif self._finale > 0 and self._hop_in <= SHOT_WIND:  # 던지기 직전 — 웅크린다
+                arms = (0, 0)
+                syk *= 1 - SHOT_CROUCH
+                sxk *= 1 + SHOT_CROUCH * 0.6
+                cy += 1.6
+            else:  # 그 사이엔 뜬 동안만 만세
+                arms = (-1, -1) if self._yoff < -FINALE_CHEER else (0, 0)
         elif self._surprise > 0:
             expr, arms = "surprise", (-1, -1)
         elif speed > 1.2:
@@ -1351,9 +1374,18 @@ class SlimSkin(Skin):
             self._cross(c, sx, sy, u, color)
 
     def _draw_shells(self, c: tk.Canvas) -> None:
-        """쏘아 올려 날아가는 중인 폭죽 — 반짝이보다 조금 크고 밝은 한 알."""
-        for sx, sy, _vx, _vy, _left, color in self._shells:
-            self._cross(c, sx, sy, MASCOT_U * 0.8, color)
+        """쏘아 올려 날아가는 중인 폭죽.
+
+        ★★ **점 하나로 그리지 말 것** — 한 프레임에 십수 px 를 지나므로 눈에 안 걸린다
+        (실제로 '이펙트만 뜨고 물체가 안 나온다' 였다). **지나온 자리를 잇는 줄기**로
+        그린다 — 머리가 제일 크고 꼬리로 갈수록 작아져, 솟아오르는 결이 남는다.
+        """
+        for sx, sy, vx, vy, _left, color in self._shells:
+            n = max(2, int(math.hypot(vx, vy) / SHELL_STEP))
+            for i in range(n):
+                t = i / n  # 0 = 머리(지금 자리), 1 = 꼬리 끝(직전 자리)
+                self._cross(c, sx - vx * t, sy - vy * t,
+                            MASCOT_U * (1.0 - 0.55 * t), color)
 
     def _draw_laptop(self, c: tk.Canvas, cx: float, cy: float) -> None:
         """노트북 — **도트가 아니라 1px 다각형**으로 그린다(위 `LAP_*` 주석 참고).
