@@ -76,7 +76,7 @@ def main() -> None:
             )
             print(stamp, f"5시간 {data['five_hour_pct']}%  주간 {data['seven_day_pct']}%")
         except LoginRequired as e:
-            print(stamp, "재로그인 필요:", e)
+            print(stamp, "로그인 막힘:", e)
         except (UsageError, requests.RequestException) as e:
             print(stamp, "실패:", e)
         time.sleep(MIN_INTERVAL)

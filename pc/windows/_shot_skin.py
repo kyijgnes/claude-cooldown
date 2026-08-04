@@ -3,7 +3,7 @@
 
     python _shot_skin.py card ok   out.png    정상
     python _shot_skin.py card net  out.png    연결 실패 (값 유지)
-    python _shot_skin.py card err  out.png    재로그인 필요 (값 없음)
+    python _shot_skin.py card err  out.png    로그인 막힘 (값 없음)
     python _shot_skin.py card max  out.png    100% · 가장 긴 문자열 (겹침 확인)
     python _shot_skin.py card note out.png    값은 멀쩡 + 자동 시작 알림
 
@@ -94,7 +94,7 @@ def main() -> None:
         skin.show(demo(), STAMP)
         skin.show_error("연결 실패", True, STAMP)
     else:
-        skin.show_error("재로그인 필요", False, STAMP)
+        skin.show_error("눌러서 로그인 잇기", False, STAMP)
 
     root.overrideredirect(True)
     root.update_idletasks()

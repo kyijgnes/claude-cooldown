@@ -38,12 +38,16 @@ from cooldown_core import (  # noqa: E402
     MIN_INTERVAL,
     ConnectionFailed,
     LoginRequired,
+    TokenStale,
     Usage,
     UsageError,
     fetch,
     pace,
+    token_expiry,
+    token_stale,
 )
 
+import cooldown_login  # noqa: E402
 import cooldown_ping  # noqa: E402
 import cooldown_push  # noqa: E402
 import cooldown_stats  # noqa: E402
@@ -140,6 +144,8 @@ RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
 UNDOCK_SLOP = 120  # 붙여 둔 상태에선 이만큼 넘게 끌어야 떼어 낸다 (그 안이면 클릭으로 보고 제자리로)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
+REVIVE_GAP = 600  # 토큰이 낡았을 때 조용히 되살려 보는 간격 (초)
+REVIVE_TRIES = 2  # 연달아 이만큼 실패하면 자동 시도를 멈춘다 (사람이 누를 때까지)
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
 PING_TICK = 20  # 자동 핑을 쏠 때가 됐는지 보는 주기 (초). 앵커 여유(GRACE_MIN)보다 촘촘히.
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
@@ -539,6 +545,16 @@ class App:
         # 껐다 켜면 사라진다 — 지난 실패는 '실행 기록' 이 갖고 있다.
         self._ping_fail: tuple[datetime, str] | None = None
 
+        # 로그인(토큰) 되살리기 — 토큰은 발급 8시간 뒤 만료되고, 새로 발급하는 건
+        # 클로드 코드 CLI 뿐이다. 낡으면 조용히 되살려 보고, 안 되면 클릭 한 번으로.
+        self.login_out: queue.Queue = queue.Queue()
+        self._revive_busy = False
+        self._revive_at = 0.0  # 마지막 자동 시도 (monotonic)
+        self._revive_fails = 0  # 연달아 실패한 횟수 — 쌓이면 자동 시도를 멈춘다
+        self._login_state = ""  # cooldown_login 의 상태 낱말 (모르면 빈 문자열)
+        self._login_account = ""  # 로그인된 계정 (알아냈을 때만)
+        self._login_render = None  # 로그인 팝업이 떠 있으면 그걸 다시 그리는 함수
+
         # 폰으로 보내기 — 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다
         self.push_cfg = cooldown_push.load_cfg()
         self.push_out: queue.Queue = queue.Queue()
@@ -686,6 +702,8 @@ class App:
         self.menu.add_command(label="이번 주 사용 속도…", command=self.open_pace)
         # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
         self.menu.add_command(label="사용량 통계…", command=self.open_stats)
+        # 위젯이 사용량을 읽을 수 있는지 · 막혔으면 여기서 잇는다
+        self.menu.add_command(label="로그인 상태…", command=self.open_login)
         self.menu.add_separator()
 
         # ---- 쿨다운 (사용량 표시) ----
@@ -772,6 +790,7 @@ class App:
                     "이번 주 사용 속도", lambda: self.commands.put("pace")
                 ),
                 pystray.MenuItem("사용량 통계", lambda: self.commands.put("stats")),
+                pystray.MenuItem("로그인 상태", lambda: self.commands.put("login")),
                 pystray.MenuItem(
                     "윈도우 켤 때 자동 실행",
                     lambda: self.commands.put("toggle_autostart"),
@@ -854,7 +873,14 @@ class App:
                 played = self.skin.absorbed()
             except Exception:  # noqa: BLE001
                 played = False
-            if not played:
+            if played:
+                return
+            # ★ 로그인이 막혀 있으면 새로고침은 어차피 헛일이다 (토큰이 낡은 걸
+            #   이미 안다) — 그 클릭을 **고칠 수 있는 곳**으로 보낸다. 그래서
+            #   위젯이 '눌러서 로그인 잇기' 라고 적어 둘 수 있다.
+            if isinstance(self.last_error, LoginRequired):
+                self.open_login()
+            else:
                 self.refresh_now()
             return
 
@@ -1113,6 +1139,7 @@ class App:
                 "toggle_autostart": self.toggle_autostart,
                 "pace": self.open_pace,
                 "stats": self.open_stats,
+                "login": self.open_login,
             }[cmd]()
             if cmd == "quit":
                 return
@@ -1136,6 +1163,13 @@ class App:
 
         while True:
             try:
+                ok, state, account = self.login_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_revive_result(ok, state, account)
+
+        while True:
+            try:
                 self.push_error = self.push_out.get_nowait()
             except queue.Empty:
                 break
@@ -1144,17 +1178,40 @@ class App:
     def _stamp(usage: Usage) -> str:
         return usage.fetched_at.astimezone().strftime("%H:%M")
 
-    @staticmethod
-    def _error_text(err: Exception) -> str:
-        # cooldown_core 가 이미 짧은 명사형으로 던진다 —
-        # '로그인 안 됨' / '로그인 만료' / '연결 실패' / '요청 과다' / '형식 변경'
+    def _error_text(self, err: Exception) -> str:
+        """위젯에 뜰 오류 한 마디. cooldown_core 가 이미 짧은 명사형으로 던진다 —
+        '연결 실패' / '요청 과다' / '형식 변경'.
+
+        **로그인 쪽만 여기서 갈아 끼운다** — 무엇이 잘못됐는지가 아니라 **무엇을 하면
+        되는지**를 쓴다. 토큰이 낡은 건 로그아웃이 아니라 '한 번 이어 주면 되는' 일이라,
+        옛 문구 '로그인 만료'(로그아웃된 줄 안다)를 되살리지 말 것.
+        """
+        if isinstance(err, LoginRequired):
+            if self._revive_busy:
+                return "로그인 잇는 중"
+            if self._login_state == cooldown_login.NO_CLI:
+                return "클로드 코드 없음"
+            if self._login_state == cooldown_login.LOGGED_OUT:
+                return "클로드 코드 로그인 필요"
+            if isinstance(err, TokenStale):
+                return "눌러서 로그인 잇기"
+            return "클로드 코드 로그인 필요"
         return str(err) or "알 수 없는 오류"
 
     def _tick(self):
         """1분마다 마지막 값으로 다시 그린다. 남은 시간이 조회 시점에 굳어
-        '1분 후' 라고 떠 있는 동안 이미 초기화가 끝나 있는 일을 막는다."""
+        '1분 후' 라고 떠 있는 동안 이미 초기화가 끝나 있는 일을 막는다.
+
+        ★ 로그인이 막혀 있는 동안에는 **토큰이 되살아났는지도 여기서 본다.** 자격
+        파일을 읽는 것뿐이라 공짜고(조회를 안 한다), 사용자가 클로드 코드를 한 번
+        쓰면 **1분 안에 저절로 이어진다.** 이게 없으면 되살리기가 한 번 실패한 뒤
+        폴링 간격(300초)·재시도 간격(600초)을 다 기다려야 해서, 정작 사람이 직접
+        고쳐 놓은 뒤에도 위젯만 한참 멎어 있었다.
+        """
         try:
-            if self.last_usage is not None and self.last_error is None:
+            if isinstance(self.last_error, LoginRequired) and token_stale() is False:
+                self.poller.refresh_now()
+            elif self.last_usage is not None and self.last_error is None:
                 self.skin.show(self.last_usage, self._stamp(self.last_usage))
                 self._apply_notice()
         except Exception:  # noqa: BLE001
@@ -1226,6 +1283,11 @@ class App:
     def _show(self, usage: Usage):
         self.last_usage = usage
         self.last_error = None
+        # 조회가 됐다 = 로그인이 멀쩡하다. 되살리기 예산을 되돌려 놓는다 —
+        # 안 그러면 며칠에 걸쳐 실패가 쌓여 자동 되살리기가 영영 멈춘다.
+        self._revive_fails = 0
+        self._revive_at = 0.0
+        self._login_state = ""
         self._clear_busy()
         self.skin.show(usage, self._stamp(usage))
         self._apply_notice()
@@ -1277,12 +1339,111 @@ class App:
         # (토큰은 8시간마다 만료돼서 자고 일어나면 매번 걸린다 — 그때마다 값이
         #  전부 사라지면 정작 궁금한 '얼마나 썼나' 를 볼 수가 없다)
         keep = self.last_usage is not None
+        if isinstance(err, TokenStale):
+            # 토큰만 낡았다 — 사용량을 안 쓰는 길로 조용히 되살려 본다.
+            # (문구는 되살리기가 시작되면 '로그인 잇는 중' 으로 바뀐다)
+            self._maybe_revive()
+        elif not isinstance(err, LoginRequired):
+            self._login_state = ""  # 로그인 문제가 아니면 옛 판정을 붙들지 않는다
         text = self._error_text(err)
         self.skin.show_error(text, keep, self.last_error_stamp)
         self._sync_status()  # 상태 점을 빨강으로 (붉은 바탕에 맞춰 자리도 다시)
         self.tray.icon = draw_icon(None)
         detail = f"{type(err).__name__}: {err}" if not str(err) else text
         self.tray.title = f"클로드 쿨다운 — {detail}"[:127]
+
+    # -------------------------------------------------- 로그인(토큰) 잇기
+    # 위젯이 쓰는 accessToken 은 **발급 8시간 뒤 만료**되고, 새로 발급할 수 있는 건
+    # 클로드 코드 CLI 뿐이다 — 그래서 클로드 코드를 하룻밤 안 쓰면 로그인은 멀쩡한데
+    # 위젯만 멎는다. 위젯이 직접 재발급하지 않는 까닭은 cooldown_login 머리말 참고.
+    def _five_open(self) -> bool:
+        """지금 5시간 창이 열려 있나 (마지막으로 받은 값 기준).
+        열려 있으면 핑을 보내도 경계가 안 밀리므로, 되살리기에 써도 잃는 게 없다."""
+        when = self._five_resets_local()
+        return when is not None and when > datetime.now()
+
+    def _maybe_revive(self) -> None:
+        """조용한 자동 되살리기. 사용량을 쓰지 않는 길만 밟는다 —
+        다만 5시간 창이 이미 열려 있으면 핑까지 밟는다(그 창에는 경계가 안 밀린다).
+
+        실패가 REVIVE_TRIES 만큼 쌓이면 멈춘다 — 안 될 일에 5분마다 프로세스를
+        띄우지 않는다. 그 뒤로는 사람이 '지금 잇기' 를 누를 때 다시 시도한다.
+        """
+        if self._revive_busy or self._revive_fails >= REVIVE_TRIES:
+            return
+        now = time.monotonic()
+        if self._revive_at and now - self._revive_at < REVIVE_GAP:
+            return
+        self._revive_at = now
+        self._start_revive(paid=self._five_open())
+
+    def _start_revive(self, paid: bool = False) -> None:
+        """되살리기를 백그라운드에서 시작한다 (CLI 를 부르므로 Tk 를 막으면 안 된다).
+
+        `paid` 가 참이면 공짜 계단이 다 실패했을 때 `claude -p` 핑까지 간다 —
+        **5시간 창이 닫혀 있었다면 그 순간 열린다.** 그래서 자동으로는 창이 이미
+        열려 있을 때만 참이고, 닫혀 있을 땐 사람이 그 버튼을 눌렀을 때만 참이다.
+        """
+        if self._revive_busy:
+            return
+        self._revive_busy = True
+        cfg = dict(self.ping_cfg)
+        self._refresh_error_text()  # '로그인 잇는 중' 으로 바꿔 단다
+        self._render_login()
+
+        def worker():
+            try:
+                ok = cooldown_login.revive_free()
+                if not ok and paid:
+                    ok = cooldown_ping.send_ping(cfg)[0]
+                if ok:
+                    self.login_out.put((True, cooldown_login.OK, ""))
+                    return
+                # 왜 안 됐는지는 CLI 가 안다 — 로그아웃인지, 아예 없는지.
+                status = cooldown_login.auth_status()
+                self.login_out.put(
+                    (False, cooldown_login.state(status), cooldown_login.account(status))
+                )
+            except Exception as e:  # noqa: BLE001
+                applog(f"스레드 오류 (로그인 잇기)\n{e}")
+                self.login_out.put((False, cooldown_login.UNKNOWN, ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_revive_result(self, ok: bool, state: str, account: str) -> None:
+        self._revive_busy = False
+        self._login_state = "" if ok else state
+        if account:
+            self._login_account = account
+        if ok:
+            self._revive_fails = 0
+            self.poller.refresh_now()  # 토큰이 새로 나왔으니 곧바로 다시 조회
+        else:
+            self._revive_fails += 1
+        self._refresh_error_text()
+        self._render_login()
+
+    def _refresh_error_text(self) -> None:
+        """오류가 떠 있는 채로 로그인 상태만 바뀌었을 때 그 한 줄만 다시 단다."""
+        try:
+            if self.last_error is not None:
+                self.skin.show_error(
+                    self._error_text(self.last_error),
+                    self.last_usage is not None,
+                    self.last_error_stamp,
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _render_login(self) -> None:
+        """로그인 팝업이 떠 있으면 내용을 다시 그린다 (안 떠 있으면 아무것도 안 한다)."""
+        render = self._login_render
+        if render is None:
+            return
+        try:
+            render()
+        except tk.TclError:
+            self._login_render = None
 
     # -------------------------------------------------- 자동 핑 (모닝 스타터)
     def _five_resets_local(self) -> datetime | None:
@@ -1556,6 +1717,138 @@ class App:
             render()
             self._finalize_panel(top, width)
             entry.focus_set()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # -------------------------------------------------- 로그인 상태
+    def open_login(self):
+        """로그인 상태 — 위젯이 사용량을 읽을 수 있는지, 막혔으면 여기서 잇는다.
+
+        말로 설명하지 않는다. **두 줄이 곧 설명**이다:
+        `클로드 코드`(로그인돼 있나) · `사용량 읽기`(위젯이 읽을 수 있나, 언제까지).
+        고칠 게 있을 때만 버튼이 뜨고, **버튼 이름이 그 값을 치른다는 뜻까지 담는다**
+        (`5시간 창 열고 잇기`) — 그래야 툴팁으로 부연할 일이 없다.
+        """
+        W = 300
+        try:
+            top, body = self._open_panel("로그인 상태")
+            wrap = tk.Frame(body, bg=P.bg)
+            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
+
+            def render():
+                for w in wrap.winfo_children():
+                    w.destroy()
+
+                stale = token_stale()
+                busy = self._revive_busy
+                st = self._login_state
+                expiry = token_expiry()
+
+                # ---- 클로드 코드: 로그인돼 있나
+                # 아직 안 알아본 상태(빈 문자열)에서 '로그인됨' 이라고 적지 않는다 —
+                # 확인하기 전에는 확인 중이라고만 쓴다.
+                if st == cooldown_login.NO_CLI:
+                    account, color = "설치 안 됨", P.red
+                elif st == cooldown_login.LOGGED_OUT:
+                    account, color = "로그아웃됨", P.red
+                elif st == cooldown_login.UNKNOWN and not busy:
+                    account, color = "확인 실패", P.amber
+                elif stale and not st:
+                    account, color = "확인 중…", P.faint
+                else:
+                    account = self._login_account or "로그인됨"
+                    color = P.green
+                self._pair(wrap, "클로드 코드", account, color)
+
+                # ---- 사용량 읽기: 위젯이 지금 읽을 수 있나, 언제까지
+                if stale is False:
+                    when = f"{expiry.astimezone():%H:%M} 까지" if expiry else "됨"
+                    self._pair(wrap, "사용량 읽기", when, P.green)
+                else:
+                    since = f"{expiry.astimezone():%H:%M} 부터 막힘" if expiry else "막힘"
+                    self._pair(wrap, "사용량 읽기", since, P.red)
+
+                if stale is False and not busy:
+                    tk.Label(
+                        wrap, text="이어져 있어요.", bg=P.bg, fg=P.faint,
+                        font=(KR, 9), anchor="w",
+                    ).pack(fill="x", pady=(10, 2))
+                    self._refit_panel(top, W)
+                    return
+
+                tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(12, 0))
+
+                if busy:
+                    tk.Label(
+                        wrap, text="잇는 중…", bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w"
+                    ).pack(fill="x", pady=(10, 2))
+                    self._refit_panel(top, W)
+                    return
+
+                if st == cooldown_login.LOGGED_OUT or st == cooldown_login.NO_CLI:
+                    # 여기서부터는 사람이 해야 한다 — 위젯이 자격 증명을 대신 넣지 않는다.
+                    tk.Label(
+                        wrap,
+                        text=(
+                            "클로드 코드를 설치해 주세요."
+                            if st == cooldown_login.NO_CLI
+                            else f"{cooldown_login.login_command()} 을 실행해 주세요."
+                        ),
+                        bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w",
+                        wraplength=W - PANEL_PAD * 2, justify="left",
+                    ).pack(fill="x", pady=(10, 8))
+                    if st == cooldown_login.LOGGED_OUT:
+                        self._themed_button(
+                            wrap, "로그인 창 열기",
+                            cooldown_login.open_login_console,
+                            primary=True, width=0,
+                        ).pack(anchor="e")
+                    self._refit_panel(top, W)
+                    return
+
+                # 낡았다 — 사용량을 안 쓰는 되살리기가 먼저다.
+                # ★ 버튼은 **늘 하나**다. '지금 잇기' 와 '5시간 창 열고 잇기' 를 나란히
+                #   놓아 봤더니, 앞엣것은 어차피 또 실패할 길인데 둘 중 뭘 눌러야 하는지가
+                #   화면에서 안 보였다. 다음에 밟을 계단 하나만 내놓고, **값을 치르는
+                #   계단이면 버튼 이름이 그걸 말한다.**
+                tried = self._revive_fails > 0
+                costs_window = tried and not self._five_open()
+                tk.Label(
+                    wrap,
+                    text=(
+                        "클로드 코드를 한 번 쓰면 저절로 이어져요."
+                        if tried
+                        else "클로드 코드가 열쇠를 새로 내주면 이어져요."
+                    ),
+                    bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w",
+                    wraplength=W - PANEL_PAD * 2, justify="left",
+                ).pack(fill="x", pady=(10, 8))
+                self._themed_button(
+                    wrap,
+                    "5시간 창 열고 잇기" if costs_window else "지금 잇기",
+                    lambda paid=costs_window or self._five_open(): self._start_revive(paid=paid),
+                    primary=True,
+                    width=0 if costs_window else 7,
+                ).pack(anchor="e")
+                self._refit_panel(top, W)
+
+            # 막혀 있는데 아직 까닭을 안 알아봤으면(앱을 막 켰다 등) 여기서 알아본다.
+            # `_login_render` 를 아직 안 걸어 둔 자리라 다시 그리기가 겹치지 않는다.
+            if token_stale() and not self._login_state and not self._revive_busy:
+                self._start_revive(paid=self._five_open())
+
+            render()
+            self._login_render = render
+            top.bind(
+                "<Destroy>",
+                lambda e, t=top: setattr(self, "_login_render", None) if e.widget is t else None,
+                add="+",
+            )
+            self._finalize_panel(top, W)
+            # 팝업을 여는 사이에 토큰이 되살아나 있었으면(클로드 코드를 그새 썼다)
+            # 굳이 기다리게 하지 않고 곧바로 다시 조회한다.
+            if token_stale() is False and self.last_error is not None:
+                self.poller.refresh_now()
         except Exception:  # noqa: BLE001
             pass
 
@@ -1972,8 +2265,12 @@ class App:
         except tk.TclError:
             pass
 
-    def _themed_button(self, parent, text, command, primary=False) -> tk.Button:
-        """팔레트 색을 입힌 납작한 버튼. primary 는 초록 강조."""
+    def _themed_button(self, parent, text, command, primary=False, width=7) -> tk.Button:
+        """팔레트 색을 입힌 납작한 버튼. primary 는 초록 강조.
+
+        `width` 는 **글자 수**라 7 을 넘는 이름은 그대로 잘린다 (`5시간 창 열고 잇기` 가
+        `간 창 열고 잇` 으로 보였다). 긴 이름은 `width=0` 으로 넘겨 글자에 맞춰 늘린다.
+        """
         if primary:
             bg, fg, active = P.green, P.bg, P.green
         else:
@@ -1982,7 +2279,7 @@ class App:
             parent,
             text=text,
             command=command,
-            width=7,
+            width=width,
             bg=bg,
             fg=fg,
             activebackground=active,

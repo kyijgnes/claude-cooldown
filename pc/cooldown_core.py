@@ -32,7 +32,16 @@ class UsageError(Exception):
 
 
 class LoginRequired(UsageError):
-    """토큰이 없거나 만료됐다. 사용자가 Claude Code 에 다시 로그인해야 한다."""
+    """토큰이 없다. 사용자가 Claude Code 에 로그인해야 한다."""
+
+
+class TokenStale(LoginRequired):
+    """로그인은 살아 있는데 토큰만 낡았다 (발급 8시간 뒤 만료).
+
+    새 토큰을 발급하는 건 Claude Code CLI 뿐이라, 클로드 코드를 한 번 쓰면 저절로
+    풀린다 — 사람이 다시 로그인할 일이 아니다. 되살리기는 `cooldown_login` 에 있다.
+    LoginRequired 를 물려받으므로 옛 `except LoginRequired` 는 그대로 잡는다.
+    """
 
 
 class ConnectionFailed(UsageError):
@@ -278,7 +287,8 @@ def five_due(usage: Usage, now: datetime | None = None) -> float | None:
 # ---------------------------------------------------------------- 조회
 
 
-def read_token() -> str:
+def read_oauth() -> dict:
+    """`~/.claude/.credentials.json` 의 claudeAiOauth 부분. 없으면 LoginRequired."""
     if not os.path.exists(CRED_PATH):
         raise LoginRequired("로그인 안 됨")
     try:
@@ -286,10 +296,44 @@ def read_token() -> str:
             data = json.load(f)
     except (OSError, ValueError) as e:
         raise LoginRequired("로그인 정보 손상") from e
-    token = (data.get("claudeAiOauth") or {}).get("accessToken")
-    if not token:
+    oauth = data.get("claudeAiOauth")
+    if not isinstance(oauth, dict) or not oauth.get("accessToken"):
         raise LoginRequired("로그인 안 됨")
-    return token
+    return oauth
+
+
+def token_expiry() -> datetime | None:
+    """accessToken 이 만료되는 시각(UTC aware). 모르면 None."""
+    try:
+        ms = read_oauth().get("expiresAt")
+    except LoginRequired:
+        return None
+    if not isinstance(ms, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(ms / 1000, timezone.utc)
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def token_stale() -> bool | None:
+    """토큰이 이미 만료됐나. 만료 시각을 못 읽으면 None(모름).
+
+    조회하기 **전에** 이걸 보면, 어차피 401 로 튕길 요청을 5분마다 보내지 않아도 된다
+    (문서화 안 된 엔드포인트라 헛요청은 그 자체로 부담이고, 실제로 429 까지 받았다).
+    """
+    when = token_expiry()
+    if when is None:
+        return None
+    return datetime.now(timezone.utc) >= when
+
+
+def read_token() -> str:
+    """지금 쓸 수 있는 accessToken. 이미 만료됐으면 부르지 않고 TokenStale."""
+    oauth = read_oauth()
+    if token_stale():
+        raise TokenStale("로그인 갱신 필요")
+    return oauth["accessToken"]
 
 
 def fetch_raw() -> dict:
@@ -307,8 +351,11 @@ def fetch_raw() -> dict:
         raise ConnectionFailed("연결 실패") from e
 
     # 화면에 그대로 나가는 문구다. 슬림 바의 오류 자리가 좁으니 짧은 명사형으로.
+    # 401·403 은 토큰이 낡았을 때가 거의 전부다 (만료 시각을 미리 봐서 걸렀는데도
+    # 여기까지 왔다면 시계 어긋남·토큰 회수 등). 어느 쪽이든 되살리기가 스스로
+    # 가려내므로(로그아웃이면 `claude auth status` 가 알려 준다) 같은 길로 보낸다.
     if r.status_code in (401, 403):
-        raise LoginRequired("로그인 만료")
+        raise TokenStale("로그인 갱신 필요")
     if r.status_code == 429:
         raise UsageError("요청 과다")
     if r.status_code >= 400:
