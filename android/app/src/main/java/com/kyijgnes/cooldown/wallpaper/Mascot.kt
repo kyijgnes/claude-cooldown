@@ -550,17 +550,27 @@ class Mascot {
     }
 
     /**
-     * 쏘아 올린 알이 터진다 — 그 자리에서 사방으로 흩뿌린다.
+     * 쏘아 올린 알이 터진다 — 그 자리에서 **사방으로 팡** 흩뿌린다.
      * ★ **발마다 퍼지는 정도가 다르다** — 다 같으면 한 발을 복사해 놓은 것처럼 보인다.
+     * ★★ **터지는 순간의 바깥 속도가 곧 '팡' 이다** — 느리게 뿜으면 한 뭉치로 뭉개져
+     *   '터지는 게 안 보인다'(폰에서 실제로 그랬다). 데스크탑(`slim.py`)과 같은 세기로
+     *   확 벌린 뒤 수명대로 사그라들게 한다.
      */
     private fun pop(fx: Float, fy: Float, ink: Int) {
         val spread = rnd(FINALE_SPREAD_MIN, FINALE_SPREAD_MAX)
         val core = if (rnd() < 0.5f) INK_STAR else ink
+        // 한복판에 밝은 섬광 — '팡' 하고 터지는 그 찰나의 심지 (짧고 빠르게 흩어진다)
+        for (k in 0 until FINALE_FLASH) {
+            val a = rnd(0f, TAU)
+            val r = rnd(0.25f, 0.6f) * spread
+            sparks.add(spark(fx, fy, cos(a) * r, sin(a) * r,
+                SPARK_LIFE * rnd(0.35f, 0.6f), INK_STAR))
+        }
         val n = rndInt(FINALE_PER_MIN, FINALE_PER_MAX + 1)
         for (k in 0 until n) {
             val a = rnd(0f, TAU)
-            val r = rnd(0.12f, 0.34f) * spread
-            sparks.add(spark(fx, fy, cos(a) * r, sin(a) * r - 0.05f,
+            val r = rnd(FINALE_V_MIN, FINALE_V_MAX) * spread
+            sparks.add(spark(fx, fy, cos(a) * r, sin(a) * r - 0.12f,
                 SPARK_LIFE * rnd(1.3f, 2.0f), if (k % 4 == 0) core else ink))
         }
     }
@@ -1076,11 +1086,16 @@ class Mascot {
         // ★★ 축하하는 동안은 **누르는 걸 안 받는다**(`party`). 그 '동안' 은 쏘는 프레임이
         //   아니라 **반짝이가 다 사그라들 때까지**다 — 안 그러면 화면엔 폭죽이 한창인데
         //   클로디만 먼저 평소로 돌아가 클릭에 반응한다.
-        const val FINALE_FRAMES = 49     // 폭죽을 쏘아 올리는 프레임 (약 1.6초)
-        const val FINALE_PER_MIN = 9     // 한 발에 뿜는 반짝이 (발마다 다르게)
-        const val FINALE_PER_MAX = 14
-        const val FINALE_SPREAD_MIN = 0.55f   // 발마다 퍼지는 정도도 다르다
-        const val FINALE_SPREAD_MAX = 1.35f
+        const val FINALE_FRAMES = 90     // 폭죽을 쏘아 올리는 프레임 (약 3초 — 꼬리까지 ≈ 5초)
+        const val FINALE_PER_MIN = 14    // 한 발에 뿜는 반짝이 (발마다 다르게) — 팡 하려면 넉넉히
+        const val FINALE_PER_MAX = 20
+        const val FINALE_FLASH = 5       // 터지는 찰나 한복판에 튀는 밝은 섬광
+        // ★★ 터지는 바깥 속도(칸/프레임) — 데스크탑과 같은 세기다. 작으면 한 뭉치로 뭉개져
+        //   '터지는 게 안 보인다'. 폰은 화면이 커서 이만큼은 벌려야 폭죽으로 읽힌다.
+        const val FINALE_V_MIN = 0.5f
+        const val FINALE_V_MAX = 1.1f
+        const val FINALE_SPREAD_MIN = 0.6f    // 발마다 퍼지는 정도도 다르다
+        const val FINALE_SPREAD_MAX = 1.5f
         // ★ 폴짝은 **누를 때보다 작고 잦게**(춤추듯). 크게 한 번씩 뛰면 눌러서 튄 것과
         //   똑같아 보인다 — '축하 중에 누르면 계속 점프한다' 로 읽힌다(데스크탑에서 겪음).
         const val FINALE_HOP = 12        // 이 프레임마다 한 박자 (웅크렸다 쏘며 폴짝)
@@ -1091,8 +1106,8 @@ class Mascot {
         const val SHELL_SPEED = 3.0f     // 날아가는 속도 (칸/프레임)
         const val SHELL_MIN = 6          // 아무리 가까워도 이만큼은 날아간다 (프레임)
         const val SHELL_MAX = 19         // 아무리 멀어도 이만큼 안에 닿는다 (안 늘어지게)
-        const val SHELL_SHOTS_MIN = 2    // 한 박자에 이만큼 쏜다
-        const val SHELL_SHOTS_MAX = 3
+        const val SHELL_SHOTS_MIN = 2    // 한 박자에 이만큼 쏜다 (여러 발이 겹쳐 팡팡)
+        const val SHELL_SHOTS_MAX = 4
         const val SHELL_STEP = 0.8f      // 줄기를 이만큼(칸)마다 한 알씩 찍어 잇는다
         const val SHELL_TRAIL = 0.8f     // 지나온 자리에 남기는 연기 (반짝이 수명 배수)
         const val POP_CONFETTI = 6       // 쏠 때 입에서 흩어지는 색종이
