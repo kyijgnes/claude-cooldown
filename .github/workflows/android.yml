@@ -89,6 +89,11 @@ jobs:
     needs: apk
     permissions:
       contents: write
+    env:
+      # ★ 러너의 콘솔은 cp1252 라 한글을 print 하는 순간 UnicodeEncodeError 로 죽는다
+      #   (build_exe.py 는 진행 상황을 한글로 찍는다). UTF-8 모드로 돌린다.
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
 
     steps:
       - uses: actions/checkout@v4
