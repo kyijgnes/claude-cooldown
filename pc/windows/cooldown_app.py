@@ -8,7 +8,7 @@ pip install -r ../requirements.txt
 
 - 시작표시줄 아이콘을 누르면 위젯이 맨 앞으로 나온다.
 - 위젯은 드래그로 옮기고, 위치는 저장된다. 우클릭으로 메뉴.
-- 우클릭 > 위젯 모양 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
+- 우클릭 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
 - 우클릭 > 앱 설정 > 윈도우 켤 때 자동 실행 을 켜면 시작 프로그램에 등록된다.
 """
 
@@ -757,10 +757,10 @@ class App:
         )
 
         # 메인 메뉴는 **갈래(하위 메뉴)로만** 이룬다 — 하나의 앱이지만 기능은 직관적으로 분리.
-        #   · 얼마나 썼나: 지금 이 창의 속도 · 쌓인 날들의 통계 (읽는 쪽)
-        #   · 위젯 모양: 디자인·밝기·항상 위 (옛 이름 '쿨다운')
-        #   · 5시간 자동 시작: 5시간 창을 앵커 시각에 맞춰 여는 기능 (옛 이름 '모닝 스타터')
-        #   · 폰에서 보기: 릴레이 전송·페어링
+        #   · 사용량: 지금 이 창의 속도 · 쌓인 날들의 통계 (읽는 쪽)
+        #   · 디자인: 스킨 넷을 곧바로 + 밝기·항상 위 (옛 이름 '쿨다운 (사용량 표시)')
+        #   · 클로드 모닝 스타터: 5시간 창을 앵커 시각에 맞춰 여는 기능
+        #   · 모바일: 릴레이 전송·페어링
         #   · 앱 설정: 로그인·자동 적용·자동 실행 (앱 전체에 걸리는 것)
         # 맨 아래 종료만 메인에 둔다.
         # ★ **갈래 이름에 괄호를 달지 않는다.** '쿨다운 (사용량 표시)' 처럼 이름이 안 통해서
@@ -768,7 +768,7 @@ class App:
         #   (폴더 전체 규칙: 설명이 필요하면 화면을 고친다).
         self.menu = tk.Menu(self.root, tearoff=0)
 
-        # ---- 얼마나 썼나 ----
+        # ---- 사용량 ----
         # 같은 물음('얼마나 썼나')에 답이 둘이라 한 갈래로 묶는다 —
         # 속도는 **지금 이 창**을, 통계는 **쌓인 날들**을 본다.
         used = tk.Menu(self.menu, tearoff=0)
@@ -776,22 +776,23 @@ class App:
         used.add_command(label="이번 주 사용 속도…", command=self.open_pace)
         # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
         used.add_command(label="사용량 통계…", command=self.open_stats)
-        self.menu.add_cascade(label="얼마나 썼나", menu=used)
+        self.menu.add_cascade(label="사용량", menu=used)
         self.menu.add_separator()
 
-        # ---- 위젯 모양 ----
+        # ---- 디자인 ----
         # '지금 새로고침' 항목은 뺀다 — 위젯을 클릭하면 새로고침되고 스피너가 돈다.
+        # ★ 스킨은 **이 갈래에 곧바로** 놓는다 — 안에 또 `디자인` 갈래를 두면
+        #   `디자인 > 디자인 > 카드형` 이 되어 한 단계가 헛돈다.
         cool = tk.Menu(self.menu, tearoff=0)
 
-        design = tk.Menu(cool, tearoff=0)
         for cls in skins.SKINS:
-            design.add_radiobutton(
+            cool.add_radiobutton(
                 label=cls.name,
                 value=cls.key,
                 variable=self.var_skin,
                 command=lambda k=cls.key: self.switch_skin(k),
             )
-        cool.add_cascade(label="디자인", menu=design)
+        cool.add_separator()
 
         theme = tk.Menu(cool, tearoff=0)
         for key, label in THEMES:
@@ -803,15 +804,15 @@ class App:
             )
         cool.add_cascade(label="밝기", menu=theme)
 
-        # '작업표시줄에 붙이기' 는 따로 두지 않는다 — 디자인에서 '슬림 바' 를 고르면
+        # '작업표시줄에 붙이기' 는 따로 두지 않는다 — 여기서 '작업표시줄 슬림 바' 를 고르면
         # 바로 작업표시줄에 붙고, 끌어 옮기면 그 자리에 남는다.
         cool.add_checkbutton(
             label="항상 위에 표시", variable=self.var_topmost, command=self.toggle_topmost
         )
         self.menu_cool = cool
-        self.menu.add_cascade(label="위젯 모양", menu=cool)
+        self.menu.add_cascade(label="디자인", menu=cool)
 
-        # ---- 모닝 스타터 ----
+        # ---- 클로드 모닝 스타터 ----
         # '핑' 같은 개발자 용어를 쓰지 않는다. 항목 이름이 곧 하는 일이 되게 한다.
         # 값(다음 시각·마지막 결과)은 메뉴에 나열하지 않는다 — 설정·기록 창에서 본다.
         ping = tk.Menu(self.menu, tearoff=0)
@@ -824,9 +825,9 @@ class App:
         ping.add_command(label="지금 한 번 실행", command=self.send_ping_now)
         ping.add_command(label="시각 설정…", command=self.open_ping_times)
         ping.add_command(label="실행 기록…", command=self.open_ping_log)
-        self.menu.add_cascade(label="5시간 자동 시작", menu=ping)
+        self.menu.add_cascade(label="클로드 모닝 스타터", menu=ping)
 
-        # ---- 폰에서 보기 ----
+        # ---- 모바일 ----
         # 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다. 폰 앱이 그걸 읽는다.
         phone = tk.Menu(self.menu, tearoff=0)
         phone.add_checkbutton(
@@ -834,7 +835,7 @@ class App:
         )
         phone.add_separator()
         phone.add_command(label="폰 연결…", command=self.open_phone_link)
-        self.menu.add_cascade(label="폰에서 보기", menu=phone)
+        self.menu.add_cascade(label="모바일", menu=phone)
 
         # ---- 앱 설정 ----
         # 앱 전체에 걸리는 것들 — 위젯 모양(쿨다운)이 아니라 '이 프로그램이 어떻게 도는가'.
