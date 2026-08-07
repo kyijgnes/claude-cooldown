@@ -8,7 +8,7 @@ pip install -r ../requirements.txt
 
 - 시작표시줄 아이콘을 누르면 위젯이 맨 앞으로 나온다.
 - 위젯은 드래그로 옮기고, 위치는 저장된다. 우클릭으로 메뉴.
-- 우클릭 > 쿨다운 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
+- 우클릭 > 위젯 모양 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
 - 우클릭 > 앱 설정 > 윈도우 켤 때 자동 실행 을 켜면 시작 프로그램에 등록된다.
 """
 
@@ -758,11 +758,14 @@ class App:
 
         # 메인 메뉴는 **갈래(하위 메뉴)로만** 이룬다 — 하나의 앱이지만 기능은 직관적으로 분리.
         #   · 얼마나 썼나: 지금 이 창의 속도 · 쌓인 날들의 통계 (읽는 쪽)
-        #   · 쿨다운 (사용량 표시): 위젯 모양·동작 (새로고침·디자인·밝기·붙이기·항상위)
-        #   · 모닝 스타터 (자동 핑): 5시간 창을 앵커 시각에 맞춰 여는 기능
+        #   · 위젯 모양: 디자인·밝기·항상 위 (옛 이름 '쿨다운')
+        #   · 5시간 자동 시작: 5시간 창을 앵커 시각에 맞춰 여는 기능 (옛 이름 '모닝 스타터')
         #   · 폰에서 보기: 릴레이 전송·페어링
         #   · 앱 설정: 로그인·자동 적용·자동 실행 (앱 전체에 걸리는 것)
         # 맨 아래 종료만 메인에 둔다.
+        # ★ **갈래 이름에 괄호를 달지 않는다.** '쿨다운 (사용량 표시)' 처럼 이름이 안 통해서
+        #   괄호로 풀어 줘야 한다면, 괄호를 붙일 게 아니라 **이름을 하는 일로 바꾼다**
+        #   (폴더 전체 규칙: 설명이 필요하면 화면을 고친다).
         self.menu = tk.Menu(self.root, tearoff=0)
 
         # ---- 얼마나 썼나 ----
@@ -773,10 +776,10 @@ class App:
         used.add_command(label="이번 주 사용 속도…", command=self.open_pace)
         # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
         used.add_command(label="사용량 통계…", command=self.open_stats)
-        self.menu.add_cascade(label="얼마나 썼나 (속도·통계)", menu=used)
+        self.menu.add_cascade(label="얼마나 썼나", menu=used)
         self.menu.add_separator()
 
-        # ---- 쿨다운 (사용량 표시) ----
+        # ---- 위젯 모양 ----
         # '지금 새로고침' 항목은 뺀다 — 위젯을 클릭하면 새로고침되고 스피너가 돈다.
         cool = tk.Menu(self.menu, tearoff=0)
 
@@ -806,7 +809,7 @@ class App:
             label="항상 위에 표시", variable=self.var_topmost, command=self.toggle_topmost
         )
         self.menu_cool = cool
-        self.menu.add_cascade(label="쿨다운 (사용량 표시)", menu=cool)
+        self.menu.add_cascade(label="위젯 모양", menu=cool)
 
         # ---- 모닝 스타터 ----
         # '핑' 같은 개발자 용어를 쓰지 않는다. 항목 이름이 곧 하는 일이 되게 한다.
@@ -821,7 +824,7 @@ class App:
         ping.add_command(label="지금 한 번 실행", command=self.send_ping_now)
         ping.add_command(label="시각 설정…", command=self.open_ping_times)
         ping.add_command(label="실행 기록…", command=self.open_ping_log)
-        self.menu.add_cascade(label="모닝 스타터 (5시간 자동 시작)", menu=ping)
+        self.menu.add_cascade(label="5시간 자동 시작", menu=ping)
 
         # ---- 폰에서 보기 ----
         # 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다. 폰 앱이 그걸 읽는다.
@@ -831,7 +834,7 @@ class App:
         )
         phone.add_separator()
         phone.add_command(label="폰 연결…", command=self.open_phone_link)
-        self.menu.add_cascade(label="폰에서 보기 (앱·위젯)", menu=phone)
+        self.menu.add_cascade(label="폰에서 보기", menu=phone)
 
         # ---- 앱 설정 ----
         # 앱 전체에 걸리는 것들 — 위젯 모양(쿨다운)이 아니라 '이 프로그램이 어떻게 도는가'.
@@ -852,7 +855,7 @@ class App:
             command=self.toggle_autostart,
         )
         self.menu_conf = conf
-        self.menu.add_cascade(label="앱 설정 (로그인·자동 실행)", menu=conf)
+        self.menu.add_cascade(label="앱 설정", menu=conf)
 
         self.menu.add_separator()
         self.menu.add_command(label="종료", command=self.quit)
@@ -2139,7 +2142,9 @@ class App:
             bar.create_rectangle(x, 0, x + MARK_W, 10, fill=P.title, width=0)
 
             self._pair(wrap, "지금까지 사용", f"{p.used:.0f}%", tone(p.used))
-            self._pair(wrap, "적정선 (고르게 쓸 때)", f"{p.due:.0f}%", P.sub)
+            # 괄호로 `(고르게 쓸 때)` 를 달지 않는다 — 바로 위 `_gap_sentence` 가
+            # `고르게 쓸 때보다 N%p 덜 썼어요` 로 이미 말했다. 이름은 어디서나 `적정선`.
+            self._pair(wrap, "적정선", f"{p.due:.0f}%", P.sub)
 
             tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(10, 8))
 
