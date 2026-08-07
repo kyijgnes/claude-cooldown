@@ -8,8 +8,8 @@ pip install -r ../requirements.txt
 
 - 시작표시줄 아이콘을 누르면 위젯이 맨 앞으로 나온다.
 - 위젯은 드래그로 옮기고, 위치는 저장된다. 우클릭으로 메뉴.
-- 우클릭 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
-- 우클릭 > 윈도우 켤 때 자동 실행 을 켜면 시작 프로그램에 등록된다.
+- 우클릭 > 쿨다운 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
+- 우클릭 > 앱 설정 > 윈도우 켤 때 자동 실행 을 켜면 시작 프로그램에 등록된다.
 """
 
 from __future__ import annotations
@@ -278,43 +278,85 @@ def autostart_enabled() -> bool:
     return os.path.exists(STARTUP_LNK)
 
 
+STABLE_EXE = "클로드 쿨다운.exe"  # build_exe 가 판 번호 없는 이름으로도 늘 남긴다
+
+
+def stable_twin(exe: str) -> str:
+    """옆에 있는 **판 번호 없는 쌍둥이 파일** 경로. 없거나 다른 것이면 준 것 그대로.
+
+    ★ 자동 실행 바로가기가 `claude-cooldown-v0.15.exe` 를 가리키면, 판을 올리며
+      그 파일을 지우는 순간 **없는 파일을 가리키는 바로가기**가 된다 — 다음 로그인에
+      아무 일도 안 일어나고 오류도 안 뜬다. `repair_autostart` 는 앱이 떠야 도니까
+      스스로 못 고친다. 이름이 안 바뀌는 쪽을 등록하면 그 구멍이 없어진다.
+    두 파일은 `shutil.copy2` 로 복사한 것이라 크기·수정시각이 정확히 같다 —
+    **그럴 때만** 바꾼다(예전에 만들어 두고 잊은 파일을 잘못 가리키지 않게).
+    """
+    twin = os.path.join(os.path.dirname(exe), STABLE_EXE)
+    if os.path.normcase(twin) == os.path.normcase(exe):
+        return exe
+    try:
+        here, there = os.stat(exe), os.stat(twin)
+    except OSError:
+        return exe
+    same = here.st_size == there.st_size and abs(here.st_mtime - there.st_mtime) < 2
+    return twin if same else exe
+
+
 def launch_command() -> tuple[str, str, str]:
     """(실행 파일, 인자, 작업 폴더) — 지금 이 프로그램을 다시 띄우는 방법.
 
-    exe 로 묶으면 파이썬도 스크립트도 없다. 그때는 exe 자신이 곧 실행 파일이다.
+    exe 로 묶으면 파이썬도 스크립트도 없다. 그때는 exe 자신이 곧 실행 파일이다
+    (단, 판 번호 없는 쌍둥이가 옆에 있으면 그쪽 — `stable_twin` 참고).
     """
     if getattr(sys, "frozen", False):  # PyInstaller 로 묶인 상태
         exe = os.path.abspath(sys.executable)
-        return exe, "", os.path.dirname(exe)
+        return stable_twin(exe), "", os.path.dirname(exe)
     pyw = sys.executable.replace("python.exe", "pythonw.exe")
     script = os.path.abspath(__file__)
     return pyw, f'"{script}"', os.path.dirname(script)
 
 
-def autostart_points_here() -> bool | None:
-    """등록된 바로가기가 지금 이 프로그램을 가리키는가. 없거나 못 읽으면 None."""
+def autostart_link() -> tuple[str, str] | None:
+    """등록된 바로가기의 (가리키는 파일, 인자). 없거나 못 읽으면 None."""
     if not os.path.exists(STARTUP_LNK):
         return None
     try:
         from win32com.client import Dispatch
 
         link = Dispatch("WScript.Shell").CreateShortCut(STARTUP_LNK)
-        target, args, _ = launch_command()
-        same_exe = os.path.normcase(link.TargetPath) == os.path.normcase(target)
-        return same_exe and link.Arguments.strip() == args.strip()
+        return link.TargetPath, link.Arguments
     except Exception:  # noqa: BLE001
         return None
 
 
-def repair_autostart() -> None:
-    """자동 실행이 켜져 있는데 딴 것을 가리키면 지금 것으로 고쳐 쓴다.
+def autostart_points_here() -> bool | None:
+    """등록된 바로가기가 지금 이 프로그램을 가리키는가. 없거나 못 읽으면 None."""
+    link = autostart_link()
+    if link is None:
+        return None
+    target, args, _ = launch_command()
+    same_exe = os.path.normcase(link[0]) == os.path.normcase(target)
+    return same_exe and link[1].strip() == args.strip()
 
-    폴더를 옮기거나 exe 로 바꾸면 바로가기가 없어진 파일을 가리키게 되고,
+
+def repair_autostart() -> None:
+    """자동 실행 바로가기가 고장났으면 지금 것으로 고쳐 쓴다.
+
+    폴더를 옮기거나 판을 올리면 바로가기가 **없어진 파일**을 가리키게 되고,
     재부팅해도 아무 일이 일어나지 않는다 — 오류도 안 뜬다. 켜 둔 사람은
     고장난 줄도 모른다.
+
+    ★ **소스로 돌릴 때는 멀쩡한 exe 등록을 빼앗지 않는다.** 손보느라
+      `python cooldown_app.py` 를 한 번 돌리면 바로가기가 조용히
+      `pythonw + 스크립트` 로 바뀌어, 그 뒤로는 부팅 때 **exe 가 아니라 소스가**
+      뜬다(파이썬을 옮기거나 지우면 그대로 먹통이고, 새 기능도 exe 에는 안 들어간다).
+      바꾸는 건 사람이 메뉴로 할 일이다.
     """
-    ok = autostart_points_here()
-    if ok is False:
+    if autostart_points_here() is not False:
+        return  # 등록이 아예 없거나(꺼 둠) 이미 맞다
+    link = autostart_link()
+    dangling = not os.path.exists(link[0] if link else "")
+    if dangling or getattr(sys, "frozen", False):
         set_autostart(True)
 
 
@@ -714,18 +756,24 @@ class App:
             self.root, bool(self.state.get("auto_update"))
         )
 
-        # 메인 메뉴는 두 진입점으로 나눈다 — 하나의 앱이지만 기능은 직관적으로 분리.
+        # 메인 메뉴는 **갈래(하위 메뉴)로만** 이룬다 — 하나의 앱이지만 기능은 직관적으로 분리.
+        #   · 얼마나 썼나: 지금 이 창의 속도 · 쌓인 날들의 통계 (읽는 쪽)
         #   · 쿨다운 (사용량 표시): 위젯 모양·동작 (새로고침·디자인·밝기·붙이기·항상위)
         #   · 모닝 스타터 (자동 핑): 5시간 창을 앵커 시각에 맞춰 여는 기능
-        # 공통(앱 전체)인 자동 실행·종료만 메인에 둔다.
+        #   · 폰에서 보기: 릴레이 전송·페어링
+        #   · 앱 설정: 로그인·자동 적용·자동 실행 (앱 전체에 걸리는 것)
+        # 맨 아래 종료만 메인에 둔다.
         self.menu = tk.Menu(self.root, tearoff=0)
 
-        # 게이지의 '지금쯤' 눈금이 무슨 뜻인지, 숫자와 판정까지 여기서 다 본다.
-        self.menu.add_command(label="이번 주 사용 속도…", command=self.open_pace)
+        # ---- 얼마나 썼나 ----
+        # 같은 물음('얼마나 썼나')에 답이 둘이라 한 갈래로 묶는다 —
+        # 속도는 **지금 이 창**을, 통계는 **쌓인 날들**을 본다.
+        used = tk.Menu(self.menu, tearoff=0)
+        # 게이지의 '적정선' 눈금이 무슨 뜻인지, 숫자와 판정까지 여기서 다 본다.
+        used.add_command(label="이번 주 사용 속도…", command=self.open_pace)
         # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
-        self.menu.add_command(label="사용량 통계…", command=self.open_stats)
-        # 위젯이 사용량을 읽을 수 있는지 · 막혔으면 여기서 잇는다
-        self.menu.add_command(label="로그인 상태…", command=self.open_login)
+        used.add_command(label="사용량 통계…", command=self.open_stats)
+        self.menu.add_cascade(label="얼마나 썼나 (속도·통계)", menu=used)
         self.menu.add_separator()
 
         # ---- 쿨다운 (사용량 표시) ----
@@ -785,22 +833,27 @@ class App:
         phone.add_command(label="폰 연결…", command=self.open_phone_link)
         self.menu.add_cascade(label="폰에서 보기 (앱·위젯)", menu=phone)
 
-        # ---- 앱 공통 ----
-        self.menu.add_separator()
-        # [업데이트 대기] 항목 이름에 조건을 그대로 적는다 — 언제 도는지 묻지 않아도 알게
-        self.menu.add_checkbutton(
-            label=(
-                f"작업 없고 자리 비면 클로드 업데이트 자동 적용 "
-                f"({cooldown_update.QUIET_MIN:.0f}분·{cooldown_update.IDLE_MIN:.0f}분)"
-            ),
+        # ---- 앱 설정 ----
+        # 앱 전체에 걸리는 것들 — 위젯 모양(쿨다운)이 아니라 '이 프로그램이 어떻게 도는가'.
+        conf = tk.Menu(self.menu, tearoff=0)
+        # 위젯이 사용량을 읽을 수 있는지 · 막혔으면 여기서 잇는다
+        conf.add_command(label="로그인 상태…", command=self.open_login)
+        conf.add_separator()
+        # [업데이트 대기] 이름은 **언제 도는지**까지만 — 몇 분인지는 안 적는다.
+        # 옛 이름은 `작업 없고 자리 비면 … (45분·20분)` 이었는데 메뉴 한 줄이 너무 길었다.
+        conf.add_checkbutton(
+            label="자리 비면 클로드 업데이트 자동 적용",
             variable=self.var_auto_update,
             command=self.toggle_auto_update,
         )
-        self.menu.add_checkbutton(
+        conf.add_checkbutton(
             label="윈도우 켤 때 자동 실행",
             variable=self.var_autostart,
             command=self.toggle_autostart,
         )
+        self.menu_conf = conf
+        self.menu.add_cascade(label="앱 설정 (로그인·자동 실행)", menu=conf)
+
         self.menu.add_separator()
         self.menu.add_command(label="종료", command=self.quit)
 
@@ -1074,7 +1127,7 @@ class App:
         if got != want:
             # 시작 폴더에 못 쓰는 환경(정책·보안 솔루션)이다. 체크가 도로 풀려서
             # 눌러도 아무 일이 없는 것처럼 보이므로, 아예 잠가 이유를 드러낸다.
-            self.menu.entryconfig("윈도우 켤 때 자동 실행", state="disabled")
+            self.menu_conf.entryconfig("윈도우 켤 때 자동 실행", state="disabled")
         try:
             self.tray.update_menu()  # 트레이 쪽 체크는 스스로 갱신되지 않는다
         except Exception:  # noqa: BLE001

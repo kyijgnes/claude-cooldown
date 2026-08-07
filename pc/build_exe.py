@@ -108,8 +108,10 @@ def main() -> int:
     size = os.path.getsize(exe) / 1024 / 1024
     print(f"\n완성: {exe}  ({size:.1f} MB)")
 
-    # **판 번호를 붙인 이름으로도 둔다** — 자동 실행 바로가기가 가리키는 것이 이 파일이고,
-    # 릴리스에 올리는 것도 이 파일이다(이름이 곧 판 번호라 어느 판이 도는지 알 수 있다).
+    # **판 번호를 붙인 이름으로도 둔다** — 릴리스에 올리는 것이 이 파일이다
+    # (이름이 곧 판 번호라 어느 판이 도는지 알 수 있다).
+    # ★ 자동 실행 바로가기가 가리키는 것은 **위의 이름 안 바뀌는 exe** 다 —
+    #   판을 올리며 번호 붙은 파일을 지워도 바로가기가 안 끊기게(`stable_twin`).
     ver = version()
     if ver:
         named = os.path.join(ROOT, "dist", f"claude-cooldown-v{ver}.exe")
