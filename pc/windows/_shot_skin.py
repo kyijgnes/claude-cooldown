@@ -88,8 +88,9 @@ def main() -> None:
         skin.show(demo(extreme=True), STAMP)
     elif mode == "note":
         # 값은 멀쩡한데 알릴 것이 있는 상태 — 앱이 show() 바로 뒤에 notice() 를 부른다
+        # 넷째 인자로 문구를 넘기면 그걸 쓴다 (새 알림 문구의 폭을 재 볼 때)
         skin.show(demo(), STAMP)
-        skin.notice("20:03 핑 실패")
+        skin.notice(sys.argv[4] if len(sys.argv) > 4 else "20:03 핑 실패")
     elif mode == "net":
         skin.show(demo(), STAMP)
         skin.show_error("연결 실패", True, STAMP)

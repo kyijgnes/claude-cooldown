@@ -25,6 +25,7 @@ import time
 import tkinter as tk
 import traceback
 from datetime import datetime
+from tkinter import messagebox
 
 import pystray
 from PIL import Image, ImageDraw, ImageFont, ImageTk
@@ -51,6 +52,7 @@ import cooldown_login  # noqa: E402
 import cooldown_ping  # noqa: E402
 import cooldown_push  # noqa: E402
 import cooldown_stats  # noqa: E402
+import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐지면 지운다
 import skins  # noqa: E402
 from skins.base import (  # noqa: E402
     KR,
@@ -141,6 +143,9 @@ def install_crash_log() -> None:
 WARN_AT = 80  # 한도가 이 % 를 넘으면 알림
 WARN_CLEAR = 70  # 이 아래로 내려가면 알림 재무장
 RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
+# [업데이트 대기] 클로드 업데이트가 밀려 있는지 보는 간격. 남의 서버가 아니라 내 PC를
+# 보는 것이라 자주 해도 무해하지만, 한 번에 0.6초쯤 걸리므로 5분이면 충분하다.
+UPDATE_EVERY = 300
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
 UNDOCK_SLOP = 120  # 붙여 둔 상태에선 이만큼 넘게 끌어야 떼어 낸다 (그 안이면 클릭으로 보고 제자리로)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
@@ -236,6 +241,9 @@ def load_state() -> dict:
         "dock": True,  # 슬림 바는 작업표시줄에 붙는 게 기본 (자유 위치로 끌면 꺼진다)
         "theme": "auto",  # auto(윈도우 설정 따름) / light / dark
         "skin": skins.DEFAULT,
+        # [업데이트 대기] 조용할 때 알아서 껐다 켤지. **끔이 기본** — 남의 프로세스를
+        # 죽이는 일이라 켜는 것은 사람이 정한다.
+        "auto_update": False,
     }
     try:
         with open(STATE_PATH, encoding="utf-8") as f:
@@ -521,6 +529,14 @@ class App:
         self.results: queue.Queue = queue.Queue()
         self.commands: queue.Queue = queue.Queue()
         self.warned = {"five": False, "week": False}
+        # [업데이트 대기] 클로드 앱 업데이트가 실행 중인 세션을 죽이기 전에 알린다
+        self.update_out: queue.Queue = queue.Queue()
+        # ★ 결과도 큐로 돌려받는다. **작업 스레드에서 root.after 를 부르면 안 된다** —
+        #   Tk 는 스레드 안전하지 않아 조용히 씹히거나 죽는다(실제로 씹혔다).
+        self.update_done: queue.Queue = queue.Queue()
+        self._update_pending: cooldown_update.Pending | None = None
+        self._update_warned = False
+        self._update_busy = False
         self.height = 0
         self.alive = True
         self.last_usage: Usage | None = None
@@ -586,6 +602,8 @@ class App:
         self.poller.start()
         self.tray = self._build_tray()
         threading.Thread(target=self.tray.run, daemon=True).start()
+        # [업데이트 대기] 사용량 조회와 무관하므로 폴러에 얹지 않고 따로 돈다
+        threading.Thread(target=self._update_watch, daemon=True).start()
 
         self.root.after(200, self._pump)
         self.root.after(STAY_TICK, self._stay_above)
@@ -691,6 +709,10 @@ class App:
         self.var_theme = tk.StringVar(self.root, self.state["theme"])
         self.var_ping = tk.BooleanVar(self.root, bool(self.ping_cfg.get("enabled")))
         self.var_push = tk.BooleanVar(self.root, bool(self.push_cfg.get("enabled")))
+        # [업데이트 대기]
+        self.var_auto_update = tk.BooleanVar(
+            self.root, bool(self.state.get("auto_update"))
+        )
 
         # 메인 메뉴는 두 진입점으로 나눈다 — 하나의 앱이지만 기능은 직관적으로 분리.
         #   · 쿨다운 (사용량 표시): 위젯 모양·동작 (새로고침·디자인·밝기·붙이기·항상위)
@@ -765,6 +787,15 @@ class App:
 
         # ---- 앱 공통 ----
         self.menu.add_separator()
+        # [업데이트 대기] 항목 이름에 조건을 그대로 적는다 — 언제 도는지 묻지 않아도 알게
+        self.menu.add_checkbutton(
+            label=(
+                f"작업 없고 자리 비면 클로드 업데이트 자동 적용 "
+                f"({cooldown_update.QUIET_MIN:.0f}분·{cooldown_update.IDLE_MIN:.0f}분)"
+            ),
+            variable=self.var_auto_update,
+            command=self.toggle_auto_update,
+        )
         self.menu.add_checkbutton(
             label="윈도우 켤 때 자동 실행",
             variable=self.var_autostart,
@@ -784,6 +815,12 @@ class App:
                     "위젯 앞으로",
                     lambda: self.commands.put("front"),
                     default=True,
+                ),
+                # [업데이트 대기] 대기 중일 때만 나타난다. 평소엔 없는 항목이다.
+                pystray.MenuItem(
+                    lambda item: self._update_menu_label(),
+                    lambda: self.commands.put("apply_update"),
+                    visible=lambda item: self._update_pending is not None,
                 ),
                 pystray.MenuItem("지금 새로고침", lambda: self.refresh_now()),
                 pystray.MenuItem(
@@ -1140,9 +1177,25 @@ class App:
                 "pace": self.open_pace,
                 "stats": self.open_stats,
                 "login": self.open_login,
+                "apply_update": self.apply_update,  # [업데이트 대기]
             }[cmd]()
             if cmd == "quit":
                 return
+
+        # [업데이트 대기] 감시 스레드가 넣어 둔 판정을 받는다
+        while True:
+            try:
+                pending = self.update_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_update_state(pending)
+
+        while True:
+            try:
+                auto, ok, detail, target = self.update_done.get_nowait()
+            except queue.Empty:
+                break
+            self._on_update_done(auto, ok, detail, target)
 
         while True:
             try:
@@ -1248,6 +1301,137 @@ class App:
                 f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}"
             )
 
+    # ---------------------------------------------------- [업데이트 대기]
+    # 클로드 앱은 새 버전을 받아 두고 나중에 **실행 중인 세션을 죽이면서** 갈아끼운다.
+    # 대기 중인지 미리 알려 주면 편할 때 껐다 켜서 피할 수 있다.
+    # 판정은 cooldown_update 에만 있다. 클로드가 고쳐지면 이 블록째로 지운다.
+
+    def _update_watch(self) -> None:
+        """UPDATE_EVERY 마다 대기 여부를 물어 큐에 넣는다. 조회는 0.6초쯤 걸린다."""
+        while self.alive:
+            try:
+                self.update_out.put(cooldown_update.check())
+            except Exception:  # noqa: BLE001  못 물어봤으면 다음 차례에 다시
+                pass
+            time.sleep(UPDATE_EVERY)
+
+    def _update_menu_label(self) -> str:
+        """트레이 메뉴 항목 이름 = 하는 일 + 지금 값."""
+        p = self._update_pending
+        if p is None:
+            return "클로드 껐다 켜서 업데이트 끝내기"
+        return f"클로드 껐다 켜서 업데이트 끝내기 ({p.target} 대기)"
+
+    def toggle_auto_update(self) -> None:
+        self.state["auto_update"] = not bool(self.state.get("auto_update"))
+        self.var_auto_update.set(bool(self.state["auto_update"]))
+        save_state(self.state)
+
+    def _on_update_state(self, pending: cooldown_update.Pending | None) -> None:
+        was = self._update_pending
+        self._update_pending = pending
+
+        if pending is None:
+            self._update_warned = False
+        elif not self._update_warned:
+            # 한 번만 알린다. 5분마다 다시 띄우면 알림이 소음이 된다.
+            hint = (
+                "트레이 아이콘 > 클로드 껐다 켜서 업데이트 끝내기"
+                if not self.state.get("auto_update")
+                else "작업이 없고 자리를 비우면 알아서 적용합니다"
+            )
+            self.tray.notify(
+                f"{pending.line}\n"
+                "그대로 두면 작업 도중 클로드가 강제로 닫힙니다.\n" + hint,
+                "클로드 쿨다운",
+            )
+            self._update_warned = True
+
+        # 문구가 실제로 바뀌었을 때만 다시 그린다
+        if (was.target if was else None) != (pending.target if pending else None):
+            self._redraw()
+
+        if pending is not None and self.state.get("auto_update"):
+            self._auto_update_try(pending)
+
+    def _auto_update_try(self, pending: cooldown_update.Pending) -> None:
+        """조용하면 묻지 않고 적용한다. 아니면 다음 차례(5분 뒤)에 다시 본다."""
+        if self._update_busy:
+            return
+        ok, _why = cooldown_update.safe_now()
+        if not ok:
+            return
+
+        self._update_busy = True
+        target = pending.target
+
+        def worker():
+            # 판정과 실행 사이에 작업이 시작됐을 수 있다 — 죽이기 직전에 한 번 더 본다
+            still, why = cooldown_update.safe_now()
+            if not still:
+                applog(f"업데이트 자동 적용 접음 — {why}")
+                self.update_done.put((True, True, "", target))  # 조용히 물러난다
+                return
+            try:
+                ok, detail = cooldown_update.apply()
+            except Exception as e:  # noqa: BLE001
+                ok, detail = False, str(e)
+            # 다시 판정도 여기서(작업 스레드에서) 한다 — 0.6초 걸려 화면을 붙잡으면 안 된다
+            self.update_out.put(cooldown_update.check())
+            self.update_done.put((True, ok, detail, target))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def apply_update(self) -> None:
+        """클로드를 껐다 켜서 미뤄둔 등록을 지금 끝낸다. 되돌릴 수 없어 한 번 묻는다."""
+        if self._update_busy:
+            return
+        p = self._update_pending
+        if p is None:
+            messagebox.showinfo(
+                "클로드 쿨다운", "대기 중인 업데이트가 없습니다.", parent=self.root
+            )
+            return
+
+        when = f"\n내려받은 시각   {p.since:%m/%d %H:%M}" if p.since else ""
+        if not messagebox.askyesno(
+            "클로드 껐다 켜서 업데이트 끝내기",
+            f"지금 버전   {p.current}\n"
+            f"대기 버전   {p.target}{when}\n\n"
+            "클로드를 지금 닫고 새 버전으로 다시 켭니다.\n"
+            "돌고 있는 작업은 여기서 중단됩니다 (대화 기록은 남습니다).\n\n"
+            "계속할까요?",
+            parent=self.root,
+        ):
+            return
+
+        self._update_busy = True
+
+        target = p.target
+
+        def worker():
+            try:
+                ok, detail = cooldown_update.apply()
+            except Exception as e:  # noqa: BLE001
+                ok, detail = False, str(e)
+            # 다시 판정도 여기서(작업 스레드에서) 한다 — 0.6초 걸려 화면을 붙잡으면 안 된다
+            self.update_out.put(cooldown_update.check())
+            self.update_done.put((False, ok, detail, target))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_done(self, auto: bool, ok: bool, detail: str, target: str) -> None:
+        self._update_busy = False
+        self._update_warned = False
+        if detail:
+            applog(f"업데이트 {'자동 ' if auto else ''}적용 — {target} — {detail}")
+            head = "조용해서 자동으로 적용했습니다\n" if auto else ""
+            self.tray.notify(head + detail, "클로드 쿨다운")
+        if not ok and not auto:
+            messagebox.showwarning("클로드 쿨다운", detail, parent=self.root)
+
+    # ------------------------------------------------ [업데이트 대기] 끝
+
     def _notice_text(self) -> str:
         """위젯에 얹을 알림 문구 (값은 멀쩡할 때) — 자동 시작이 실패했거나 놓쳤을 때.
 
@@ -1255,6 +1439,9 @@ class App:
         '자동 시작'). 시각을 앞세우고 **까닭은 붙이지 않는다** — 까닭은 트레이 알림과
         실행 기록에 있다.
         """
+        # [업데이트 대기] 핑보다 앞선다 — 이건 놓치면 작업이 통째로 날아간다
+        if self._update_pending is not None:
+            return self._update_pending.short
         if not self.ping_cfg.get("enabled"):
             return ""
         if self._ping_fail is not None:  # 실패가 놓침보다 급하다 (지금 안 열린 것)

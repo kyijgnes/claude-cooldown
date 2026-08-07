@@ -1,6 +1,8 @@
-# 폰 앱 APK 만들기
+# 릴리스 만들기 — 폰 APK + 윈도우 exe
 #
-# 태그를 밀면(v0.2 처럼) APK 를 만들어 릴리스에 붙인다 — 친구는 그 링크만 받으면 된다.
+# 태그를 밀면(v0.2 처럼) APK 와 exe 를 만들어 **둘 다** 릴리스에 붙인다.
+# ★ **exe 를 빠뜨리지 않는다.** 예전에는 exe 를 손으로 올려서 v0.14 처럼 APK 만 달린
+#   릴리스가 나왔다. 손으로 하지 말 것 — 이 워크플로가 늘 같이 올린다.
 # 손으로 돌리려면 Actions 탭 > 이 워크플로 > Run workflow.
 #
 # ★ 시크릿 두 개가 있어야 돈다 — COOLDOWN_KEYSTORE_B64 / COOLDOWN_KEYSTORE_PASSWORD.
@@ -78,5 +80,53 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.apk.outputs.path }}
+          generate_release_notes: false
+          body: ""
+
+  # 윈도우 위젯 exe. APK 가 릴리스를 먼저 만들고 나서 붙인다(둘이 같이 만들면 겹친다).
+  exe:
+    runs-on: windows-latest
+    needs: apk
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 준비물
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r pc/requirements.txt pyinstaller
+
+      - name: 빌드
+        run: python build_exe.py
+        working-directory: pc
+
+      # 판 번호는 gradle 의 versionName 을 따르므로 태그와 어긋날 수 있다 — 여기서 잡는다.
+      - name: 판 번호가 태그와 같은지
+        shell: bash
+        run: |
+          want="pc/dist/claude-cooldown-${GITHUB_REF_NAME}.exe"
+          if [ ! -f "$want" ]; then
+            echo "::error::$want 가 없다. build.gradle.kts 의 versionName 과 태그가 어긋났다."
+            ls -1 pc/dist || true
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exe
+          path: pc/dist/claude-cooldown-${{ github.ref_name }}.exe
+
+      - name: 릴리스에 붙이기
+        # ★ 여기도 릴리스 노트를 쓰지 않는다 (위 '릴리스에 붙이기' 와 같은 규칙).
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pc/dist/claude-cooldown-${{ github.ref_name }}.exe
           generate_release_notes: false
           body: ""
