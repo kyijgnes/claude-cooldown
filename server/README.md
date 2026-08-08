@@ -10,6 +10,16 @@ PC 위젯 ──POST /api/cooldown──▶ Vercel (이 폴더) ──▶ Upstas
 
 - 주소: `https://<내-릴레이>.vercel.app`
 - 코드: `app/api/cooldown/route.ts` 한 파일. **의존성은 `next`·`react` 뿐이다**(저장소 SDK 없음).
+- **앱이 도는 곳은 `icn1`(서울)**, 저장소는 Upstash Redis(아래 '저장소 만들기' 참고).
+  2026-08-08 에 옮겼다 — 그전엔 기본값인 미국이라 저장소까지 태평양을 건넜다.
+  확인은 응답 헤더 `X-Vercel-Id` 의 **두 번째 토막**(`icn1::icn1::…` 에서 처리한 곳):
+  ```bash
+  curl -sI https://<내-릴레이>.vercel.app/api/cooldown | grep -i x-vercel-id
+  ```
+  바꾸려면 Vercel > 프로젝트 > Settings > Functions > Region 을 고치고 **재배포**한다
+  (지역은 새 배포부터 적용된다 — 설정만 바꾸면 그대로 옛 지역에서 돈다).
+  ★ **체감은 거의 없다** — PC 는 5분, 폰은 15분에 한 번이라 지연이 문제가 되는 구조가 아니다.
+  옮길 값어치가 있는 건 **앱과 저장소가 대륙째 갈렸을 때뿐**이다.
 
 ## 무엇을 저장하나
 
@@ -32,7 +42,10 @@ PC 위젯 ──POST /api/cooldown──▶ Vercel (이 폴더) ──▶ Upstas
 **Vercel 마켓플레이스로 붙인다** — 환경변수가 저절로 꽂히고 청구도 Vercel 한 곳으로 모인다.
 
 1. Vercel > 이 프로젝트 > **Storage** > `Create Database` > **Upstash for Redis**
-2. Plan **Free**, Region 은 폰·PC 와 가까운 곳(`ap-northeast-1` 도쿄)
+2. Plan **Free**, Region 은 폰·PC 와 가까운 곳(`ap-northeast-1` 도쿄).
+   **앱 지역(위 `icn1`)과 같은 대륙이어야 한다** — 여기가 미국이면 앱을 서울로 옮겨도 소용없다.
+   지금 어느 대륙인지는 왕복 시간으로 안다: 따뜻한 상태에서 GET 이 **100ms 대면 가까운 것,
+   300ms 를 넘으면 건너편**이다(아래 '확인' 의 `relay_check.mjs` 또는 그냥 `curl -w %{time_total}`).
 3. 이 프로젝트에 **Connect** — 환경변수가 자동으로 들어온다
 4. **Deployments > 맨 위 > Redeploy** (환경변수는 재배포해야 반영된다)
 
