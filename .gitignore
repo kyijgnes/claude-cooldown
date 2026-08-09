@@ -3,6 +3,10 @@ __pycache__/
 .env*
 node_modules/
 
+# 내부 개발 메모 — 공개 저장소(친구 배포용)에 올리지 않는다. 친구용 README.md 만 공개.
+CLAUDE.md
+server/README.md
+
 # PyInstaller 산출물 — 40MB 짜리라 저장소에 넣지 않는다.
 # 만드는 법은 build_exe.py, 나눠주는 법은 README 의 '친구에게 나눠주기' 참고.
 build/
