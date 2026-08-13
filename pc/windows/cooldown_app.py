@@ -2008,6 +2008,11 @@ class App:
             self._tray_say("폰에서 원격 대기 " + ("켬" if on else "끔"))
             self._apply_notice()
         cooldown_remote.save_cfg(self.remote_cfg)
+        # 결과를 **여기서 바로** 알린다 — 다음 tick(30초)까지 미루면 누른 사람 화면에는
+        # 그동안 '전하는 중' 이 남아, 됐는지 안 됐는지 모른 채 기다리게 된다.
+        self._say_state(
+            "on" if self.remote.running() else ("fail" if self.remote_error else "off")
+        )
 
     def _say_state(self, state: str) -> None:
         """지금 상태를 릴레이에 적어 둔다 — 폰이 켜졌는지 보고 알 수 있게.
