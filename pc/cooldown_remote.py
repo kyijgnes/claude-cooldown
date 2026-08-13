@@ -34,6 +34,7 @@ import subprocess
 import sys
 from datetime import datetime
 
+import cooldown_push  # 릴레이 주소·키는 '폰으로 보내기' 설정을 그대로 쓴다
 from cooldown_ping import find_claude  # claude 실행 파일 찾기는 한 곳에만 둔다
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.json")
@@ -49,6 +50,9 @@ DEFAULTS = {
     "enabled": False,   # 켜져 있어야 하나. 앱이 뜰 때 이 값대로 되살린다.
     "folder": "",       # 어느 폴더에서 돌 것인가. 비면 default_folder()
     "last_error": "",   # 마지막 실패 까닭 (화면 표시용)
+    # 폰이 마지막으로 '이렇게 해 달라' 고 적은 시각. 같은 것을 두 번 따르지 않으려고 적어 둔다 —
+    # 이게 없으면 사흘 전 폰에서 켠 것이 PC 에서 끌 때마다 되살아난다.
+    "last_want_at": "",
 }
 
 
@@ -290,6 +294,68 @@ class Remote:
             self.last_error = "끊김"
         _log(f"죽음: 코드={code} {self.last_error}")
         return self.last_error
+
+
+# ---------------------------------------------------------------- 폰에서 켜고 끄기
+#
+# 폰이 릴레이에 '원하는 상태(want)' 를 적어 두면 PC 가 주기적으로 읽어 따라간다.
+# 반대로 PC 는 '지금 상태(state)' 를 적어 폰이 화면에 표시할 수 있게 한다.
+# 주소·키는 **'폰으로 보내기'(cooldown_push) 설정을 그대로 쓴다** — 이미 QR 로 짝지어
+# 놓은 것을 또 짝지을 까닭이 없다.
+#
+# ★★ **폴링 주기를 함부로 줄이지 말 것.** Upstash 무료는 월 50만 명령이고 사용량
+#   중계만으로 이미 29%(20명 기준)를 쓴다. 여기 GET 은 MGET 하나(=명령 1)지만
+#   주기가 곧 비용이라, 60초로 하면 20명 기준 한도를 넘긴다. 계산은 server/README.md.
+
+REMOTE_PATH = "/api/remote"  # server/app/api/remote/route.ts 와 같아야 한다
+NET_TIMEOUT = 12
+
+
+def relay_ready(push_cfg: dict) -> bool:
+    """폰과 짝지어져 있나. 안 짝지어져 있으면 폴링을 아예 안 한다(남의 무료 한도를 안 쓴다)."""
+    return bool(cooldown_push.normalize_url(push_cfg.get("url"))) and bool(push_cfg.get("key"))
+
+
+def _endpoint(push_cfg: dict) -> str:
+    base = cooldown_push.normalize_url(push_cfg.get("url"))
+    return base + REMOTE_PATH if base else ""
+
+
+def fetch_want(push_cfg: dict) -> tuple[str, str] | None:
+    """릴레이에서 (원하는 상태, 적힌 시각) 을 읽는다. 없거나 못 읽으면 None.
+    네트워크를 타므로 **별도 스레드에서** 부를 것."""
+    url = _endpoint(push_cfg)
+    if not url:
+        return None
+    try:
+        import requests
+
+        r = requests.get(url, params={"key": push_cfg["key"]}, timeout=NET_TIMEOUT)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+    except Exception:  # noqa: BLE001 — 못 읽으면 그냥 지금 상태를 지킨다
+        return None
+    want, at = data.get("want"), data.get("want_at")
+    if want in ("on", "off") and isinstance(at, str):
+        return want, at
+    return None
+
+
+def publish_state(push_cfg: dict, state: str) -> None:
+    """지금 상태를 릴레이에 적는다(폰 화면 표시용). 실패해도 조용히 넘어간다 —
+    이건 알림이지 기능이 아니다."""
+    url = _endpoint(push_cfg)
+    if not url or state not in ("on", "off", "fail"):
+        return
+    try:
+        import requests
+
+        requests.post(
+            url, json={"key": push_cfg["key"], "state": state}, timeout=NET_TIMEOUT
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ---------------------------------------------------------------- 단독 확인

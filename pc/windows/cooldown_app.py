@@ -155,6 +155,10 @@ REVIVE_TRIES = 2  # 연달아 이만큼 실패하면 자동 시도를 멈춘다 
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
 PING_TICK = 20  # 자동 핑을 쏠 때가 됐는지 보는 주기 (초). 앵커 여유(GRACE_MIN)보다 촘촘히.
 REMOTE_TICK = 30  # 원격 대기가 아직 살아 있는지 보는 주기 (초)
+# 폰이 '켜 달라' 고 적어 뒀는지 릴레이에 물어보는 주기 (초).
+# ★ 줄이지 말 것 — Upstash 무료는 월 50만 명령이고 사용량 중계만으로 이미 29%(20명)를
+#   쓴다. 60초로 하면 20명 기준 한도를 넘긴다. 계산은 server/README.md.
+REMOTE_POLL = 120
 REMOTE_GIVEUP = 3  # 연달아 이만큼 못 붙으면 스스로 끈다 (안 될 일에 계속 프로세스를 띄우지 않는다)
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
@@ -628,6 +632,11 @@ class App:
         self.remote = cooldown_remote.Remote()
         self.remote_error = ""  # 마지막 실패 까닭 (성공하면 비운다)
         self._remote_fails = 0  # 연달아 못 붙은 횟수 — REMOTE_GIVEUP 이면 스스로 끈다
+        # 폰에서 켜고 끄기 — 릴레이에 적힌 '원하는 상태' 를 REMOTE_POLL 마다 읽어 따라간다
+        self.remote_out: queue.Queue = queue.Queue()
+        self._remote_busy = False
+        self._remote_poll_at = 0.0  # 마지막 물어본 때 (monotonic)
+        self._remote_said = ""  # 릴레이에 마지막으로 적어 둔 상태 (같으면 다시 안 적는다)
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -1277,6 +1286,14 @@ class App:
                 break
             self._on_update_state(pending)
 
+        # 폰이 릴레이에 적어 둔 '원하는 상태' — 물어본 스레드가 넣어 둔다
+        while True:
+            try:
+                got = self.remote_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_want(got)
+
         while True:
             try:
                 auto, ok, detail, target = self.update_done.get_nowait()
@@ -1886,6 +1903,7 @@ class App:
         else:
             self.remote.stop()
             self.remote_error = ""
+        self._say_state("on" if (want and not self.remote_error) else "off")
         self._apply_notice()
 
     def _remote_tick(self):
@@ -1905,13 +1923,16 @@ class App:
                     pass
 
     def _remote_once(self):
+        self._remote_ask()  # 폰이 켜 달라고 적어 뒀는지 먼저 본다 (꺼져 있어도 물어봐야 켤 수 있다)
         if not self.remote_cfg.get("enabled"):
+            self._say_state("off")
             return
         if self.remote.running():
             if self.remote_error:  # 되살아났다
                 self.remote_error = ""
                 self._remote_fails = 0
                 self._apply_notice()
+            self._say_state("on")
             return
 
         why = self.remote.died()  # 아직 한 번도 안 띄웠으면 None
@@ -1923,6 +1944,7 @@ class App:
                 cooldown_remote.save_cfg(self.remote_cfg)
                 self.var_remote.set(False)
                 self._tray_say(f"원격 대기 꺼짐 · {self.remote_error}")
+                self._say_state("fail")  # 폰에도 '안 됐다' 가 보이게
                 self._apply_notice()
                 return
         elif self.remote.adopt():
@@ -1939,6 +1961,65 @@ class App:
             self._remote_fails += 1
             self.remote_error = cooldown_remote.friendly_error(msg)
         self._apply_notice()
+
+    def _remote_ask(self) -> None:
+        """폰이 릴레이에 적어 둔 '원하는 상태' 를 REMOTE_POLL 마다 물어본다.
+        네트워크는 별도 스레드 — Tk 를 붙잡으면 위젯이 언다(핑·푸시와 같은 결)."""
+        if self._remote_busy or not cooldown_remote.relay_ready(self.push_cfg):
+            return  # 폰과 짝지어져 있지 않으면 아예 안 물어본다 (무료 한도를 안 쓴다)
+        now = time.monotonic()
+        if now - self._remote_poll_at < REMOTE_POLL:
+            return
+        self._remote_poll_at = now
+        self._remote_busy = True
+
+        def worker():
+            try:
+                self.remote_out.put(cooldown_remote.fetch_want(self.push_cfg))
+            except Exception:  # noqa: BLE001
+                self.remote_out.put(None)
+            finally:
+                self._remote_busy = False
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_want(self, got) -> None:
+        """폰이 원한 상태를 따라간다. `_pump_once` 가 큐에서 꺼내 부른다
+        (★ 작업 스레드에서 Tk 를 건드리면 조용히 씹힌다 — 이 저장소의 규칙)."""
+        if not got:
+            return
+        want, at = got
+        # 같은 것을 두 번 따르지 않는다 — 안 그러면 사흘 전 폰에서 켠 것이
+        # PC 에서 끌 때마다 되살아난다.
+        if at == (self.remote_cfg.get("last_want_at") or ""):
+            return
+        self.remote_cfg["last_want_at"] = at
+        on = want == "on"
+        if on != bool(self.remote_cfg.get("enabled")):
+            self.remote_cfg["enabled"] = on
+            self.var_remote.set(on)
+            self._remote_fails = 0
+            if on:
+                ok, msg = self.remote.start(self.remote_cfg["folder"])
+                self.remote_error = "" if ok else cooldown_remote.friendly_error(msg)
+            else:
+                self.remote.stop()
+                self.remote_error = ""
+            self._tray_say("폰에서 원격 대기 " + ("켬" if on else "끔"))
+            self._apply_notice()
+        cooldown_remote.save_cfg(self.remote_cfg)
+
+    def _say_state(self, state: str) -> None:
+        """지금 상태를 릴레이에 적어 둔다 — 폰이 켜졌는지 보고 알 수 있게.
+        **바뀌었을 때만** 적는다(주기마다 적으면 무료 한도를 그냥 태운다)."""
+        if state == self._remote_said or not cooldown_remote.relay_ready(self.push_cfg):
+            return
+        self._remote_said = state
+        threading.Thread(
+            target=cooldown_remote.publish_state,
+            args=(self.push_cfg, state),
+            daemon=True,
+        ).start()
 
     def open_remote_folder(self):
         """`claude rc` 는 **폴더 하나**에 붙는다 — 거기서 열린 세션만 폰에서 쓸 수 있다.
