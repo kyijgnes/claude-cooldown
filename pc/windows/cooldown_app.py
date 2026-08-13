@@ -25,7 +25,7 @@ import time
 import tkinter as tk
 import traceback
 from datetime import datetime
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 import pystray
 from PIL import Image, ImageDraw, ImageFont, ImageTk
@@ -51,6 +51,7 @@ from cooldown_core import (  # noqa: E402
 import cooldown_login  # noqa: E402
 import cooldown_ping  # noqa: E402
 import cooldown_push  # noqa: E402
+import cooldown_remote  # noqa: E402
 import cooldown_stats  # noqa: E402
 import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐지면 지운다
 import skins  # noqa: E402
@@ -153,6 +154,8 @@ REVIVE_GAP = 600  # 토큰이 낡았을 때 조용히 되살려 보는 간격 (�
 REVIVE_TRIES = 2  # 연달아 이만큼 실패하면 자동 시도를 멈춘다 (사람이 누를 때까지)
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
 PING_TICK = 20  # 자동 핑을 쏠 때가 됐는지 보는 주기 (초). 앵커 여유(GRACE_MIN)보다 촘촘히.
+REMOTE_TICK = 30  # 원격 대기가 아직 살아 있는지 보는 주기 (초)
+REMOTE_GIVEUP = 3  # 연달아 이만큼 못 붙으면 스스로 끈다 (안 될 일에 계속 프로세스를 띄우지 않는다)
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
 THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
@@ -619,6 +622,13 @@ class App:
         self._push_busy = False
         self.push_error = ""  # 마지막 전송 실패 사유 (성공하면 비운다)
 
+        # 원격 대기 — 폰·웹에서 이 PC 에 새 세션을 열려면 `claude rc` 가 상주해야 한다.
+        # 그러자고 검은 창을 하루 종일 켜 둘 까닭이 없어서 위젯이 대신 들고 있는다.
+        self.remote_cfg = cooldown_remote.load_cfg()
+        self.remote = cooldown_remote.Remote()
+        self.remote_error = ""  # 마지막 실패 까닭 (성공하면 비운다)
+        self._remote_fails = 0  # 연달아 못 붙은 횟수 — REMOTE_GIVEUP 이면 스스로 끈다
+
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
         # '최소화로 시작' 표시 상태를 넘기는 경우가 있어, withdraw → deiconify 를
@@ -652,6 +662,8 @@ class App:
         self.root.after(TICK * 1000, self._tick)
         self.root.after(THEME_TICK * 1000, self._theme_watch)
         self.root.after(3000, self._ping_tick)  # 첫 조회가 들어올 시간을 준 뒤 시작
+        # 원격 대기는 사용량과 무관하므로 곧바로 — 켜 두기로 했으면 여기서 되살아난다
+        self.root.after(1500, self._remote_tick)
 
     # -------------------------------------------------- 본체(스킨) 그리기
     def _build_body(self) -> None:
@@ -751,6 +763,7 @@ class App:
         self.var_theme = tk.StringVar(self.root, self.state["theme"])
         self.var_ping = tk.BooleanVar(self.root, bool(self.ping_cfg.get("enabled")))
         self.var_push = tk.BooleanVar(self.root, bool(self.push_cfg.get("enabled")))
+        self.var_remote = tk.BooleanVar(self.root, bool(self.remote_cfg.get("enabled")))
         # [업데이트 대기]
         self.var_auto_update = tk.BooleanVar(
             self.root, bool(self.state.get("auto_update"))
@@ -836,6 +849,20 @@ class App:
         phone.add_separator()
         phone.add_command(label="폰 연결…", command=self.open_phone_link)
         self.menu.add_cascade(label="모바일", menu=phone)
+
+        # ---- 클로드 코드 원격 ----
+        # 폰이나 claude.ai/code 에서 **이 PC 에 새 세션을 열려면** `claude rc` 가
+        # 상주해 있어야 한다. 그러자고 검은 창을 켜 둘 까닭이 없어 위젯이 들고 있는다.
+        # 값(폴더·마지막 실패)은 메뉴에 나열하지 않는다 — 폴더 창과 알림에서 본다.
+        rc = tk.Menu(self.menu, tearoff=0)
+        rc.add_checkbutton(
+            label="폰·웹에서 이 PC 에 세션 열기",
+            variable=self.var_remote,
+            command=self.toggle_remote,
+        )
+        rc.add_separator()
+        rc.add_command(label="작업 폴더…", command=self.open_remote_folder)
+        self.menu.add_cascade(label="클로드 코드 원격", menu=rc)
 
         # ---- 앱 설정 ----
         # 앱 전체에 걸리는 것들 — 위젯 모양(쿨다운)이 아니라 '이 프로그램이 어떻게 도는가'.
@@ -1188,6 +1215,9 @@ class App:
         except Exception:  # noqa: BLE001
             pass
         applog("종료 — 메뉴")
+        # ★ 원격 대기(claude rc)는 **일부러 안 끈다.** 폰에서 열어 둔 세션이 돌고 있을 수
+        #   있어서, 위젯을 닫았다고 그걸 죽이면 사고다. 앱을 다시 켜면 PID 파일을 보고
+        #   그 놈을 이어받는다(`Remote.adopt`). 끄는 것은 메뉴에서 사람이 정한다.
         try:
             self.root.destroy()
         except tk.TclError:
@@ -1499,12 +1529,15 @@ class App:
         # [업데이트 대기] 핑보다 앞선다 — 이건 놓치면 작업이 통째로 날아간다
         if self._update_pending is not None:
             return self._update_pending.short
-        if not self.ping_cfg.get("enabled"):
-            return ""
-        if self._ping_fail is not None:  # 실패가 놓침보다 급하다 (지금 안 열린 것)
-            return f"{self._ping_fail[0]:%H:%M} 핑 실패"
-        if self._missed_dt is not None:
-            return f"{self._missed_dt:%H:%M} 핑 놓침"
+        if self.ping_cfg.get("enabled"):
+            if self._ping_fail is not None:  # 실패가 놓침보다 급하다 (지금 안 열린 것)
+                return f"{self._ping_fail[0]:%H:%M} 핑 실패"
+            if self._missed_dt is not None:
+                return f"{self._missed_dt:%H:%M} 핑 놓침"
+        # 원격 대기는 맨 뒤다 — 지금 잃는 것은 없고 폰에서 새 세션만 못 연다.
+        # 여기서도 **까닭은 붙이지 않는다**(자리가 없다. 까닭은 트레이 알림에 있다).
+        if self.remote_error:
+            return "원격 대기 끊김"
         return ""
 
     def _apply_notice(self) -> None:
@@ -1830,6 +1863,101 @@ class App:
     def send_ping_now(self):
         """지금 한 번 쏜다 (테스트/즉시 창 열기). 앵커 정렬과 무관."""
         self._start_ping(manual=True)
+
+    # -------------------------------------------------- 클로드 코드 원격
+    def _tray_say(self, text: str) -> None:
+        try:
+            self.tray.notify(text, "클로드 쿨다운")
+        except Exception:  # noqa: BLE001 — 트레이가 아직 없거나 알림이 막혀 있을 수 있다
+            pass
+
+    def toggle_remote(self):
+        """폰·웹에서 이 PC 에 세션을 열 수 있게 `claude rc` 를 창 없이 띄워 둔다."""
+        want = not self.remote_cfg.get("enabled")
+        self.remote_cfg["enabled"] = want
+        cooldown_remote.save_cfg(self.remote_cfg)
+        self.var_remote.set(want)
+        self._remote_fails = 0
+        if want:
+            ok, msg = self.remote.start(self.remote_cfg["folder"])
+            self.remote_error = "" if ok else cooldown_remote.friendly_error(msg)
+            if not ok:
+                self._tray_say(f"원격 대기 실패 · {self.remote_error}")
+        else:
+            self.remote.stop()
+            self.remote_error = ""
+        self._apply_notice()
+
+    def _remote_tick(self):
+        """켜 두기로 했으면 살아 있는지 REMOTE_TICK 마다 보고, 죽었으면 다시 살린다.
+        다만 **붙지 못하는 상태**(로그인·폴더 신뢰)라면 되살려 봐야 소용없으므로
+        REMOTE_GIVEUP 번 연달아 실패하면 스스로 끄고 알린다 — 안 될 일에 30초마다
+        프로세스를 띄우지 않는다(자동 되살리기와 같은 결)."""
+        try:
+            self._remote_once()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if self.alive:
+                try:
+                    self.root.after(REMOTE_TICK * 1000, self._remote_tick)
+                except tk.TclError:  # 종료 중
+                    pass
+
+    def _remote_once(self):
+        if not self.remote_cfg.get("enabled"):
+            return
+        if self.remote.running():
+            if self.remote_error:  # 되살아났다
+                self.remote_error = ""
+                self._remote_fails = 0
+                self._apply_notice()
+            return
+
+        why = self.remote.died()  # 아직 한 번도 안 띄웠으면 None
+        if why:
+            self._remote_fails += 1
+            self.remote_error = cooldown_remote.friendly_error(why)
+            if self._remote_fails >= REMOTE_GIVEUP:
+                self.remote_cfg["enabled"] = False
+                cooldown_remote.save_cfg(self.remote_cfg)
+                self.var_remote.set(False)
+                self._tray_say(f"원격 대기 꺼짐 · {self.remote_error}")
+                self._apply_notice()
+                return
+        elif self.remote.adopt():
+            # 앱만 다시 뜬 경우 — 지난번에 띄워 둔 놈이 아직 돌고 있으면 이어받는다.
+            # (모르고 또 띄우면 같은 폴더에 원격이 둘 붙어 폰에 두 번 뜬다)
+            self.remote_error = ""
+            self._apply_notice()
+            return
+
+        ok, msg = self.remote.start(self.remote_cfg["folder"])
+        if ok:
+            self.remote_error = ""  # 실제로 붙었는지는 다음 tick 이 본다
+        else:
+            self._remote_fails += 1
+            self.remote_error = cooldown_remote.friendly_error(msg)
+        self._apply_notice()
+
+    def open_remote_folder(self):
+        """`claude rc` 는 **폴더 하나**에 붙는다 — 거기서 열린 세션만 폰에서 쓸 수 있다.
+        붙은 뒤에는 폴더를 못 바꾸므로, 바꾸면 껐다 다시 띄운다."""
+        now = self.remote_cfg.get("folder") or cooldown_remote.default_folder()
+        picked = filedialog.askdirectory(title="원격으로 열 폴더", initialdir=now)
+        if not picked:
+            return
+        picked = os.path.normpath(picked)
+        if picked == os.path.normpath(now):
+            return
+        self.remote_cfg["folder"] = picked
+        cooldown_remote.save_cfg(self.remote_cfg)
+        if self.remote_cfg.get("enabled"):
+            self.remote.stop()
+            self._remote_fails = 0
+            ok, msg = self.remote.start(picked)
+            self.remote_error = "" if ok else cooldown_remote.friendly_error(msg)
+            self._apply_notice()
 
     # -------------------------------------------------- 폰으로 보내기
     def toggle_push(self):
