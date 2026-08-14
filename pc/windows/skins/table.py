@@ -12,8 +12,11 @@ from tkinter import font as tkfont
 from cooldown_core import Usage, five_due, pace
 
 from .base import KR, MARK_W, NUM, P, Skin, mark_x, scoped_text, tone, worst
+from .claudi import Claudi
 
 PAD = 14
+# 클로디가 앉는 자리 — 머리말의 제목과 기준 시각 사이 빈 곳
+CLAUDI_W, CLAUDI_H = 52, 34
 # 한도 / 사용률 / 게이지 / 초기화까지
 # 가장 긴 문자열('Claude Sonnet' · '100%' · '10시간 00분 후')을 재고 글자 상자 여백 6을
 # 더해 잡은 폭. 합 288 + 좌우 여백 28 = 316
@@ -101,8 +104,16 @@ class TableSkin(Skin):
             self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold")
         )
         self.title.pack(side="left", padx=(6, 0))
+        # 클로디 — 제목 옆 빈자리에서 논다. 축하 폭죽도 이 칸 안에서만 터진다.
+        self.pet = tk.Canvas(
+            self.head_pad, width=CLAUDI_W, height=CLAUDI_H, bg=P.bg,
+            highlightthickness=0, bd=0,
+        )
+        self.pet.pack(side="left", padx=(10, 0))
+        self.claudi = Claudi(self.pet, (0, 0, CLAUDI_W, CLAUDI_H), leave=False)
         self.stamp = tk.Label(self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 8))
         self.stamp.pack(side="right")
+        self.claudi.start()
 
         body = tk.Frame(parent, bg=P.bg)
         body.pack(fill="x", padx=PAD, pady=(0, 14))
@@ -139,6 +150,19 @@ class TableSkin(Skin):
         for r in (2, 3, 5):
             body.grid_rowconfigure(r, minsize=max(cell, GAUGE_H) + ROW_PAD * 2)
 
+    # -------------------------------------------------- 클로디 (놀이는 claudi.py 에)
+    def react(self, x: float | None = None, y: float | None = None) -> None:
+        self.claudi.react(*self.claudi.to_local(self, x, y))
+
+    def absorbed(self) -> bool:
+        return self.claudi.absorbed()
+
+    def hold(self, x: float, y: float) -> None:
+        self.claudi.hold(*self.claudi.to_local(self, x, y))
+
+    def let_go(self) -> None:
+        self.claudi.let_go()
+
     # -------------------------------------------------- 머리말 두 얼굴
     def _dot(self, color: str, bg: str) -> None:
         self.dot.configure(bg=bg)
@@ -146,7 +170,8 @@ class TableSkin(Skin):
         self.dot.create_oval(0, 0, 8, 8, fill=color, width=0)
 
     def _head_normal(self, pct: float | None) -> None:
-        for w in (self.head, self.head_pad, self.title, self.stamp):
+        # 클로디 칸도 같이 칠한다 — 눈을 바탕색으로 파내므로 안 맞추면 눈이 사라진다
+        for w in (self.head, self.head_pad, self.title, self.stamp, self.pet):
             w.configure(bg=P.bg)
         self.accent.configure(bg=P.bg)
         self.title.configure(text="클로드 사용량", fg=P.title)
@@ -154,7 +179,7 @@ class TableSkin(Skin):
         self._dot(tone(pct), P.bg)
 
     def _head_error(self, text: str) -> None:
-        for w in (self.head, self.head_pad, self.title, self.stamp):
+        for w in (self.head, self.head_pad, self.title, self.stamp, self.pet):
             w.configure(bg=P.red_bg)
         self.accent.configure(bg=P.red)
         self.title.configure(text=text, fg=P.red)

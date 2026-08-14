@@ -15,6 +15,7 @@ import tkinter.font as tkfont
 from cooldown_core import Usage, five_due, pace
 
 from .base import KR, NUM, P, Skin, scoped_text, tone
+from .claudi import Claudi
 
 try:
     from PIL import Image, ImageDraw, ImageTk
@@ -265,6 +266,28 @@ class ArcSkin(Skin):
             x1 - 10, cy, text="", anchor="e", fill=P.red_dim,
             font=F_SMALL, state="hidden",
         )
+
+        # 클로디 — 두 링 사이 빈 틈에서 논다(집은 좁아도 **축하 폭죽은 위젯 전체**에).
+        # 맨 마지막에 켠다: 매 프레임 다시 그리므로 늘 링 위에 온다.
+        gap = mid - GAP_X + R_OUT, mid + GAP_X - R_OUT      # 링 사이 빈 가로 범위
+        self.claudi = Claudi(
+            c, (gap[0] + 2, CY - 28, gap[1] - 2, CY + 28),
+            party=(MARGIN, 10, self.width - MARGIN, Y_LINE - 10), leave=False,
+        )
+        self.claudi.start()
+
+    # -------------------------------------------------- 클로디 (놀이는 claudi.py 에)
+    def react(self, x: float | None = None, y: float | None = None) -> None:
+        self.claudi.react(*self.claudi.to_local(self, x, y))
+
+    def absorbed(self) -> bool:
+        return self.claudi.absorbed()
+
+    def hold(self, x: float, y: float) -> None:
+        self.claudi.hold(*self.claudi.to_local(self, x, y))
+
+    def let_go(self) -> None:
+        self.claudi.let_go()
 
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:

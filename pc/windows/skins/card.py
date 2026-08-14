@@ -12,8 +12,11 @@ import tkinter as tk
 from cooldown_core import Pace, Usage, five_due, pace
 
 from .base import KR, MARK_W, NUM, P, Skin, mark_x, pace_color, scoped_text, tone
+from .claudi import Claudi
 
 PAD = 18
+# 클로디가 앉는 자리 — 머리말의 제목과 기준 시각 사이 빈 곳
+CLAUDI_W, CLAUDI_H = 52, 34
 BAR_H = 3  # 게이지 두께
 BAR_TOP = 3  # 게이지 위 여백 (눈금이 위아래로 삐져나올 자리를 캔버스 안에 둔다)
 BAR_BOX = 9  # 게이지 칸 전체 높이
@@ -108,8 +111,16 @@ class CardSkin(Skin):
             self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold")
         )
         self.title.pack(side="left")
+        # 클로디 — 제목 옆 빈자리에서 논다. 축하 폭죽도 이 칸 안에서만 터진다.
+        self.pet = tk.Canvas(
+            self.head_pad, width=CLAUDI_W, height=CLAUDI_H, bg=P.bg,
+            highlightthickness=0, bd=0,
+        )
+        self.pet.pack(side="left", padx=(10, 0))
+        self.claudi = Claudi(self.pet, (0, 0, CLAUDI_W, CLAUDI_H), leave=False)
         self.stamp = tk.Label(self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 8))
         self.stamp.pack(side="right")
+        self.claudi.start()
 
         self.five = Section(parent, "5시간 한도", inner)
         tk.Frame(parent, bg=P.bg, height=14).pack()
@@ -126,16 +137,30 @@ class CardSkin(Skin):
         self.note = tk.Label(foot, text="불러오는 중", bg=P.bg, fg=P.faint, font=(KR, 8))
         self.note.pack(side="right")
 
+    # -------------------------------------------------- 클로디 (놀이는 claudi.py 에)
+    def react(self, x: float | None = None, y: float | None = None) -> None:
+        self.claudi.react(*self.claudi.to_local(self, x, y))
+
+    def absorbed(self) -> bool:
+        return self.claudi.absorbed()
+
+    def hold(self, x: float, y: float) -> None:
+        self.claudi.hold(*self.claudi.to_local(self, x, y))
+
+    def let_go(self) -> None:
+        self.claudi.let_go()
+
     # -------------------------------------------------- 머리말 두 얼굴
     def _head_normal(self) -> None:
-        for w in (self.head, self.head_pad, self.title, self.stamp):
+        # 클로디 칸도 같이 칠한다 — 눈을 바탕색으로 파내므로 안 맞추면 눈이 사라진다
+        for w in (self.head, self.head_pad, self.title, self.stamp, self.pet):
             w.configure(bg=P.bg)
         self.accent.configure(bg=P.bg)
         self.title.configure(text="클로드 사용량", fg=P.title)
         self.stamp.configure(fg=P.faint)
 
     def _head_error(self, text: str) -> None:
-        for w in (self.head, self.head_pad, self.title, self.stamp):
+        for w in (self.head, self.head_pad, self.title, self.stamp, self.pet):
             w.configure(bg=P.red_bg)
         self.accent.configure(bg=P.red)
         self.title.configure(text=text, fg=P.red)
