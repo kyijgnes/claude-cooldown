@@ -256,6 +256,28 @@ def find_claude() -> str | None:
     return None
 
 
+def child_env() -> dict:
+    """claude CLI 자식에게 물려줄 환경변수 — **`CLAUDE_CODE_OAUTH_TOKEN` 을 뺀다.**
+
+    ★★ `claude setup-token` 으로 만든 장기 토큰이 그 환경변수에 있으면 CLI 는 저장된
+    로그인(claude.ai)보다 **그것을 먼저 쓴다.** 실측(2026-08-14):
+
+        환경변수 그대로 → {"loggedIn": true, "authMethod": "oauth_token"}
+        환경변수 빼고   → {"loggedIn": true, "authMethod": "claude.ai", "email": …}
+
+    앞쪽 길로 가면 무엇을 시켜도 `~/.claude/.credentials.json` 을 **갱신하지 않는다** —
+    위젯이 쓰는 accessToken 이 8시간 뒤 만료된 채로 영영 남아, 되살리기가 다 '성공'
+    하는데도 위젯만 `눌러서 로그인 잇기` 에 머문다(그날 10분마다 핑이 나가며 한도만
+    깎았다). 원격 대기는 아예 `requires a full-scope login token` 으로 튕긴다.
+
+    그 환경변수 자체는 예약 작업이 밤에 죽지 말라고 일부러 등록해 둔 것이라
+    **지우면 안 되고**, 자식에게만 뺀다. 토큰 발급·갱신은 늘 저장된 로그인이 하게 둔다.
+    """
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    return env
+
+
 def _q(s: str) -> str:
     """cmd.exe 인자용 따옴표 감싸기. 안의 큰따옴표는 두 개로 이스케이프."""
     return '"' + str(s).replace('"', '""') + '"'
@@ -335,6 +357,7 @@ def send_ping(cfg: dict) -> tuple[bool, str]:
             cmd,
             shell=True,
             cwd=NEUTRAL_CWD if os.path.isdir(NEUTRAL_CWD) else None,
+            env=child_env(),  # ★ 장기 토큰을 빼야 저장된 로그인으로 가고 토큰이 갱신된다
             capture_output=True,
             text=True,
             encoding="utf-8",

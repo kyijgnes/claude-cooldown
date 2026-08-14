@@ -35,7 +35,8 @@ import sys
 from datetime import datetime
 
 import cooldown_push  # 릴레이 주소·키는 '폰으로 보내기' 설정을 그대로 쓴다
-from cooldown_ping import find_claude  # claude 실행 파일 찾기는 한 곳에만 둔다
+# claude 실행 파일 찾기·자식 환경변수는 한 곳(cooldown_ping)에만 둔다
+from cooldown_ping import child_env, find_claude
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.json")
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.log")
@@ -44,6 +45,15 @@ PID_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.pid")
 
 # 띄운 뒤 이만큼 안에 죽으면 '뜨다 만 것' 으로 본다 (등록까지 3초쯤 걸린다)
 SETTLE_SEC = 12
+
+# 죽은 까닭 두 가지 — **다루는 법이 다르다.**
+#   · ERR_EARLY   곧바로 죽음 = 애초에 못 붙는 상태(로그인·폴더 신뢰). 되풀이해도 소용없다.
+#   · ERR_DROPPED 한참 잘 돌다 끊김 = 밖에서 죽인 것. **그냥 다시 띄우면 된다.**
+# 이걸 안 가르면 밖에서 세 번 죽었을 때 원격 대기가 스스로 꺼져 버린다 — 2026-08-14 에
+# 업데이트 자동 적용이 5분마다 `claude.exe` 를 싹 죽이는 바람에 실제로 그렇게 꺼졌고,
+# 그날 아침 내내 폰에서 이 PC 에 세션을 열 수 없었다.
+ERR_EARLY = "붙지 못함 (로그인·폴더 신뢰 확인)"
+ERR_DROPPED = "끊김"
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — 콘솔 없는 앱이라 검은 창이 뜨면 안 된다
 
 DEFAULTS = {
@@ -231,8 +241,7 @@ class Remote:
             return False, self.last_error
 
         # ★ 장기 토큰을 자식에게만 뺀다 (맨 위 설명 참고). 지우는 게 아니다.
-        env = dict(os.environ)
-        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        env = child_env()
 
         try:
             p = subprocess.Popen(
@@ -287,11 +296,9 @@ class Remote:
         self._p = None
         self._pid = 0
         _write_pid(0)
-        if early:
-            # 곧바로 죽었다 = 붙지 못한 것. 로그인·신뢰 문제일 때가 많다.
-            self.last_error = "붙지 못함 (로그인·폴더 신뢰 확인)"
-        else:
-            self.last_error = "끊김"
+        # 곧바로 죽었다 = 붙지 못한 것(로그인·신뢰 문제일 때가 많다).
+        # 한참 돌다 죽었다 = 밖에서 죽인 것 — 다시 띄우면 된다.
+        self.last_error = ERR_EARLY if early else ERR_DROPPED
         _log(f"죽음: 코드={code} {self.last_error}")
         return self.last_error
 

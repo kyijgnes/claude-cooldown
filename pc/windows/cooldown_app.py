@@ -584,8 +584,11 @@ class App:
         #   Tk 는 스레드 안전하지 않아 조용히 씹히거나 죽는다(실제로 씹혔다).
         self.update_done: queue.Queue = queue.Queue()
         self._update_pending: cooldown_update.Pending | None = None
-        self._update_warned = False
+        self._update_warned = ""  # 알림을 이미 띄운 대기 판 (판마다 한 번만)
         self._update_busy = False
+        # ★ 자동으로 해 봤는데 안 끝난 판. 다시 시도하지 않는다 — 적용은 클로드를
+        #   죽이는 일이라 되풀이하면 5분마다 앱이 사라진다(2026-08-14 밤새 그랬다).
+        self._update_giveup: set[str] = set()
         self.height = 0
         self.alive = True
         self.last_usage: Usage | None = None
@@ -1436,9 +1439,11 @@ class App:
         self._update_pending = pending
 
         if pending is None:
-            self._update_warned = False
-        elif not self._update_warned:
-            # 한 번만 알린다. 5분마다 다시 띄우면 알림이 소음이 된다.
+            self._update_warned = ""
+        elif self._update_warned != pending.target:
+            # ★★ **판마다 딱 한 번**이다. 예전엔 적용이 끝날 때마다 이 표시를 지워서,
+            #   적용이 안 먹히면 5분마다 같은 알림이 다시 떴다 — 하룻밤에 100통이
+            #   쌓였다(2026-08-14). 새 판이 나오기 전에는 다시 알리지 않는다.
             hint = (
                 "트레이 아이콘 > 클로드 껐다 켜서 업데이트 끝내기"
                 if not self.state.get("auto_update")
@@ -1449,7 +1454,7 @@ class App:
                 "그대로 두면 작업 도중 클로드가 강제로 닫힙니다.\n" + hint,
                 "클로드 쿨다운",
             )
-            self._update_warned = True
+            self._update_warned = pending.target
 
         # 문구가 실제로 바뀌었을 때만 다시 그린다
         if (was.target if was else None) != (pending.target if pending else None):
@@ -1459,8 +1464,19 @@ class App:
             self._auto_update_try(pending)
 
     def _auto_update_try(self, pending: cooldown_update.Pending) -> None:
-        """조용하면 묻지 않고 적용한다. 아니면 다음 차례(5분 뒤)에 다시 본다."""
-        if self._update_busy:
+        """조용하면 묻지 않고 적용한다. 아니면 다음 차례(5분 뒤)에 다시 본다.
+
+        ★★ **같은 판을 두 번 자동으로 적용하지 않는다.** 적용은 클로드를 죽이는
+        일이라, 한 번 해서 안 끝난 것을 5분마다 되풀이하면 **밤새 클로드가 5분마다
+        사라진다**(2026-08-14 03:53~13:09 에 실제로 그랬다 — 원격 대기까지 같이
+        죽었다). 안 끝난 판은 `_update_giveup` 에 적어 두고 손 뗀다. 사람이 메뉴에서
+        직접 부르는 길은 그대로 열려 있고, 새 판이 나오면 다시 해 본다.
+        """
+        if self._update_busy or pending.target in self._update_giveup:
+            return
+        # ★ 윈도우가 실제로 등록을 미뤄 뒀을 때만 자동으로 한다(이벤트 658).
+        #   업데이터가 새 판을 '봤다' 는 것뿐이면 껐다 켜도 끝낼 것이 없다.
+        if not pending.staged:
             return
         ok, _why = cooldown_update.safe_now()
         if not ok:
@@ -1526,11 +1542,17 @@ class App:
 
     def _on_update_done(self, auto: bool, ok: bool, detail: str, target: str) -> None:
         self._update_busy = False
-        self._update_warned = False
         if detail:
             applog(f"업데이트 {'자동 ' if auto else ''}적용 — {target} — {detail}")
-            head = "조용해서 자동으로 적용했습니다\n" if auto else ""
+            if auto:
+                head = "조용해서 자동으로 적용했습니다\n" if ok else "자동 적용이 안 끝났어요\n"
+            else:
+                head = ""
             self.tray.notify(head + detail, "클로드 쿨다운")
+        if not ok and auto and target:
+            # 안 끝났다 = 껐다 켜도 안 되는 판이다. 손 뗀다(맨 위 `_auto_update_try` 참고).
+            self._update_giveup.add(target)
+            applog(f"업데이트 자동 적용 그만둠 — {target} (이제 사람이 눌러야 함)")
         if not ok and not auto:
             messagebox.showwarning("클로드 쿨다운", detail, parent=self.root)
 
@@ -1689,7 +1711,11 @@ class App:
             try:
                 ok = cooldown_login.revive_free()
                 if not ok and paid:
-                    ok = cooldown_ping.send_ping(cfg)[0]
+                    # ★★ '핑이 나갔다' 와 '토큰이 새로 나왔다' 는 다른 말이다.
+                    #   보내고 나서 자격 파일을 다시 본다 — 안 그러면 갱신이 안 됐는데도
+                    #   성공으로 쳐서 예산이 되돌아가고, **10분마다 핑이 나가며 한도만
+                    #   깎는다**(2026-08-14 오전 08:05~09:56 에 열두 번 그랬다).
+                    ok = cooldown_ping.send_ping(cfg)[0] and token_stale() is False
                 if ok:
                     self.login_out.put((True, cooldown_login.OK, ""))
                     return
@@ -1936,7 +1962,14 @@ class App:
             return
 
         why = self.remote.died()  # 아직 한 번도 안 띄웠으면 None
-        if why:
+        if why == cooldown_remote.ERR_DROPPED:
+            # ★★ 잘 돌다 끊긴 것은 **못 붙은 게 아니다** — 밖에서 죽인 것이니 그냥 다시
+            #   띄운다(아래로 내려간다). 이걸 실패로 세면 세 번 만에 스스로 꺼져 폰에서
+            #   세션을 못 연다 — 2026-08-14 새벽에 업데이트 자동 적용이 `claude.exe` 를
+            #   싹 죽이는 바람에 그렇게 꺼졌다(그쪽도 고쳤다: cooldown_update.PKG_MARK).
+            applog("원격 대기 끊김 — 다시 띄움")
+            self.remote_error = ""
+        elif why:
             self._remote_fails += 1
             self.remote_error = cooldown_remote.friendly_error(why)
             if self._remote_fails >= REMOTE_GIVEUP:

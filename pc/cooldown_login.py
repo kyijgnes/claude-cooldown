@@ -19,6 +19,13 @@
    위젯이 `.credentials.json` 을 덮어쓰다 CLI 와 엇갈리면 **진짜로 로그인이 풀린다.**
    발급은 언제나 CLI 에게만 시킨다 — 이 규칙을 되돌리지 말 것.
 
+★★ **되살리기가 안 먹던 까닭**(2026-08-14): CLI 를 부를 때 환경변수
+   `CLAUDE_CODE_OAUTH_TOKEN`(장기 토큰)이 그대로 물려 가면, CLI 는 저장된 로그인
+   대신 그 토큰으로 인증하고 **`.credentials.json` 을 건드리지 않는다.** 계단이
+   전부 '성공' 하는데 토큰은 여전히 낡아, 컴퓨터를 켤 때마다 위젯이 `눌러서 로그인
+   잇기` 에 멎어 있었다. 그래서 자식에게는 늘 `cooldown_ping.child_env()` 를 준다 —
+   까닭·실측은 그 함수 주석에.
+
 단독 확인:
     python cooldown_login.py            상태만 보기
     python cooldown_login.py --revive   사용량 안 쓰는 되살리기 한 번
@@ -31,7 +38,7 @@ import os
 import subprocess
 import sys
 
-from cooldown_ping import find_claude
+from cooldown_ping import child_env, find_claude
 import cooldown_core
 
 STATUS_TIMEOUT = 25  # `claude auth status` 는 로컬 확인이라 금방 끝난다 (초)
@@ -67,6 +74,7 @@ def _run(args: list[str], timeout: int) -> tuple[int, str]:
         r = subprocess.run(
             cmd,
             shell=True,
+            env=child_env(),  # ★ 장기 토큰을 뺀다 — 아래 '되살리기가 안 먹던 까닭'
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -160,6 +168,7 @@ def open_login_console() -> bool:
         subprocess.Popen(
             f'start "클로드 코드 로그인" cmd /k "{claude}" auth login',
             shell=True,
+            env=child_env(),  # ★ 장기 토큰이 물려 가면 로그인해도 그쪽이 이긴다
         )
         return True
     except Exception:  # noqa: BLE001

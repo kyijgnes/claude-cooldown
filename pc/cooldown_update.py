@@ -24,6 +24,13 @@ from datetime import datetime
 # 클로드 앱 식별자 — 실행·종료에 쓴다
 APP_LINK = r"shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude"
 IMAGE_NAME = "Claude.exe"
+# ★★ **이름으로 죽이지 않는다.** 클로드 코드 CLI 도 실행 파일 이름이 `claude.exe` 이고
+#   `taskkill /IM` 은 대소문자를 안 가린다 — `taskkill /F /T /IM Claude.exe` 는
+#   **돌고 있는 세션·원격 대기(`claude rc`)·핑까지 같이 죽였다**(2026-08-14 에 실제로
+#   그랬다: 자동 적용이 5분마다 돌면서 원격 대기를 세 번 죽여 스스로 꺼졌고, 폰에서
+#   이 PC 에 세션을 열 수 없게 됐다). 데스크톱 앱은 MSIX 라 **패키지 폴더 안에서**
+#   돌므로, 죽일 것은 그 경로로 고른다. 되돌리지 말 것.
+PKG_MARK = r"\WindowsApps\Claude_"
 
 _NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — 콘솔 없는 앱이라 창이 뜨면 안 된다
 
@@ -35,6 +42,10 @@ class Pending:
     current: str  # 지금 돌고 있는 버전
     target: str  # 등록을 기다리는 버전
     since: datetime | None  # 내려받은 시각 (모르면 None)
+    # 윈도우가 실제로 '등록을 미뤄 뒀나'(이벤트 658). 거짓이면 업데이터가 새 판을
+    # **봤다는 것뿐**(`updaterLastSeenVersion`)이라, 껐다 켜도 끝날 것이 없을 수 있다.
+    # 자동 적용은 참일 때만 한다 — 아래 '자동으로 적용해도 되는가' 참고.
+    staged: bool = False
 
     @property
     def short(self) -> str:
@@ -95,7 +106,12 @@ def _ver(s: str) -> tuple[int, ...]:
 #   seen  앱 업데이터가 마지막으로 본 버전 (이벤트 로그가 막혔을 때의 보조 신호)
 _PROBE = r"""
 $ErrorActionPreference = 'SilentlyContinue'
-$cur = (Get-AppxPackage -Name Claude).Version
+# ★ 같은 앱이 여러 판 등록돼 있을 수 있다. 그때 Get-AppxPackage 는 여러 줄을 주고,
+#   그걸 문자열로 이어 붙이면 "1.26832.0.0 1.30096.1.0" 이 되어 _ver() 이 앞의(=옛)
+#   판으로 읽는다 — 새 판이 이미 등록됐는데도 '대기 중' 이 영영 안 풀린다.
+#   **가장 높은 판**을 지금 판으로 본다.
+$cur = (Get-AppxPackage -Name Claude | Sort-Object { [version]$_.Version } |
+        Select-Object -Last 1).Version
 $vers = @(); $when = ''
 $ev = Get-WinEvent -FilterHashtable @{
         LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Id = 658
@@ -135,15 +151,21 @@ def check() -> Pending | None:
     cands = data.get("vers") or []
     if isinstance(cands, str):  # 원소가 하나면 ConvertTo-Json 이 배열을 벗긴다
         cands = [cands]
-    seen = (data.get("seen") or "").strip()
-    if seen:
-        cands = list(cands) + [seen]
 
-    target = ""
-    for v in cands:
-        v = (v or "").strip()
-        if _ver(v) > _ver(cur) and (not target or _ver(v) > _ver(target)):
-            target = v
+    def _highest(values) -> str:
+        best = ""
+        for v in values:
+            v = (v or "").strip()
+            if _ver(v) > _ver(cur) and (not best or _ver(v) > _ver(best)):
+                best = v
+        return best
+
+    # 두 신호를 **가른다**. 이벤트 658 = 윈도우가 등록을 실제로 미뤄 둔 것(껐다 켜면
+    # 끝난다), `updaterLastSeenVersion` = 업데이터가 새 판을 봤다는 것뿐(아직 안
+    # 내려받았을 수 있어 껐다 켜도 끝날 것이 없다).
+    staged_target = _highest(cands)
+    seen_target = _highest([data.get("seen") or ""])
+    target = staged_target or seen_target
     if not target:
         return None
 
@@ -154,7 +176,9 @@ def check() -> Pending | None:
             since = datetime.fromisoformat(when)
         except ValueError:
             since = None
-    return Pending(current=cur, target=target, since=since)
+    return Pending(
+        current=cur, target=target, since=since, staged=bool(staged_target)
+    )
 
 
 # ------------------------------------------------------ 지금 껐다 켜도 되는가
@@ -226,9 +250,33 @@ def safe_now() -> tuple[bool, str]:
     return True, ""
 
 
+# 등록이 끝나기를 기다리는 시간(초). 등록 자체는 ~31초인데, 프로세스가 다 빠진 뒤에야
+# 시작되므로 넉넉히 준다. 여기까지 안 끝나면 **안 끝난 것으로 보고 그렇게 말한다.**
+REGISTER_WAIT = 120
+
+
+def _desktop_pids() -> list[int]:
+    """돌고 있는 **데스크톱 앱**(MSIX 패키지) 프로세스 번호들.
+
+    ★ 이름이 아니라 **경로**로 고른다 — 클로드 코드 CLI 도 `claude.exe` 라서
+    이름으로 고르면 돌고 있는 세션·원격 대기·핑까지 딸려 들어간다(맨 위 참고).
+    """
+    out = _ps(
+        "@(Get-CimInstance Win32_Process -Filter \"Name='Claude.exe'\" | "
+        "Where-Object { $_.ExecutablePath -like '*" + PKG_MARK + "*' } | "
+        "ForEach-Object { $_.ProcessId }) -join ','",
+        timeout=20,
+    )
+    pids = []
+    for chunk in (out or "").replace("\n", ",").split(","):
+        chunk = chunk.strip()
+        if chunk.isdigit():
+            pids.append(int(chunk))
+    return pids
+
+
 def _alive() -> int:
-    out = _run(["tasklist", "/FI", f"IMAGENAME eq {IMAGE_NAME}", "/NH"], timeout=10)
-    return out.count(IMAGE_NAME)
+    return len(_desktop_pids())
 
 
 def apply(relaunch: bool = True) -> tuple[bool, str]:
@@ -236,9 +284,17 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
 
     프로세스가 전부 빠지면 Windows 가 알아서 등록을 적용한다. 돌아오는 문구는
     사용자에게 그대로 보여 줄 수 있는 한 줄.
+
+    ★ **끝났을 때만 True** 다. 껐다 켰는데도 판이 안 바뀌었으면 False —
+    부르는 쪽이 그걸 보고 **같은 판을 또 시도하지 않는다**(안 그러면 5분마다 클로드를
+    죽이는 무한 되풀이가 된다. 2026-08-14 새벽에 밤새 그랬다).
     """
     before = check()
-    _run(["taskkill", "/F", "/T", "/IM", IMAGE_NAME], timeout=20)
+    target = before.target if before else ""
+
+    pids = _desktop_pids()
+    for pid in pids:
+        _run(["taskkill", "/F", "/PID", str(pid)], timeout=15)
 
     for _ in range(40):  # 20초까지 기다린다
         if _alive() == 0:
@@ -247,9 +303,8 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
     else:
         return False, "클로드가 안 닫힙니다 — 윈도우를 다시 시작해야 합니다"
 
-    target = before.target if before else ""
     done = False
-    for _ in range(60):  # 등록에 30초쯤 걸린다
+    for _ in range(REGISTER_WAIT):
         time.sleep(1.0)
         now = check()
         if now is None or (target and _ver(now.current) >= _ver(target)):
@@ -266,4 +321,20 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
         return True, "클로드를 다시 켰습니다"
     if done:
         return True, f"업데이트 완료 — {target}"
-    return True, f"클로드를 다시 켰습니다 — {target} 는 실행 시점에 적용됩니다"
+    return False, f"{target} 로 안 바뀌었습니다 — 클로드만 다시 켰습니다"
+
+
+# ---------------------------------------------------------------- 단독 확인
+#     python cooldown_update.py          지금 판정만 (아무것도 안 죽인다)
+
+if __name__ == "__main__":
+    p = check()
+    if p is None:
+        print("대기 중인 업데이트 없음")
+    else:
+        print(f"지금 {p.current} → 대기 {p.target}")
+        print("등록 지연됨(이벤트 658):", "예" if p.staged else "아니오 (업데이터가 본 판)")
+        print("내려받은 시각:", f"{p.since:%m-%d %H:%M}" if p.since else "모름")
+    ok, why = safe_now()
+    print("지금 껐다 켜도 되나:", "예" if ok else f"아니오 — {why}")
+    print("데스크톱 앱 프로세스:", len(_desktop_pids()), "개")
