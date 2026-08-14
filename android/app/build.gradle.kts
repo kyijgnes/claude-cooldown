@@ -1,4 +1,4 @@
-﻿import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Base64
 import java.util.Properties
 
@@ -7,16 +7,16 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// ?? 由대━???쒕챸 ??????????????????????????????????????????????????????????
-// **移쒓뎄?먭쾶 ?섎닠二쇰뒗 APK ????긽 媛숈? ?ㅻ줈 ?쒕챸?쇱빞 ?쒕떎.** ?쒕챸???щ씪吏硫??곗씠
-// ?낅뜲?댄듃瑜?嫄곕??섍퀬("?깆씠 ?ㅼ튂?섏? ?딆쓬") 吏?좊떎 源붿븘???댁꽌 ?섏뼱留곷룄 ?ㅼ떆 ?댁빞 ?쒕떎.
-// ?덉쟾??release ???붾쾭洹??ㅻ줈 ?쒕챸?덈뒗?? ?붾쾭洹??ㅻ뒗 PC 留덈떎 ?ㅻⅤ怨?CI ??留ㅻ쾲
-// ??VM ?대씪 **鍮뚮뱶???뚮쭏???쒕챸??諛붾뚯뿀??**
+// ── 릴리스 서명 키 ────────────────────────────────────────────────────────
+// **친구에게 나눠주는 APK 는 항상 같은 키로 서명돼야 한다.** 서명이 달라지면 폰이
+// 업데이트를 거부하고("앱이 설치되지 않음") 지웠다 깔아야 해서 페어링도 다시 해야 한다.
+// 예전엔 release 도 디버그 키로 서명했는데, 디버그 키는 PC 마다 다르고 CI 는 매번
+// 새 VM 이라 **빌드할 때마다 서명이 바뀌었다.**
 //
-// ?ㅻ? 李얜뒗 ??媛덈옒:
-//   ??PC ??android/keystore.properties        (??μ냼?????щ씪媛꾨떎)
-//   CI    ??COOLDOWN_KEYSTORE_B64 ?섍꼍蹂??     (GitHub Secret. ?닿쾶 ?ㅼ쓽 諛깆뾽???쒕떎)
-// ?????놁쑝硫??붾쾭洹??ㅻ줈 ?⑥뼱吏꾨떎 ???대줎留????щ엺??鍮뚮뱶???섍쾶. ???寃쎄퀬瑜??꾩슫??
+// 키를 찾는 두 갈래:
+//   내 PC → android/keystore.properties        (저장소에 안 올라간다)
+//   CI    → COOLDOWN_KEYSTORE_B64 환경변수      (GitHub Secret. 이게 키의 백업도 된다)
+// 둘 다 없으면 디버그 키로 떨어진다 — 클론만 한 사람도 빌드는 되게. 대신 경고를 띄운다.
 val keyProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
@@ -28,13 +28,13 @@ val keyStoreFile: File? = when {
     keyPath != null -> rootProject.file(keyPath)
     !keyB64.isNullOrBlank() -> layout.buildDirectory.file("cooldown-release.jks").get().asFile.apply {
         parentFile.mkdirs()
-        // ?ㅽ겕由쏀듃 ?덉뿉??`java` ??Gradle ??java ?뺤옣?대씪 ?⑦궎吏 ?대쫫?쇰줈 紐??대떎 ???꾩뿉??import ?쒕떎
+        // 스크립트 안에서 `java` 는 Gradle 의 java 확장이라 패키지 이름으로 못 쓴다 — 위에서 import 한다
         writeBytes(Base64.getMimeDecoder().decode(keyB64))
     }
     else -> null
 }
-// ???대쫫??storePassword/keyPassword 濡?吏볦? 留?寃????꾨옒 signingConfigs 釉붾줉 ?덉뿉?쒕뒗
-//   洹멸쾶 SigningConfig ?먯떊???띿꽦?대씪, ??蹂?섏씤 以??뚭퀬 ?곕㈃ null ???ㅼ뼱媛꾨떎.
+// ★ 이름을 storePassword/keyPassword 로 짓지 말 것 — 아래 signingConfigs 블록 안에서는
+//   그게 SigningConfig 자신의 속성이라, 내 변수인 줄 알고 쓰면 null 이 들어간다.
 val keyStorePw: String? = keyProps.getProperty("storePassword")
     ?: System.getenv("COOLDOWN_KEYSTORE_PASSWORD")
 val keyAliasName: String = keyProps.getProperty("keyAlias") ?: "cooldown"
@@ -43,8 +43,8 @@ val signRelease = keyStoreFile != null && keyStoreFile.exists() && !keyStorePw.i
 
 if (!signRelease) {
     logger.warn(
-        "???쒕챸 ?ㅺ? ?놁뼱 release ???붾쾭洹??ㅻ줈 ?쒕챸?쒕떎. " +
-            "?섎닠以?APK ???대윭硫????쒕떎 ??鍮뚮뱶???뚮쭏???쒕챸???щ씪???낅뜲?댄듃媛 留됲엺??",
+        "⚠ 서명 키가 없어 release 도 디버그 키로 서명한다. " +
+            "나눠줄 APK 는 이러면 안 된다 — 빌드할 때마다 서명이 달라져 업데이트가 막힌다.",
     )
 }
 
@@ -56,7 +56,7 @@ android {
         applicationId = "com.kyijgnes.cooldown"
         minSdk = 26
         targetSdk = 36
-        // ???섎닠二쇨린 ?꾩뿉 versionCode 瑜??щ┫ 寃? ???щ━硫??곗씠 ?낅뜲?댄듃?몄? 援щ퀎??紐??쒕떎.
+        // ★ 나눠주기 전에 versionCode 를 올릴 것. 안 올리면 폰이 업데이트인지 구별을 못 한다.
         versionCode = 17
         versionName = "0.17"
     }
@@ -75,7 +75,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            // ?ㅽ넗?댁뿉 ?щ━吏 ?딄퀬 APK 瑜?吏곸젒 ?섎닠 以?????꾩뿉??李얠? 怨좎젙 ?ㅻ줈 ?쒕챸?쒕떎.
+            // 스토어에 올리지 않고 APK 를 직접 나눠 준다 — 위에서 찾은 고정 키로 서명한다.
             signingConfig = signingConfigs.getByName(if (signRelease) "release" else "debug")
         }
     }
@@ -99,12 +99,12 @@ kotlin {
 }
 
 dependencies {
-    // 15遺?二쇨린 媛깆떊 + ?щ?????蹂듦뎄. ?닿굅 ?섎굹硫??섎?濡??ㅻⅨ androidx ?????대떎.
+    // 15분 주기 갱신 + 재부팅 후 복구. 이거 하나면 되므로 다른 androidx 는 안 쓴다.
     implementation("androidx.work:work-runtime:2.11.2")
-    // QR ?ㅼ틪. 移대찓??沅뚰븳 ?놁씠 Play ?쒕퉬?ㅺ? ???李띿뼱 以??(?놁쑝硫?吏곸젒 ?낅젰?쇰줈 ?섏뼱媛꾨떎)
+    // QR 스캔. 카메라 권한 없이 Play 서비스가 대신 찍어 준다 (없으면 직접 입력으로 넘어간다)
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
-    // ?붾㈃ 洹몃┝?????놁씠 PNG 濡?戮묒븘 蹂대뒗 ?⑸룄 (RenderPreviewTest)
+    // 화면 그림을 폰 없이 PNG 로 뽑아 보는 용도 (RenderPreviewTest)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16.1")
 }
