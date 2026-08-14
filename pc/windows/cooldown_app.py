@@ -556,10 +556,20 @@ def fullscreen_over(root: tk.Tk) -> bool:
       (창을 옮기는 `SetWindowPos` 만 위험하다 — `raise_above_taskbar` 주석 참고).
     """
     try:
+        import ctypes  # ★ 이 파일은 ctypes 를 **함수 안에서** 들여온다 (모듈 전역에 없다)
         import win32api
         import win32con
         import win32gui
 
+        # ① 윈도우 자신의 판단 — 알림을 띄워도 되는 상태인가.
+        #    전체화면 게임(D3D)·발표 모드처럼 창 크기만으로는 못 잡는 것까지 잡아 준다.
+        #    2 QUNS_BUSY(전체화면 앱) · 3 D3D 전체화면 · 4 발표 모드
+        busy = ctypes.c_int(0)
+        if ctypes.windll.shell32.SHQueryUserNotificationState(
+                ctypes.byref(busy)) == 0 and busy.value in (2, 3, 4):
+            return True
+
+        # ② 맨 앞 창이 제 모니터를 꽉 채우는가 (바탕화면·작업표시줄은 뺀다)
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
             return False
@@ -643,6 +653,7 @@ class App:
         self._menu_open = False
         # 지금 창에 걸어 둔 '항상 위' 값 — 전체화면일 때 내렸다가 끝나면 되돌린다
         self._topmost_now: bool | None = None
+        self._behind = False    # 전체화면 앞에서 물러나 있는 중인가
         self._panels: list[tk.Toplevel] = []  # 열려 있는 팝업들 (한 번에 하나만 둔다)
 
         # 자동 핑(모닝 스타터) 상태 — _build_menu 가 참조하므로 그 전에 잡아 둔다
@@ -1444,6 +1455,14 @@ class App:
             if want != self._topmost_now:
                 self._topmost_now = want
                 self.root.attributes("-topmost", want)
+            if behind != self._behind:
+                self._behind = behind
+                applog("전체화면 — 물러남" if behind else "전체화면 끝 — 돌아옴")
+                if behind:
+                    # ★ '항상 위'를 내리는 것만으로는 모자란다 — 방금 위젯을 눌렀다면
+                    #   그 자리에서 여전히 영상 위에 있다. 한 번 **맨 뒤로 내린다.**
+                    #   (Tk 의 lower 는 Tcl 안에서 SetWindowPos 를 부르므로 GIL 문제가 없다)
+                    self.root.lower()
             if not behind and docked and not self._menu_open and not popup_menu_open():
                 raise_above_taskbar(self.root)
         except Exception:  # noqa: BLE001
