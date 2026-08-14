@@ -1444,10 +1444,13 @@ class App:
             # ★★ **판마다 딱 한 번**이다. 예전엔 적용이 끝날 때마다 이 표시를 지워서,
             #   적용이 안 먹히면 5분마다 같은 알림이 다시 떴다 — 하룻밤에 100통이
             #   쌓였다(2026-08-14). 새 판이 나오기 전에는 다시 알리지 않는다.
+            # 자동으로 갈 수 있는 것만 자동이라고 말한다 — 자동 적용은 윈도우가 실제로
+            # 등록을 미뤄 뒀을 때(`staged`)만 돈다(`_auto_update_try`).
+            auto_will = bool(self.state.get("auto_update")) and pending.staged
             hint = (
-                "트레이 아이콘 > 클로드 껐다 켜서 업데이트 끝내기"
-                if not self.state.get("auto_update")
-                else "작업이 없고 자리를 비우면 알아서 적용합니다"
+                "작업이 없고 자리를 비우면 알아서 적용합니다"
+                if auto_will
+                else "트레이 아이콘 > 클로드 껐다 켜서 업데이트 끝내기"
             )
             self.tray.notify(
                 f"{pending.line}\n"
