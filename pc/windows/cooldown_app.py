@@ -542,6 +542,48 @@ def popup_menu_open() -> bool:
         return False
 
 
+def fullscreen_over(root: tk.Tk) -> bool:
+    """**전체화면 앱이 위젯이 있는 화면을 덮고 있는가** (영상·게임·발표).
+
+    작업표시줄에 붙어 있으면 위젯도 '항상 위'라, 유튜브를 전체화면으로 켜도 그 위에
+    남아 있었다. 그때는 잠시 물러나야 한다(`_stay_above` 가 topmost 를 내린다).
+
+    - 판정은 **맨 앞 창이 제 모니터를 꽉 채우는가**로 한다. 바탕화면·작업표시줄은 뺀다
+      (그것들도 화면 전체 크기라 안 빼면 늘 전체화면으로 보인다).
+    - **위젯과 같은 모니터일 때만** 참이다 — 두 번째 화면에서 영상을 봐도 이쪽 위젯이
+      사라지면 그게 더 이상하다.
+    - 여기서 부르는 win32 함수들은 메시지를 돌리지 않으므로 GIL 을 놓아도 안전하다
+      (창을 옮기는 `SetWindowPos` 만 위험하다 — `raise_above_taskbar` 주석 참고).
+    """
+    try:
+        import win32api
+        import win32con
+        import win32gui
+
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return False
+        if win32gui.GetClassName(hwnd) in (
+            "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
+        ):
+            return False
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        screen = win32api.GetMonitorInfo(
+            win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
+        )["Monitor"]
+        if (right - left < screen[2] - screen[0]
+                or bottom - top < screen[3] - screen[1]):
+            return False
+        mine = win32api.MonitorFromPoint(
+            (root.winfo_x() + root.winfo_width() // 2,
+             root.winfo_y() + root.winfo_height() // 2),
+            win32con.MONITOR_DEFAULTTONEAREST,
+        )
+        return win32api.GetMonitorInfo(mine)["Monitor"] == screen
+    except Exception:  # noqa: BLE001  못 물어봤으면 하던 대로 둔다
+        return False
+
+
 def dismiss_menus() -> None:
     """열려 있는 팝업 메뉴를 닫는다.
 
@@ -599,6 +641,8 @@ class App:
         self._hold_job = None   # '꾹 누름' 판정 예약
         self._holding = False   # 지금 꾹 누르고 있는가
         self._menu_open = False
+        # 지금 창에 걸어 둔 '항상 위' 값 — 전체화면일 때 내렸다가 끝나면 되돌린다
+        self._topmost_now: bool | None = None
         self._panels: list[tk.Toplevel] = []  # 열려 있는 팝업들 (한 번에 하나만 둔다)
 
         # 자동 핑(모닝 스타터) 상태 — _build_menu 가 참조하므로 그 전에 잡아 둔다
@@ -1159,6 +1203,7 @@ class App:
     def toggle_topmost(self):
         self.state["topmost"] = not self.state["topmost"]
         self.root.attributes("-topmost", bool(self.state["topmost"]))
+        self._topmost_now = None   # 손으로 건드렸다 — 다음 tick 이 다시 맞춘다
         self.var_topmost.set(bool(self.state["topmost"]))
         save_state(self.state)
 
@@ -1212,6 +1257,7 @@ class App:
             )
         # 작업표시줄 자체가 항상 위라, 그 위에 얹으려면 이쪽도 항상 위여야 한다
         self.root.attributes("-topmost", docked or bool(self.state["topmost"]))
+        self._topmost_now = None   # 손으로 건드렸다 — 다음 tick 이 다시 맞춘다
         self.root.geometry(f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}")
         round_corners(self.root)
         if docked:
@@ -1386,10 +1432,19 @@ class App:
         작업표시줄은 눌릴 때마다 스스로를 맨 앞으로 올린다. 그때 가려지는 시간이
         곧 주기이므로 짧게 잡는다 — SetWindowPos 한 번이라 비용은 사실상 없다.
         다만 메뉴가 떠 있는 동안 올리면 그 메뉴를 덮어 버리므로 그때는 쉰다.
+
+        ★ **전체화면 앱이 이 화면을 덮으면 잠시 물러난다** — 영상을 전체화면으로 보는데
+          위젯만 맨 앞에 남아 있었다. '항상 위'를 내리는 것으로 충분하다(창을 감추면
+          돌아올 때 자리·모양을 다시 잡아야 한다). 끝나면 원래대로 되돌린다.
         """
         try:
             docked = self.state["dock"] and self.skin.dockable
-            if docked and not self._menu_open and not popup_menu_open():
+            behind = fullscreen_over(self.root)
+            want = False if behind else (docked or bool(self.state["topmost"]))
+            if want != self._topmost_now:
+                self._topmost_now = want
+                self.root.attributes("-topmost", want)
+            if not behind and docked and not self._menu_open and not popup_menu_open():
                 raise_above_taskbar(self.root)
         except Exception:  # noqa: BLE001
             pass
