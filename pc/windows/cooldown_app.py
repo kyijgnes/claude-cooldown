@@ -2074,9 +2074,17 @@ class App:
 
     def _remote_ask(self) -> None:
         """폰이 릴레이에 적어 둔 '원하는 상태' 를 REMOTE_POLL 마다 물어본다.
-        네트워크는 별도 스레드 — Tk 를 붙잡으면 위젯이 언다(핑·푸시와 같은 결)."""
+        네트워크는 별도 스레드 — Tk 를 붙잡으면 위젯이 언다(핑·푸시와 같은 결).
+
+        ★★ **평소에는 아예 안 물어본다** — 사용량을 올릴 때(5분) 그 응답에 want 가 얹혀
+        오기 때문이다(`_start_push`). 이 폴링이 무료 한도의 60%를 먹던 항목이었다.
+        남겨 둔 건 **'폰으로 보내기'를 꺼 둔 채 짝만 지어 둔 경우** 하나뿐이다 —
+        그때는 올리는 요청 자체가 없어서 얹어 받을 자리가 없다.
+        """
         if self._remote_busy or not cooldown_remote.relay_ready(self.push_cfg):
             return  # 폰과 짝지어져 있지 않으면 아예 안 물어본다 (무료 한도를 안 쓴다)
+        if cooldown_push.ready(self.push_cfg):
+            return  # 올릴 때 같이 받는다 — 따로 물어볼 까닭이 없다
         now = time.monotonic()
         if now - self._remote_poll_at < REMOTE_POLL:
             return
@@ -2171,7 +2179,10 @@ class App:
 
         def worker():
             try:
-                cooldown_push.push(usage, self.push_cfg)
+                data = cooldown_push.push(usage, self.push_cfg)
+                # 올린 응답에 폰이 원한 상태가 얹혀 온다 — 그것 하나 때문에 2분마다
+                # 따로 물어보던 요청이 사라졌다(무료 한도 절약. `_remote_ask` 참고).
+                self.remote_out.put(cooldown_remote.want_of(data))
                 self.push_out.put("")
             except Exception as e:  # noqa: BLE001
                 self.push_out.put(str(e) or "전송 실패")

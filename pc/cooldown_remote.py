@@ -328,6 +328,20 @@ def _endpoint(push_cfg: dict) -> str:
     return base + REMOTE_PATH if base else ""
 
 
+def want_of(data) -> tuple[str, str] | None:
+    """응답에서 (원하는 상태, 적힌 시각)만 골라낸다. 형식이 아니면 None.
+
+    사용량을 올린 응답(`/api/cooldown` POST)에도, 따로 물어본 응답(`/api/remote` GET)에도
+    같은 두 필드가 들어 있어 **읽는 자리는 하나로 둔다.**
+    """
+    if not isinstance(data, dict):
+        return None
+    want, at = data.get("want"), data.get("want_at")
+    if want in ("on", "off") and isinstance(at, str):
+        return want, at
+    return None
+
+
 def fetch_want(push_cfg: dict) -> tuple[str, str] | None:
     """릴레이에서 (원하는 상태, 적힌 시각) 을 읽는다. 없거나 못 읽으면 None.
     네트워크를 타므로 **별도 스레드에서** 부를 것."""
@@ -343,10 +357,7 @@ def fetch_want(push_cfg: dict) -> tuple[str, str] | None:
         data = r.json()
     except Exception:  # noqa: BLE001 — 못 읽으면 그냥 지금 상태를 지킨다
         return None
-    want, at = data.get("want"), data.get("want_at")
-    if want in ("on", "off") and isinstance(at, str):
-        return want, at
-    return None
+    return want_of(data)
 
 
 def publish_state(push_cfg: dict, state: str) -> None:

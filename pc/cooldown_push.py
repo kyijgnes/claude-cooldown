@@ -118,8 +118,12 @@ def ready(cfg: dict) -> bool:
 # ---------------------------------------------------------------- 전송
 
 
-def push(usage: Usage, cfg: dict) -> None:
-    """퍼센트만 올린다. 실패하면 PushError."""
+def push(usage: Usage, cfg: dict) -> dict:
+    """퍼센트만 올린다. 실패하면 PushError.
+
+    **응답을 돌려준다** — 서버가 원격 대기의 '원하는 상태(want)' 를 얹어 주기 때문이다.
+    그 덕에 PC 가 그것 하나 때문에 2분마다 따로 물어보지 않아도 된다(무료 한도 절약).
+    """
     url = endpoint(cfg)
     if not url:
         raise PushError("주소 없음")
@@ -143,6 +147,11 @@ def push(usage: Usage, cfg: dict) -> None:
 
     cfg["last_ok"] = datetime.now().isoformat(timespec="seconds")
     save_cfg(cfg)
+    try:
+        data = r.json()
+    except ValueError:  # 옛 서버는 {ok:true} 만 준다 — 그래도 올리기는 성공이다
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def last_ok_at(cfg: dict) -> datetime | None:

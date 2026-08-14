@@ -37,6 +37,14 @@ function slot(key: string): string {
   return "cd:" + createHash("sha256").update(key).digest("hex");
 }
 
+// 원격 대기의 '원하는 상태' 자리 — /api/remote 가 쓰는 것과 **같은 자리·같은 해시**다.
+// ★ 왜 여기서 읽나: PC 가 그것 하나 때문에 2분마다 따로 물어보면 무료 한도(월 50만 명령)의
+//   60%를 그 폴링이 먹는다. 사용량을 올리는 김에 **응답에 얹어 돌려주면** 그 요청이 통째로
+//   사라진다. 계산은 server/README.md.
+function wantSlot(key: string): string {
+  return "rcw:" + createHash("sha256").update(key).digest("hex");
+}
+
 // Upstash REST: 명령을 JSON 배열로 POST 하면 { result } 또는 { error } 가 온다.
 // 던지는 메시지에 key·slot 을 담지 않는다 (Vercel 로그에 남는다).
 async function redis(cmd: (string | number)[]): Promise<unknown> {
@@ -93,7 +101,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "db" }, { status: 500, headers: NO_STORE });
   }
 
-  return NextResponse.json({ ok: true }, { headers: NO_STORE });
+  // 올리는 김에 **원격 대기의 '원하는 상태' 를 얹어 돌려준다** — PC 가 그것만 따로
+  // 2분마다 물어보던 요청이 사라진다(무료 한도의 60%가 그 폴링이었다).
+  // ★ 여기서 실패해도 **올리기는 성공**이다 — 이건 덤이지 이 요청의 일이 아니다.
+  let want: string | null = null;
+  let wantAt: string | null = null;
+  try {
+    const raw = await redis(["GET", wantSlot(key)]);
+    if (typeof raw === "string") {
+      const o = JSON.parse(raw) as { v?: unknown; at?: unknown };
+      if ((o?.v === "on" || o?.v === "off") && typeof o.at === "string") {
+        want = o.v;
+        wantAt = o.at;
+      }
+    }
+  } catch {
+    /* 못 읽었으면 없는 셈 친다 — PC 는 다음 번(5분 뒤)에 다시 받는다 */
+  }
+
+  return NextResponse.json({ ok: true, want, want_at: wantAt }, { headers: NO_STORE });
 }
 
 export async function GET(req: NextRequest) {
