@@ -1582,13 +1582,17 @@ class App:
                 applog(f"업데이트 자동 적용 접음 — {why}")
                 self.update_done.put((True, True, "", target))  # 조용히 물러난다
                 return
+            ok, detail = False, ""
             try:
-                ok, detail = cooldown_update.apply()
+                ok, detail = cooldown_update.apply(target=target)
+                # 다시 판정도 여기서(작업 스레드에서) 한다 — 0.6초 걸려 화면을 붙잡으면 안 된다
+                self.update_out.put(cooldown_update.check())
             except Exception as e:  # noqa: BLE001
                 ok, detail = False, str(e)
-            # 다시 판정도 여기서(작업 스레드에서) 한다 — 0.6초 걸려 화면을 붙잡으면 안 된다
-            self.update_out.put(cooldown_update.check())
-            self.update_done.put((True, ok, detail, target))
+            finally:
+                # ★ 무슨 일이 있어도 **결과를 돌려준다.** 여기서 빠져나가면 `_update_busy`
+                #   가 True 로 굳어 자동 적용이 그날 이후로 영영 안 돈다.
+                self.update_done.put((True, ok, detail, target))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1620,13 +1624,15 @@ class App:
         target = p.target
 
         def worker():
+            ok, detail = False, ""
             try:
-                ok, detail = cooldown_update.apply()
+                ok, detail = cooldown_update.apply(target=target)
+                # 다시 판정도 여기서(작업 스레드에서) 한다 — 0.6초 걸려 화면을 붙잡으면 안 된다
+                self.update_out.put(cooldown_update.check())
             except Exception as e:  # noqa: BLE001
                 ok, detail = False, str(e)
-            # 다시 판정도 여기서(작업 스레드에서) 한다 — 0.6초 걸려 화면을 붙잡으면 안 된다
-            self.update_out.put(cooldown_update.check())
-            self.update_done.put((False, ok, detail, target))
+            finally:
+                self.update_done.put((False, ok, detail, target))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1644,14 +1650,19 @@ class App:
                 self.tray.notify(detail, "클로드 쿨다운")
         if auto and target and detail:
             # 물러난 것(detail 이 빈 것)은 시도로 세지 않는다 — 죽인 적이 없다.
+            # ★★ **죽였으면 센다 — 됐든 안 됐든.** 실패했을 때만 세면, 안 끝났는데 끝났다고
+            #    돌아온 한 번이 빗장을 통째로 지나가 **30분마다 밤새** 클로드를 죽인다
+            #    (2026-08-14 사고가 주기만 늘려 되살아나는 길이다). 진짜로 끝났으면 대기가
+            #    사라져 여기 다시 안 오므로, 성공을 세도 잃는 것이 없다.
             self._update_last[target] = time.time()
-            if not ok:
-                n = self._update_tries.get(target, 0) + 1
-                self._update_tries[target] = n
-                if n >= AUTO_TRIES:
-                    applog(f"업데이트 자동 적용 그만둠 — {target} (이제 사람이 눌러야 함)")
+            n = self._update_tries.get(target, 0) + 1
+            self._update_tries[target] = n
+            if not ok and n >= AUTO_TRIES:
+                applog(f"업데이트 자동 적용 그만둠 — {target} (이제 사람이 눌러야 함)")
         if not ok and not auto:
-            messagebox.showwarning("클로드 쿨다운", detail, parent=self.root)
+            messagebox.showwarning(
+                "클로드 쿨다운", detail or "적용하지 못했습니다", parent=self.root
+            )
 
     # ------------------------------------------------ [업데이트 대기] 끝
 

@@ -263,12 +263,14 @@ def _desktop_pids() -> list[int]:
 
     ★ 이름이 아니라 **경로**로 고른다 — 클로드 코드 CLI 도 `claude.exe` 라서
     이름으로 고르면 돌고 있는 세션·원격 대기·핑까지 딸려 들어간다(맨 위 참고).
+    거꾸로 **이름은 안 본다** — 패키지 폴더 안에서 도는 것은 이름이 무엇이든 한 식구라,
+    하나라도 남아 있으면 등록이 `0x80073D02` 로 튕긴다.
     """
     out = _ps(
-        "@(Get-CimInstance Win32_Process -Filter \"Name='Claude.exe'\" | "
+        "@(Get-CimInstance Win32_Process | "
         "Where-Object { $_.ExecutablePath -like '*" + PKG_MARK + "*' } | "
         "ForEach-Object { $_.ProcessId }) -join ','",
-        timeout=20,
+        timeout=25,
     )
     pids = []
     for chunk in (out or "").replace("\n", ",").split(","):
@@ -306,6 +308,27 @@ _WHY = {
 }
 
 
+_CUR_PS = (
+    "$p = Get-AppxPackage -Name Claude | Sort-Object { [version]$_.Version } | "
+    "Select-Object -Last 1; if ($p) { $p.Version }"
+)
+_VERLIKE = re.compile(r"^\d+(\.\d+)+$")
+
+
+def installed_version() -> str:
+    """지금 등록돼 있는 판. **못 읽었으면 빈 문자열**(= 모른다).
+
+    ★ `check()` 를 성공 판정에 쓰면 안 된다 — 그건 '대기 없음' 과 '못 물어봤음' 이
+    똑같이 `None` 이라, 파워셸이 한 번 튕긴 밤에 **등록이 깨졌는데 '업데이트 완료'** 라고
+    말하게 된다. 여기서는 **판 번호를 눈으로 읽었을 때만** 그 값을 준다.
+    """
+    for line in _ps(_CUR_PS, timeout=25).splitlines():
+        line = line.strip()
+        if _VERLIKE.match(line):
+            return line
+    return ""
+
+
 def register(target: str = "") -> tuple[bool, str]:
     """받아 둔 판을 **지금** 등록한다. 프로세스가 전부 빠진 뒤에 부를 것.
 
@@ -332,7 +355,7 @@ def register(target: str = "") -> tuple[bool, str]:
     return False, why
 
 
-def apply(relaunch: bool = True) -> tuple[bool, str]:
+def apply(relaunch: bool = True, target: str = "") -> tuple[bool, str]:
     """클로드를 닫고 **등록까지 끝낸 뒤** 다시 켠다.
 
     셋을 순서대로 한다: 데스크톱 앱만 죽이기 → `register()` → 다시 켜기.
@@ -341,9 +364,17 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
     ★ **끝났을 때만 True** 다. 판이 안 바뀌었으면 False — 부르는 쪽이 그걸 보고
     같은 판을 몇 번이고 되풀이하지 않는다(안 그러면 5분마다 클로드를 죽인다.
     2026-08-14 새벽에 밤새 그랬다).
+
+    ★★ **어느 판을 올릴지는 부르는 쪽이 준다.** 여기서 다시 물어보게 두면, 그 물음
+    한 번이 헛돌았을 때(`check()` 는 **못 물어봤을 때도 None** 이다) 올릴 판을 모르는
+    채로 **죽이기만 하고 등록은 건너뛰고서 '다 됐다'** 고 말하게 된다. 모르면 아무것도
+    하지 않는다 — 남의 앱을 죽이는 일에 '아마' 는 없다.
     """
-    before = check()
-    target = before.target if before else ""
+    if not target:
+        before = check()
+        target = before.target if before else ""
+    if not target:
+        return False, "대기 중인 업데이트를 못 찾았습니다"
 
     pids = _desktop_pids()
     for pid in pids:
@@ -356,13 +387,16 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
     else:
         return False, "클로드가 안 닫힙니다 — 윈도우를 다시 시작해야 합니다"
 
-    why = ""
-    if target:
-        _ok, why = register(target)
+    _ok, why = register(target)
 
-    # 켜기 **전에** 본다 — 앱이 뜨면 다시 물고 있어 판정이 흐려진다
-    now = check()
-    done = bool(target) and (now is None or _ver(now.current) >= _ver(target))
+    # 켜기 **전에** 본다 — 앱이 뜨면 다시 물고 있어 판정이 흐려진다.
+    # ★★ **끝났다는 말은 판 번호를 읽었을 때만 한다.** 등록 명령이 'OK' 를 줘도 그것이
+    #   곧 새 판은 아니고(`-RegisterByFamilyName` 은 같은 판을 다시 등록해도 OK 다),
+    #   `check()` 의 None 은 '대기 없음' 과 '못 물어봤음' 을 가리지 못한다. 못 읽었으면
+    #   **안 끝난 것으로 친다** — 이쪽으로 틀리면 30분 뒤에 한 번 더 해 볼 뿐이지만,
+    #   반대로 틀리면 깨진 밤에 '업데이트 완료' 라고 말하고 손을 놓는다.
+    cur = installed_version()
+    done = bool(cur) and _ver(cur) >= _ver(target)
 
     if relaunch:
         try:
@@ -370,8 +404,6 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
         except OSError:
             _run(["explorer.exe", APP_LINK], timeout=10)
 
-    if not target:
-        return True, "클로드를 다시 켰습니다"
     if done:
         return True, f"업데이트 완료 — {target}"
     return False, f"{target} 등록이 안 됐습니다 — {why or '판이 안 바뀌었습니다'}"
