@@ -147,6 +147,10 @@ RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
 # [업데이트 대기] 클로드 업데이트가 밀려 있는지 보는 간격. 남의 서버가 아니라 내 PC를
 # 보는 것이라 자주 해도 무해하지만, 한 번에 0.6초쯤 걸리므로 5분이면 충분하다.
 UPDATE_EVERY = 300
+# [업데이트 대기] 자동 적용을 판마다 몇 번까지 · 실패한 뒤 얼마나 띄우고 다시 할지.
+# **되풀이를 막는 빗장이자, 한 번 어긋났다고 하루를 버리지 않게 하는 여유다.**
+AUTO_TRIES = 3
+AUTO_RETRY_GAP = 1800  # 초 (30분)
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
 UNDOCK_SLOP = 120  # 붙여 둔 상태에선 이만큼 넘게 끌어야 떼어 낸다 (그 안이면 클릭으로 보고 제자리로)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
@@ -638,9 +642,13 @@ class App:
         self._update_pending: cooldown_update.Pending | None = None
         self._update_warned = ""  # 알림을 이미 띄운 대기 판 (판마다 한 번만)
         self._update_busy = False
-        # ★ 자동으로 해 봤는데 안 끝난 판. 다시 시도하지 않는다 — 적용은 클로드를
-        #   죽이는 일이라 되풀이하면 5분마다 앱이 사라진다(2026-08-14 밤새 그랬다).
-        self._update_giveup: set[str] = set()
+        # ★ 판마다 **몇 번 해 봤나 · 마지막으로 언제 해 봤나**. 적용은 클로드를 죽이는
+        #   일이라 5분마다 되풀이하면 밤새 앱이 사라진다(2026-08-14). 그렇다고 한 번에
+        #   손을 떼면 잠깐 어긋난 것 하나로 **하루 종일 안 올라간다**(2026-08-19 에
+        #   그랬다 — 09:28 에 한 번 실패하고 그날은 끝이었다). 그래서 사이를 넉넉히
+        #   띄우고 몇 번만 한다(`AUTO_TRIES` · `AUTO_RETRY_GAP`).
+        self._update_tries: dict[str, int] = {}
+        self._update_last: dict[str, float] = {}
         self.height = 0
         self.alive = True
         self.last_usage: Usage | None = None
@@ -1543,13 +1551,18 @@ class App:
     def _auto_update_try(self, pending: cooldown_update.Pending) -> None:
         """조용하면 묻지 않고 적용한다. 아니면 다음 차례(5분 뒤)에 다시 본다.
 
-        ★★ **같은 판을 두 번 자동으로 적용하지 않는다.** 적용은 클로드를 죽이는
-        일이라, 한 번 해서 안 끝난 것을 5분마다 되풀이하면 **밤새 클로드가 5분마다
-        사라진다**(2026-08-14 03:53~13:09 에 실제로 그랬다 — 원격 대기까지 같이
-        죽었다). 안 끝난 판은 `_update_giveup` 에 적어 두고 손 뗀다. 사람이 메뉴에서
-        직접 부르는 길은 그대로 열려 있고, 새 판이 나오면 다시 해 본다.
+        ★★ **되풀이하지 않는다.** 적용은 클로드를 죽이는 일이라, 안 끝난 것을 5분마다
+        다시 하면 **밤새 클로드가 5분마다 사라진다**(2026-08-14 03:53~13:09 에 실제로
+        그랬다 — 원격 대기까지 같이 죽었다). 그래서 판마다 `AUTO_TRIES`(3번)까지,
+        실패하면 `AUTO_RETRY_GAP`(30분) 띄우고 다시 한다. 그 뒤로는 손 떼고 사람이
+        메뉴에서 부르기를 기다린다.
         """
-        if self._update_busy or pending.target in self._update_giveup:
+        if self._update_busy:
+            return
+        if self._update_tries.get(pending.target, 0) >= AUTO_TRIES:
+            return
+        last = self._update_last.get(pending.target, 0.0)
+        if last and time.time() - last < AUTO_RETRY_GAP:
             return
         # ★ 윈도우가 실제로 등록을 미뤄 뒀을 때만 자동으로 한다(이벤트 658).
         #   업데이터가 새 판을 '봤다' 는 것뿐이면 껐다 켜도 끝낼 것이 없다.
@@ -1621,15 +1634,22 @@ class App:
         self._update_busy = False
         if detail:
             applog(f"업데이트 {'자동 ' if auto else ''}적용 — {target} — {detail}")
-            if auto:
-                head = "조용해서 자동으로 적용했습니다\n" if ok else "자동 적용이 안 끝났어요\n"
-            else:
-                head = ""
-            self.tray.notify(head + detail, "클로드 쿨다운")
-        if not ok and auto and target:
-            # 안 끝났다 = 껐다 켜도 안 되는 판이다. 손 뗀다(맨 위 `_auto_update_try` 참고).
-            self._update_giveup.add(target)
-            applog(f"업데이트 자동 적용 그만둠 — {target} (이제 사람이 눌러야 함)")
+            # ★ **자동은 성공만 알린다.** 자리를 비운 사이에 실패해서 뜬 오류 알림은
+            #   돌아와 볼 때 할 일이 없는 잔소리다 — 어차피 30분 뒤에 다시 한다.
+            #   실패는 로그(`~/.claude_cooldown_app.log`)에만 남는다.
+            if ok:
+                head = "조용해서 자동으로 적용했습니다\n" if auto else ""
+                self.tray.notify(head + detail, "클로드 쿨다운")
+            elif not auto:
+                self.tray.notify(detail, "클로드 쿨다운")
+        if auto and target and detail:
+            # 물러난 것(detail 이 빈 것)은 시도로 세지 않는다 — 죽인 적이 없다.
+            self._update_last[target] = time.time()
+            if not ok:
+                n = self._update_tries.get(target, 0) + 1
+                self._update_tries[target] = n
+                if n >= AUTO_TRIES:
+                    applog(f"업데이트 자동 적용 그만둠 — {target} (이제 사람이 눌러야 함)")
         if not ok and not auto:
             messagebox.showwarning("클로드 쿨다운", detail, parent=self.root)
 

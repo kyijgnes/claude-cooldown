@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime
 
-# 클로드 앱 식별자 — 실행·종료에 쓴다
-APP_LINK = r"shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude"
+# 클로드 앱 식별자 — 실행·종료·등록에 쓴다
+PUB_ID = "pzs8sxrjxfjjc"  # 게시자 꼬리표. 패키지 이름·가족 이름·폴더 이름에 다 들어간다
+APP_LINK = rf"shell:AppsFolder\Claude_{PUB_ID}!Claude"
+PKG_FAMILY = f"Claude_{PUB_ID}"  # 등록할 때 쓰는 가족 이름
+PKG_ROOT = r"C:\Program Files\WindowsApps"  # 받아 둔 판이 앉아 있는 곳
 IMAGE_NAME = "Claude.exe"
 # ★★ **이름으로 죽이지 않는다.** 클로드 코드 CLI 도 실행 파일 이름이 `claude.exe` 이고
 #   `taskkill /IM` 은 대소문자를 안 가린다 — `taskkill /F /T /IM Claude.exe` 는
@@ -250,9 +254,8 @@ def safe_now() -> tuple[bool, str]:
     return True, ""
 
 
-# 등록이 끝나기를 기다리는 시간(초). 등록 자체는 ~31초인데, 프로세스가 다 빠진 뒤에야
-# 시작되므로 넉넉히 준다. 여기까지 안 끝나면 **안 끝난 것으로 보고 그렇게 말한다.**
-REGISTER_WAIT = 120
+# 등록 명령을 기다려 주는 시간(초). 등록 자체는 ~31초인데 파일이 많으면 더 걸린다.
+REGISTER_WAIT = 180
 
 
 def _desktop_pids() -> list[int]:
@@ -279,15 +282,65 @@ def _alive() -> int:
     return len(_desktop_pids())
 
 
+# ------------------------------------------------------------ 등록을 직접 부른다
+#
+# ★★★ **윈도우는 프로세스가 다 빠져도 스스로 등록하지 않는다.** 2026-08-19 에 하루를
+# 통째로 날리고 알아낸 것 — 미뤄둔 등록을 처리하는 것은 **앱을 다음에 켤 때**
+# (이벤트 679 `OnDemandRegisterPackageList`)인데, 그때는 앱이 이미 떠 있어
+# **`0x80073D02` (앱을 닫아야 하므로 설치할 수 없습니다)** 로 깨진다. 그래서 옛
+# `apply()` 는 다 죽여 놓고 120초를 헛기다리다 '안 바뀌었습니다' 로 접었고(등록을 부를
+# 사람이 아무도 없었다), 곧바로 앱을 다시 켜서 **다음 기회까지 막아** 버렸다.
+# 켜져 있어서 안 되고 꺼져 있어서 안 되는 꼴이었다.
+#
+# 빠져나가는 길은 하나뿐이다 — **다 죽은 그 틈에 등록을 우리가 부른다.**
+# 관리자 권한은 필요 없다(실측). 되돌리지 말 것.
+_REG_TRY = "$ErrorActionPreference='Stop'; try {{ {cmd}; 'OK' }} catch {{ $_.Exception.Message }}"
+
+# 파워셸 오류 문구는 콘솔 코드페이지(cp949)로 나와 utf-8 로 읽으면 깨진다. 그래서
+# **HRESULT 만 뽑아** 우리 말로 바꿔 준다 — 코드는 어느 코드페이지에서나 ASCII 다.
+_HRESULT = re.compile(r"0x[0-9A-Fa-f]{8}")
+_WHY = {
+    "0x80073D02": "클로드가 아직 떠 있습니다",
+    "0x80073CF9": "등록에 실패했습니다",
+    "0x80073CFB": "이미 같은 판이 등록돼 있습니다",
+}
+
+
+def register(target: str = "") -> tuple[bool, str]:
+    """받아 둔 판을 **지금** 등록한다. 프로세스가 전부 빠진 뒤에 부를 것.
+
+    두 길을 차례로 해 본다. 먼저 **판 번호로 폴더를 짚어** 등록하고(윈도우가 스스로 할
+    때와 같은 길이다 — 이벤트 854 에 그 `AppxManifest.xml` 이 찍힌다), 폴더가 없거나
+    거절당하면 **가족 이름**으로 받아 둔 판을 찾아 등록한다.
+    """
+    cmds = []
+    if target:
+        manifest = os.path.join(
+            PKG_ROOT, f"Claude_{target}_x64__{PUB_ID}", "AppxManifest.xml"
+        )
+        if os.path.exists(manifest):
+            cmds.append(f"Add-AppxPackage -DisableDevelopmentMode -Register '{manifest}'")
+    cmds.append(f"Add-AppxPackage -RegisterByFamilyName -MainPackage '{PKG_FAMILY}'")
+
+    why = ""
+    for cmd in cmds:
+        out = _ps(_REG_TRY.format(cmd=cmd), timeout=REGISTER_WAIT).strip()
+        if out.startswith("OK"):
+            return True, ""
+        code = _HRESULT.search(out)
+        why = _WHY.get(code.group(0), f"등록 오류 {code.group(0)}") if code else "등록이 안 됐습니다"
+    return False, why
+
+
 def apply(relaunch: bool = True) -> tuple[bool, str]:
-    """클로드를 껐다 켜서 미뤄둔 등록을 지금 끝낸다.
+    """클로드를 닫고 **등록까지 끝낸 뒤** 다시 켠다.
 
-    프로세스가 전부 빠지면 Windows 가 알아서 등록을 적용한다. 돌아오는 문구는
-    사용자에게 그대로 보여 줄 수 있는 한 줄.
+    셋을 순서대로 한다: 데스크톱 앱만 죽이기 → `register()` → 다시 켜기.
+    돌아오는 문구는 사용자에게 그대로 보여 줄 수 있는 한 줄.
 
-    ★ **끝났을 때만 True** 다. 껐다 켰는데도 판이 안 바뀌었으면 False —
-    부르는 쪽이 그걸 보고 **같은 판을 또 시도하지 않는다**(안 그러면 5분마다 클로드를
-    죽이는 무한 되풀이가 된다. 2026-08-14 새벽에 밤새 그랬다).
+    ★ **끝났을 때만 True** 다. 판이 안 바뀌었으면 False — 부르는 쪽이 그걸 보고
+    같은 판을 몇 번이고 되풀이하지 않는다(안 그러면 5분마다 클로드를 죽인다.
+    2026-08-14 새벽에 밤새 그랬다).
     """
     before = check()
     target = before.target if before else ""
@@ -303,13 +356,13 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
     else:
         return False, "클로드가 안 닫힙니다 — 윈도우를 다시 시작해야 합니다"
 
-    done = False
-    for _ in range(REGISTER_WAIT):
-        time.sleep(1.0)
-        now = check()
-        if now is None or (target and _ver(now.current) >= _ver(target)):
-            done = True
-            break
+    why = ""
+    if target:
+        _ok, why = register(target)
+
+    # 켜기 **전에** 본다 — 앱이 뜨면 다시 물고 있어 판정이 흐려진다
+    now = check()
+    done = bool(target) and (now is None or _ver(now.current) >= _ver(target))
 
     if relaunch:
         try:
@@ -321,7 +374,7 @@ def apply(relaunch: bool = True) -> tuple[bool, str]:
         return True, "클로드를 다시 켰습니다"
     if done:
         return True, f"업데이트 완료 — {target}"
-    return False, f"{target} 로 안 바뀌었습니다 — 클로드만 다시 켰습니다"
+    return False, f"{target} 등록이 안 됐습니다 — {why or '판이 안 바뀌었습니다'}"
 
 
 # ---------------------------------------------------------------- 단독 확인
