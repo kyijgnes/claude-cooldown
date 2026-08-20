@@ -2570,9 +2570,12 @@ class App:
                 self._finalize_panel(top, W)
                 return
 
-            head = f"기록 {rep.span_days:.0f}일 · 표본 {rep.samples}개"
+            # ★ 여기 한 줄이 화면 전체의 단위를 말한다 — 없으면 '오늘 7%' 가 무엇의
+            #   7% 인지 알 길이 없다(쓰는 사람이 실제로 물었다, 2026-08-20).
+            head = f"기록 {rep.span_days:.0f}일"
             if rep.first is not None:
-                head += f" · {rep.first:%m/%d} 부터"
+                head += f" ({rep.first:%m/%d} 부터)"
+            head += " · 모든 % 는 주간 한도 기준"
             tk.Label(
                 wrap, text=head, bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
             ).pack(fill="x", pady=(0, 8))
@@ -2633,16 +2636,18 @@ class App:
 
     # ---- 일별 ----
     def _stats_daily(self, wrap, rep, inner: int) -> None:
-        self._section(wrap, "일별 사용량", "주간 한도 기준")
+        self._section(wrap, "일별 사용량", "하루에 쓴 만큼")
         self._chart_days(wrap, rep.days, inner)
         self._pair(
-            wrap, "오늘", f"{rep.today:.0f}%p", pace_color(self._day_level(rep.today))
+            wrap, "오늘", f"{rep.today:.0f}%", pace_color(self._day_level(rep.today))
         )
-        self._pair(wrap, "어제", f"{rep.yesterday:.0f}%p", P.sub)
-        self._pair(wrap, "하루 평균 (최근 이레)", f"{rep.avg_day:.0f}%p", P.sub)
+        self._pair(wrap, "어제", f"{rep.yesterday:.0f}%", P.sub)
+        self._pair(wrap, "하루 평균 (최근 7일)", f"{rep.avg_day:.0f}%", P.sub)
+        # 차트의 점선이 무엇인지 숫자로 말해 준다 (한도를 7일에 고르게 나눈 값)
+        self._pair(wrap, "하루 적정선", f"{DAY_PP:.0f}%", P.faint)
         if rep.busiest is not None:
             day, value = rep.busiest
-            self._pair(wrap, "가장 많이 쓴 날", f"{self._day_text(day)} {value:.0f}%p", P.sub)
+            self._pair(wrap, "가장 많이 쓴 날", f"{self._day_text(day)} {value:.0f}%", P.sub)
 
         self._rule(wrap)
         self._section(wrap, "시간대", "0~23시")
@@ -2669,7 +2674,7 @@ class App:
             tk.Label(wrap, text="아직 한 주가 안 찼음", bg=P.bg, fg=P.faint,
                      font=(KR, 9)).pack(anchor="w", pady=(2, 8))
             return
-        self._section(wrap, "주간 한도 창", f"최근 {len(rep.limits)}개")
+        self._section(wrap, "주간 한도 창", "한 주에 쓴 만큼")
         self._chart_weeks(wrap, rep.limits, inner)
         if rep.week_now is not None:
             self._pair(wrap, "지금 창", f"{rep.week_now.used:.0f}%",
@@ -2685,59 +2690,57 @@ class App:
             w = rep.busiest_week
             self._pair(wrap, "가장 많이 쓴 창",
                        f"{w.start.month}/{w.start.day:02d} 시작 {w.used:.0f}%", P.sub)
-        self._coverage_note(wrap, rep)
 
     # ---- 달별 ----
     def _stats_monthly(self, wrap, rep, inner: int) -> None:
         """달마다 날수가 다르고 이번 달·첫 달은 잘려 있어, 막대 색은 **하루 평균**으로 정한다."""
-        self._section(wrap, "달별 사용량", "주간 한도 기준")
+        self._section(wrap, "달별 사용량", "한 달에 쓴 만큼")
         self._chart_months(wrap, rep.months, inner)
-        self._pair(wrap, "이번 달", f"{rep.this_month:.0f}%p", P.title)
-        self._pair(wrap, "지난 달", f"{rep.last_month:.0f}%p", P.sub)
-        if rep.busiest_month is not None:
-            when, value, span = rep.busiest_month
-            self._pair(wrap, "가장 많이 쓴 달",
-                       f"{when.month}월 {value:.0f}%p"
-                       + (f" (하루 {value / span:.0f}%p)" if span >= 1 else ""), P.sub)
+        self._pair(wrap, "이번 달", f"{rep.this_month:.0f}%", P.title)
+        self._pair(wrap, "지난 달", f"{rep.last_month:.0f}%", P.sub)
         cur = rep.months[-1] if rep.months else None
         if cur is not None and cur[2] >= 1:  # 기록이 하루도 안 되는 달은 평균이 뜻이 없다
             avg = cur[1] / cur[2]
-            self._pair(wrap, "이번 달 하루 평균", f"{avg:.0f}%p",
+            self._pair(wrap, "이번 달 하루 평균", f"{avg:.0f}%",
                        pace_color(self._day_level(avg)))
-        self._coverage_note(wrap, rep)
+        if rep.busiest_month is not None:
+            when, value, span = rep.busiest_month
+            self._pair(wrap, "가장 많이 쓴 달",
+                       f"{when.month}월 {value:.0f}%"
+                       + (f" (하루 {value / span:.0f}%)" if span >= 1 else ""), P.sub)
 
     # ---- 전체 ----
     def _stats_total(self, wrap, rep, inner: int) -> None:
         """쌓인 기록 전부를 한 장으로 — 얼마나 썼나 · 어느 요일에 몰리나 · 늘고 있나."""
         self._section(wrap, "쌓인 기록 전부", self._span_text(rep))
-        self._pair(wrap, "합계", f"{rep.total:.0f}%p", P.title)
-        self._pair(wrap, "하루 평균", f"{rep.total_avg_day:.0f}%p",
+        self._pair(wrap, "그동안 쓴 합계", f"{rep.total:.0f}%", P.title)
+        self._pair(wrap, "하루 평균", f"{rep.total_avg_day:.0f}%",
                    pace_color(self._day_level(rep.total_avg_day)))
-        self._pair(wrap, "주 환산", f"{min(999, rep.total_avg_day * 7):.0f}%",
+        self._pair(wrap, "이 속도면 한 주에", f"{min(999, rep.total_avg_day * 7):.0f}%",
                    tone(rep.total_avg_day * 7))
         if rep.trend is not None:
             self._pair(
-                wrap, "최근 이레 (그 전 이레 대비)", f"{rep.trend * 100:+.0f}%",
+                wrap, "최근 7일 (그 전 7일 대비)", f"{rep.trend * 100:+.0f}%",
                 P.red if rep.trend > 0.25 else (P.green if rep.trend < -0.25 else P.sub),
             )
 
         self._rule(wrap)
-        self._section(wrap, "요일별", "하루 평균")
+        self._section(wrap, "요일별", "그 요일 하루 평균")
         self._chart_weekdays(wrap, rep.weekdays, inner)
         if rep.peak_weekday is not None:
             self._pair(wrap, "가장 많이 쓰는 요일",
                        f"{'월화수목금토일'[rep.peak_weekday]}요일 "
-                       f"{rep.weekdays[rep.peak_weekday]:.0f}%p", P.sub)
+                       f"{rep.weekdays[rep.peak_weekday]:.0f}%", P.sub)
 
         self._rule(wrap)
         self._section(wrap, "시간대", "0~23시")
         self._chart_hours(wrap, rep.hours, inner)
 
+        # 통계는 위젯이 떠 있는 동안만 쌓인다 — 못 센 시간이 길면 위 숫자가 그만큼
+        # 실제보다 적다. 그 사실을 숨기지 않되, 한 줄로만 말한다.
         self._rule(wrap)
         self._section(wrap, "기록", "위젯이 떠 있는 동안만 쌓임")
-        self._pair(wrap, "덮은 비율", f"{rep.covered * 100:.0f}%",
-                   P.sub if rep.covered >= 0.9 else P.amber)
-        self._pair(wrap, "끊긴 시간", f"{rep.gap_hours:.0f}시간",
+        self._pair(wrap, "못 센 시간 (컴퓨터 꺼짐)", f"{rep.gap_hours:.0f}시간",
                    P.sub if rep.gap_hours < 24 else P.amber)
 
     # ---- 통계 화면 조각 ----
@@ -2754,11 +2757,6 @@ class App:
         if rep.first is None or rep.last is None:
             return ""
         return f"{rep.first:%m/%d} ~ {rep.last:%m/%d}"
-
-    def _coverage_note(self, wrap, rep) -> None:
-        """기록이 많이 끊겼으면 그 사실을 값 옆에 적는다 — 숫자가 실제보다 적다는 뜻이다."""
-        if rep.gap_hours >= 24:
-            self._pair(wrap, "기록 끊긴 시간", f"{rep.gap_hours:.0f}시간", P.amber)
 
     @staticmethod
     def _section(parent: tk.Misc, title: str, note: str = "") -> None:

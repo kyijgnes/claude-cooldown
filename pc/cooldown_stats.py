@@ -43,7 +43,7 @@ TRIM_AT = 40000  # 줄이 이보다 많아지면 한 번 정리한다 (앱 시�
 GRID = 60  # 초기화 시각을 맞출 눈금(초) — 응답이 ±1초로 흔들린다 (맨 위 설명)
 FIVE_SPAN = timedelta(hours=5)
 WEEK_SPAN = timedelta(days=7)
-DAY_PP = 100 / 7  # 하루치 사용량(%p) — 주간 한도를 이레에 고르게 나눈 값
+DAY_PP = 100 / 7  # 하루치 사용량(%p) — 주간 한도를 7일에 고르게 나눈 값
 GAP_SEC = HEARTBEAT * 2  # 표본이 이보다 벌어지면 기록이 끊긴 구간(컴퓨터 꺼짐)
 
 _last_row: list | None = None  # 마지막으로 쓴 줄 (같은 값을 또 쓰지 않으려고)
@@ -263,7 +263,7 @@ def hourly(samples: list[Sample]) -> list[float]:
 def weekday(samples: list[Sample]) -> list[float]:
     """요일(월~일)별 **하루 평균** %p — 어느 요일에 몰아 쓰는지.
 
-    합계로 두면 기록에 든 그 요일 수가 다를 때(이레가 안 채워진 첫 주·마지막 주)
+    합계로 두면 기록에 든 그 요일 수가 다를 때(첫 주·마지막 주는 7일이 다 안 채워진다)
     막대 길이가 요일 수를 재는 셈이 된다. 실제로 그 요일이 며칠 있었는지로 나눈다.
     """
     total = [0.0] * 7
@@ -401,7 +401,7 @@ class Report:
     windows: list = field(default_factory=list)  # [Window]
     today: float = 0.0
     yesterday: float = 0.0
-    avg_day: float = 0.0  # 최근 이레 하루 평균 (기록이 짧으면 그만큼으로 나눈다)
+    avg_day: float = 0.0  # 최근 7일 하루 평균 (기록이 짧으면 그만큼으로 나눈다)
     busiest: tuple | None = None  # (date, %p) 가장 많이 쓴 날
     peak_hour: int | None = None  # 가장 많이 쓰는 시간대
     win_avg: float | None = None  # 5시간 창 평균 최고 %
@@ -427,7 +427,7 @@ class Report:
     peak_weekday: int | None = None
     gap_hours: float = 0.0  # 기록이 끊긴 시간 (위젯이 꺼져 있던 만큼)
     covered: float = 0.0  # 기록이 덮은 비율 0~1
-    trend: float | None = None  # 최근 이레 ÷ 그 전 이레 − 1 (없으면 None)
+    trend: float | None = None  # 최근 7일 ÷ 그 전 7일 − 1 (없으면 None)
 
 
 def analyze(samples: list[Sample], days: int = 14, today: date | None = None) -> Report:
@@ -447,7 +447,7 @@ def analyze(samples: list[Sample], days: int = 14, today: date | None = None) ->
     rep.today = table.get(today, 0.0)
     rep.yesterday = table.get(today - timedelta(days=1), 0.0)
 
-    # 하루 평균: 기록이 이레보다 짧으면 그 날수로 나눈다 (0 으로 희석되지 않게)
+    # 하루 평균: 기록이 7일보다 짧으면 그 날수로 나눈다 (0 으로 희석되지 않게)
     span = max(1.0, min(7.0, rep.span_days + 1))
     recent = [v for d, v in rep.days if (today - d).days < 7]
     rep.avg_day = sum(recent) / span if recent else 0.0
@@ -495,7 +495,7 @@ def analyze(samples: list[Sample], days: int = 14, today: date | None = None) ->
         rep.peak_weekday = max(range(7), key=lambda i: rep.weekdays[i])
     rep.gap_hours, rep.covered = coverage(samples)
 
-    # 추세: 최근 이레 ÷ 그 전 이레. 앞 이레가 통째로 기록 밖이면 뜻이 없다
+    # 추세: 최근 7일 ÷ 그 전 7일. 앞 7일이 통째로 기록 밖이면 뜻이 없다
     if rep.span_days >= 13:
         cut = samples[-1].at - timedelta(days=7)
         prev_cut = cut - timedelta(days=7)
@@ -513,19 +513,19 @@ if __name__ == "__main__":
     _r = analyze(_s)
     print(f"기록 {_r.samples}개 · {_r.span_days:.1f}일" + (
         f" (처음 {_r.first:%m/%d %H:%M})" if _r.first else ""
-    ))
+    ) + " · 모든 % 는 주간 한도 기준")
     if not _s:
         raise SystemExit("아직 쌓인 기록이 없습니다 — 위젯이 떠 있는 동안 쌓입니다.")
-    print(f"오늘 {_r.today:.1f}%p · 어제 {_r.yesterday:.1f}%p · 하루 평균 {_r.avg_day:.1f}%p")
+    print(f"오늘 {_r.today:.1f}% · 어제 {_r.yesterday:.1f}% · 하루 평균 {_r.avg_day:.1f}%")
     if _r.busiest:
-        print(f"가장 많이 쓴 날 {_r.busiest[0]:%m/%d} {_r.busiest[1]:.1f}%p")
+        print(f"가장 많이 쓴 날 {_r.busiest[0]:%m/%d} {_r.busiest[1]:.1f}%")
     if _r.peak_hour is not None:
         print(f"가장 많이 쓰는 때 {_r.peak_hour:02d}시")
     if _r.win_avg is not None:
         print(f"5시간 창 {len(_r.windows)}개 · 평균 최고 {_r.win_avg:.0f}% · 90%↑ {_r.win_full}개")
     print()
     for _d, _v in _r.days:
-        print(f"  {_d:%m/%d}({'월화수목금토일'[_d.weekday()]})  {_v:5.1f}%p  "
+        print(f"  {_d:%m/%d}({'월화수목금토일'[_d.weekday()]})  {_v:5.1f}%  "
               + "█" * int(_v / 2))
 
     print("\n[주간 한도 창]")
@@ -538,13 +538,13 @@ if __name__ == "__main__":
     print("\n[달별]")
     for _m, _v, _n in _r.months:
         if _v > 0:
-            print(f"  {_m:%Y-%m}  {_v:6.1f}%p  ({_n:.0f}일 · 하루 {_v / max(1.0, _n):.1f}%p)")
+            print(f"  {_m:%Y-%m}  {_v:6.1f}%  ({_n:.0f}일 · 하루 {_v / max(1.0, _n):.1f}%)")
 
     print("\n[전체]")
-    print(f"  합계 {_r.total:.1f}%p · 하루 평균 {_r.total_avg_day:.1f}%p"
-          f" · 주 환산 {_r.total_avg_day * 7:.0f}%")
+    print(f"  합계 {_r.total:.1f}% · 하루 평균 {_r.total_avg_day:.1f}%"
+          f" · 이 속도면 한 주에 {_r.total_avg_day * 7:.0f}%")
     print("  요일별 하루 평균  " + " · ".join(
         f"{'월화수목금토일'[i]} {v:.0f}" for i, v in enumerate(_r.weekdays)))
-    print(f"  기록 덮은 비율 {_r.covered * 100:.0f}% · 끊긴 시간 {_r.gap_hours:.0f}시간")
+    print(f"  못 센 시간 {_r.gap_hours:.0f}시간 (기록이 덮은 비율 {_r.covered * 100:.0f}%)")
     if _r.trend is not None:
-        print(f"  최근 이레 추세 {_r.trend * 100:+.0f}%")
+        print(f"  최근 7일 추세 {_r.trend * 100:+.0f}%")
