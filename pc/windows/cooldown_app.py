@@ -165,6 +165,7 @@ REMOTE_TICK = 30  # 원격 대기가 아직 살아 있는지 보는 주기 (초)
 REMOTE_POLL = 120
 REMOTE_GIVEUP = 3  # 연달아 이만큼 못 붙으면 스스로 끈다 (안 될 일에 계속 프로세스를 띄우지 않는다)
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
+STATS_TABS = ("일별", "주별", "달별", "전체")  # 사용량 통계에서 볼 수 있는 기간
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
 THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
@@ -663,6 +664,7 @@ class App:
         self._topmost_now: bool | None = None
         self._behind = False    # 전체화면 앞에서 물러나 있는 중인가
         self._panels: list[tk.Toplevel] = []  # 열려 있는 팝업들 (한 번에 하나만 둔다)
+        self._stats_period = STATS_TABS[0]  # 사용량 통계에서 마지막에 보던 기간
 
         # 자동 핑(모닝 스타터) 상태 — _build_menu 가 참조하므로 그 전에 잡아 둔다
         self.ping_cfg = cooldown_ping.load_cfg()
@@ -2545,10 +2547,13 @@ class App:
         사용량 단위는 **주간 한도 %p** — 5시간 퍼센트는 5시간마다 0으로 돌아가
         더할 수가 없고, 주간 퍼센트가 오른 만큼이 곧 그 사이에 쓴 양이다.
         셈은 전부 `cooldown_stats` 가 하고, 여기서는 그리기만 한다.
+
+        위쪽 기간 줄(일별·주별·달별·전체)로 갈아 가며 본다. 마지막에 보던 기간은
+        `self._stats_period` 에 남아 다음에 열 때 그대로 열린다.
         """
         W = 344
         try:
-            rep = cooldown_stats.analyze(cooldown_stats.read_samples(days=30))
+            rep = cooldown_stats.analyze(cooldown_stats.read_samples())
             top, body = self._open_panel("사용량 통계")
             wrap = tk.Frame(body, bg=P.bg)
             wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
@@ -2565,56 +2570,195 @@ class App:
                 self._finalize_panel(top, W)
                 return
 
+            head = f"기록 {rep.span_days:.0f}일 · 표본 {rep.samples}개"
+            if rep.first is not None:
+                head += f" · {rep.first:%m/%d} 부터"
             tk.Label(
-                wrap,
-                text=f"기록 {rep.span_days:.0f}일 · 표본 {rep.samples}개",
-                bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
+                wrap, text=head, bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
             ).pack(fill="x", pady=(0, 8))
 
-            # ---- 일별 ----
-            self._section(wrap, "일별 사용량", "주간 한도 기준")
-            self._chart_days(wrap, rep.days, inner)
-            self._pair(
-                wrap, "오늘", f"{rep.today:.0f}%p", pace_color(self._day_level(rep.today))
-            )
-            self._pair(wrap, "어제", f"{rep.yesterday:.0f}%p", P.sub)
-            self._pair(wrap, "하루 평균 (최근 이레)", f"{rep.avg_day:.0f}%p", P.sub)
-            if rep.busiest is not None:
-                day, value = rep.busiest
-                self._pair(
-                    wrap, "가장 많이 쓴 날",
-                    f"{day.month}/{day.day:02d}({'월화수목금토일'[day.weekday()]}) "
-                    f"{value:.0f}%p",
-                    P.sub,
-                )
-
-            tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(12, 10))
-
-            # ---- 시간대 ----
-            self._section(wrap, "시간대", "0~23시")
-            self._chart_hours(wrap, rep.hours, inner)
-            if rep.peak_hour is not None:
-                self._pair(
-                    wrap, "가장 많이 쓰는 때",
-                    f"{rep.peak_hour:02d}~{(rep.peak_hour + 1) % 24:02d}시", P.sub,
-                )
-
-            # ---- 5시간 창 ----
-            if rep.windows:
-                tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(12, 10))
-                self._section(wrap, "5시간 창 최고", f"최근 {len(rep.windows)}개")
-                self._chart_windows(wrap, rep.windows, inner)
-                self._pair(
-                    wrap, "평균 최고", f"{rep.win_avg:.0f}%", tone(rep.win_avg)
-                )
-                self._pair(
-                    wrap, "90% 넘긴 창", f"{rep.win_full}개",
-                    P.red if rep.win_full else P.sub,
-                )
+            bar = tk.Frame(wrap, bg=P.bg)
+            bar.pack(fill="x", pady=(0, 10))
+            content = tk.Frame(wrap, bg=P.bg)
+            content.pack(fill="both", expand=True)
+            self._build_stats_tabs(bar, top, content, rep, inner, W)
 
             self._finalize_panel(top, W)
         except Exception:  # noqa: BLE001
             pass
+
+    def _build_stats_tabs(self, bar, top, content, rep, inner: int, W: int) -> None:
+        """기간 고르는 줄. 고른 것만 밝고 밑에 초록 밑줄이 선다 (툴팁 없이 지금 상태를 보임)."""
+        tabs: dict[str, tk.Label] = {}
+
+        def show(name: str) -> None:
+            self._stats_period = name
+            for key, lb in tabs.items():
+                on = key == name
+                lb.config(fg=P.title if on else P.faint,
+                          font=(KR, 9, "bold") if on else (KR, 9))
+                lb.rule.config(bg=P.green if on else P.line)
+            for w in content.winfo_children():
+                w.destroy()
+            self._draw_stats(content, rep, inner, name)
+            self._refit_panel(top, W)
+
+        for name in STATS_TABS:
+            cell = tk.Frame(bar, bg=P.bg)
+            cell.pack(side="left", expand=True, fill="x")
+            lb = tk.Label(cell, text=name, bg=P.bg, fg=P.faint, font=(KR, 9),
+                          cursor="hand2", pady=3)
+            lb.pack(fill="x")
+            lb.rule = tk.Frame(cell, bg=P.line, height=2)
+            lb.rule.pack(fill="x")
+            lb.bind("<Button-1>", lambda _e, n=name: show(n))
+            lb.bind("<Enter>", lambda _e, n=name, w=lb:
+                    w.config(fg=P.sub) if self._stats_period != n else None)
+            lb.bind("<Leave>", lambda _e, n=name, w=lb:
+                    w.config(fg=P.faint) if self._stats_period != n else None)
+            tabs[name] = lb
+
+        show(self._stats_period if self._stats_period in tabs else STATS_TABS[0])
+
+    def _draw_stats(self, wrap, rep, inner: int, period: str) -> None:
+        """고른 기간 하나를 그린다. 셈은 이미 `analyze` 가 다 해 뒀다."""
+        if period == "일별":
+            self._stats_daily(wrap, rep, inner)
+        elif period == "주별":
+            self._stats_weekly(wrap, rep, inner)
+        elif period == "달별":
+            self._stats_monthly(wrap, rep, inner)
+        else:
+            self._stats_total(wrap, rep, inner)
+
+    # ---- 일별 ----
+    def _stats_daily(self, wrap, rep, inner: int) -> None:
+        self._section(wrap, "일별 사용량", "주간 한도 기준")
+        self._chart_days(wrap, rep.days, inner)
+        self._pair(
+            wrap, "오늘", f"{rep.today:.0f}%p", pace_color(self._day_level(rep.today))
+        )
+        self._pair(wrap, "어제", f"{rep.yesterday:.0f}%p", P.sub)
+        self._pair(wrap, "하루 평균 (최근 이레)", f"{rep.avg_day:.0f}%p", P.sub)
+        if rep.busiest is not None:
+            day, value = rep.busiest
+            self._pair(wrap, "가장 많이 쓴 날", f"{self._day_text(day)} {value:.0f}%p", P.sub)
+
+        self._rule(wrap)
+        self._section(wrap, "시간대", "0~23시")
+        self._chart_hours(wrap, rep.hours, inner)
+        if rep.peak_hour is not None:
+            self._pair(
+                wrap, "가장 많이 쓰는 때",
+                f"{rep.peak_hour:02d}~{(rep.peak_hour + 1) % 24:02d}시", P.sub,
+            )
+
+        if rep.windows:
+            self._rule(wrap)
+            self._section(wrap, "5시간 창 최고", f"최근 {len(rep.windows)}개")
+            self._chart_windows(wrap, rep.windows, inner)
+            self._pair(wrap, "평균 최고", f"{rep.win_avg:.0f}%", tone(rep.win_avg))
+            self._pair(wrap, "90% 넘긴 창", f"{rep.win_full}개",
+                       P.red if rep.win_full else P.sub)
+
+    # ---- 주별 ----
+    def _stats_weekly(self, wrap, rep, inner: int) -> None:
+        """주는 **달력 주가 아니라 주간 한도 창**이다 — 초기화 시각에서 7일 뺀 데서 시작한다.
+        그래서 0~100% 고정 눈금으로 그리고, 그 값이 곧 그 주에 쓴 한도다."""
+        if not rep.limits:
+            tk.Label(wrap, text="아직 한 주가 안 찼음", bg=P.bg, fg=P.faint,
+                     font=(KR, 9)).pack(anchor="w", pady=(2, 8))
+            return
+        self._section(wrap, "주간 한도 창", f"최근 {len(rep.limits)}개")
+        self._chart_weeks(wrap, rep.limits, inner)
+        if rep.week_now is not None:
+            self._pair(wrap, "지금 창", f"{rep.week_now.used:.0f}%",
+                       tone(rep.week_now.used))
+        if rep.week_prev is not None:
+            w = rep.week_prev
+            self._pair(wrap, "지난 창" + (" (도중부터)" if w.partial else ""),
+                       f"{w.used:.0f}%", P.sub)
+        if rep.avg_week is not None:
+            self._pair(wrap, "다 채운 창 평균", f"{rep.avg_week:.0f}%", tone(rep.avg_week))
+        # 지금 도는 창이 곧 최고면 바로 위 줄과 같은 말이라 적지 않는다
+        if rep.busiest_week is not None and rep.busiest_week is not rep.week_now:
+            w = rep.busiest_week
+            self._pair(wrap, "가장 많이 쓴 창",
+                       f"{w.start.month}/{w.start.day:02d} 시작 {w.used:.0f}%", P.sub)
+        self._coverage_note(wrap, rep)
+
+    # ---- 달별 ----
+    def _stats_monthly(self, wrap, rep, inner: int) -> None:
+        """달마다 날수가 다르고 이번 달·첫 달은 잘려 있어, 막대 색은 **하루 평균**으로 정한다."""
+        self._section(wrap, "달별 사용량", "주간 한도 기준")
+        self._chart_months(wrap, rep.months, inner)
+        self._pair(wrap, "이번 달", f"{rep.this_month:.0f}%p", P.title)
+        self._pair(wrap, "지난 달", f"{rep.last_month:.0f}%p", P.sub)
+        if rep.busiest_month is not None:
+            when, value, span = rep.busiest_month
+            self._pair(wrap, "가장 많이 쓴 달",
+                       f"{when.month}월 {value:.0f}%p"
+                       + (f" (하루 {value / span:.0f}%p)" if span >= 1 else ""), P.sub)
+        cur = rep.months[-1] if rep.months else None
+        if cur is not None and cur[2] >= 1:  # 기록이 하루도 안 되는 달은 평균이 뜻이 없다
+            avg = cur[1] / cur[2]
+            self._pair(wrap, "이번 달 하루 평균", f"{avg:.0f}%p",
+                       pace_color(self._day_level(avg)))
+        self._coverage_note(wrap, rep)
+
+    # ---- 전체 ----
+    def _stats_total(self, wrap, rep, inner: int) -> None:
+        """쌓인 기록 전부를 한 장으로 — 얼마나 썼나 · 어느 요일에 몰리나 · 늘고 있나."""
+        self._section(wrap, "쌓인 기록 전부", self._span_text(rep))
+        self._pair(wrap, "합계", f"{rep.total:.0f}%p", P.title)
+        self._pair(wrap, "하루 평균", f"{rep.total_avg_day:.0f}%p",
+                   pace_color(self._day_level(rep.total_avg_day)))
+        self._pair(wrap, "주 환산", f"{min(999, rep.total_avg_day * 7):.0f}%",
+                   tone(rep.total_avg_day * 7))
+        if rep.trend is not None:
+            self._pair(
+                wrap, "최근 이레 (그 전 이레 대비)", f"{rep.trend * 100:+.0f}%",
+                P.red if rep.trend > 0.25 else (P.green if rep.trend < -0.25 else P.sub),
+            )
+
+        self._rule(wrap)
+        self._section(wrap, "요일별", "하루 평균")
+        self._chart_weekdays(wrap, rep.weekdays, inner)
+        if rep.peak_weekday is not None:
+            self._pair(wrap, "가장 많이 쓰는 요일",
+                       f"{'월화수목금토일'[rep.peak_weekday]}요일 "
+                       f"{rep.weekdays[rep.peak_weekday]:.0f}%p", P.sub)
+
+        self._rule(wrap)
+        self._section(wrap, "시간대", "0~23시")
+        self._chart_hours(wrap, rep.hours, inner)
+
+        self._rule(wrap)
+        self._section(wrap, "기록", "위젯이 떠 있는 동안만 쌓임")
+        self._pair(wrap, "덮은 비율", f"{rep.covered * 100:.0f}%",
+                   P.sub if rep.covered >= 0.9 else P.amber)
+        self._pair(wrap, "끊긴 시간", f"{rep.gap_hours:.0f}시간",
+                   P.sub if rep.gap_hours < 24 else P.amber)
+
+    # ---- 통계 화면 조각 ----
+    @staticmethod
+    def _rule(parent: tk.Misc) -> None:
+        tk.Frame(parent, bg=P.line, height=1).pack(fill="x", pady=(12, 10))
+
+    @staticmethod
+    def _day_text(day) -> str:
+        return f"{day.month}/{day.day:02d}({'월화수목금토일'[day.weekday()]})"
+
+    @staticmethod
+    def _span_text(rep) -> str:
+        if rep.first is None or rep.last is None:
+            return ""
+        return f"{rep.first:%m/%d} ~ {rep.last:%m/%d}"
+
+    def _coverage_note(self, wrap, rep) -> None:
+        """기록이 많이 끊겼으면 그 사실을 값 옆에 적는다 — 숫자가 실제보다 적다는 뜻이다."""
+        if rep.gap_hours >= 24:
+            self._pair(wrap, "기록 끊긴 시간", f"{rep.gap_hours:.0f}시간", P.amber)
 
     @staticmethod
     def _section(parent: tk.Misc, title: str, note: str = "") -> None:
@@ -2718,6 +2862,84 @@ class App:
                 x + bar_w / 2, height + 7, text=f"{w.start.hour}",
                 font=(NUM, 7), fill=P.faint,
             )
+
+    @staticmethod
+    def _chart_weeks(parent: tk.Misc, weeks: list, width: int, height: int = 46) -> None:
+        """주간 한도 창마다 '한 주를 얼마나 썼나' — 0~100% 고정 눈금이라 주끼리 바로 견준다.
+        도중부터 기록한 창은 **성긴 무늬**로 칠한다(그 값은 실제보다 적다)."""
+        c = tk.Canvas(
+            parent, width=width, height=height + 14, bg=P.bg, highlightthickness=0, bd=0
+        )
+        c.pack(fill="x", pady=(0, 8))
+        n = max(1, len(weeks))
+        pitch = width / n
+        bar_w = max(6.0, min(38.0, pitch - 6))
+        for i, w in enumerate(weeks):
+            x = i * pitch + (pitch - bar_w) / 2
+            c.create_rectangle(x, 0, x + bar_w, height, fill=P.track, width=0)
+            filled = min(100.0, w.used) / 100 * height
+            c.create_rectangle(
+                x, height - max(2.0, filled), x + bar_w, height, fill=tone(w.used),
+                width=0, stipple="gray50" if w.partial else "",
+            )
+            c.create_text(
+                x + bar_w / 2, height + 8, text=f"{w.start.month}/{w.start.day}",
+                font=(NUM, 7), fill=P.faint,
+            )
+
+    @staticmethod
+    def _chart_months(parent: tk.Misc, months: list, width: int, height: int = 52) -> None:
+        """달마다 쓴 %p. 달 길이가 다르고 이번 달은 아직 안 끝나서, **색은 하루 평균**으로
+        정한다(막대 길이는 합계 그대로) — 잘린 달이 억울하게 빨개지지 않게."""
+        c = tk.Canvas(
+            parent, width=width, height=height + 14, bg=P.bg, highlightthickness=0, bd=0
+        )
+        c.pack(fill="x", pady=(0, 8))
+        n = max(1, len(months))
+        pitch = width / n
+        bar_w = max(6.0, min(38.0, pitch - 8))
+        top_v = max([v for _d, v, _s in months] + [1.0]) * 1.12
+        for i, (when, value, span) in enumerate(months):
+            x = i * pitch + (pitch - bar_w) / 2
+            if value <= 0:  # 기록이 없던 달도 자리는 남긴다
+                c.create_rectangle(x, height - 2, x + bar_w, height, fill=P.track, width=0)
+            else:
+                h = value / top_v * height
+                c.create_rectangle(
+                    x, height - max(2.0, h), x + bar_w, height,
+                    fill=pace_color(App._day_level(value / max(1.0, span))), width=0,
+                )
+            c.create_text(
+                x + bar_w / 2, height + 8, text=f"{when.month}월",
+                font=(KR, 7), fill=P.faint,
+            )
+
+    @staticmethod
+    def _chart_weekdays(parent: tk.Misc, values: list, width: int, height: int = 46) -> None:
+        """요일별 하루 평균 + 하루 적정선(점선). 일별 막대와 같은 잣대·같은 색이다."""
+        c = tk.Canvas(
+            parent, width=width, height=height + 14, bg=P.bg, highlightthickness=0, bd=0
+        )
+        c.pack(fill="x", pady=(0, 8))
+        pitch = width / 7
+        bar_w = max(6.0, min(34.0, pitch - 8))
+        top_v = max(list(values) + [DAY_PP]) * 1.15
+        for i, value in enumerate(values):
+            x = i * pitch + (pitch - bar_w) / 2
+            if value <= 0:
+                c.create_rectangle(x, height - 2, x + bar_w, height, fill=P.track, width=0)
+            else:
+                h = value / top_v * height
+                c.create_rectangle(
+                    x, height - max(2.0, h), x + bar_w, height,
+                    fill=pace_color(App._day_level(value)), width=0,
+                )
+            c.create_text(
+                x + bar_w / 2, height + 8, text="월화수목금토일"[i],
+                font=(KR, 7), fill=P.faint,
+            )
+        y = height - DAY_PP / top_v * height
+        c.create_line(0, y, width, y, fill=P.title, width=1, dash=(3, 3))
 
     @staticmethod
     def _gap_sentence(p) -> str:
