@@ -509,6 +509,14 @@ def analyze(samples: list[Sample], days: int = 14, today: date | None = None) ->
 # ---------------------------------------------------------------- 단독 확인
 
 if __name__ == "__main__":
+    import sys
+
+    # 한국어 콘솔(cp949)은 막대 글자(█)를 못 그려 UnicodeEncodeError 로 죽는다 —
+    # 못 그리는 글자는 ? 로 대신하고 계속 찍는다.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
     _s = read_samples()
     _r = analyze(_s)
     print(f"기록 {_r.samples}개 · {_r.span_days:.1f}일" + (
