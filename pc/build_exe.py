@@ -1,10 +1,21 @@
-"""
+r"""
 배포용 exe 만들기
 ==================
     pip install pyinstaller
     python build_exe.py
 
-결과: dist/클로드 쿨다운.exe  (파이썬이 없는 PC 에서도 더블클릭으로 실행)
+결과: dist/클로드 쿨다운 v<판>/클로드 쿨다운.exe  (파이썬이 없는 PC 에서도 더블클릭으로 실행)
+      dist/claude-cooldown-v<판>.zip            (릴리스에 올리는 것 — 위 폴더를 통째로 담은 것)
+
+★ **onedir 다 — onefile 로 되돌리지 말 것**(2026-09-08). onefile 은 켤 때마다 `%TEMP%\_MEIxxxx` 에
+자기 속을 풀어 놓고 거기서 도는데, 윈도우 **저장소 센스**(임시 파일 정리)가 **돌고 있는** exe 의
+그 폴더를 비워 버린다. 그러면 인증서(`certifi\cacert.pem`)가 사라져 HTTPS 가 전부 막히고 위젯에
+`Could not find a suitable TLS CA certificate bundle` 이 흐른다(마지막 값만 남고 조회가 안 된다).
+onedir 은 exe 옆 `_internal\` 에서 그대로 돌아 임시 폴더가 없고, 켜는 것도 빠르다.
+
+폴더 이름에 판 번호가 붙는 까닭: 돌고 있는 판의 `_internal\` 은 잠겨 있어 같은 폴더에 다시
+못 짓는다. 판마다 새 폴더에 지으면 옛 판을 끄지 않고도 빌드가 되고, 새 exe 를 한 번 띄우면
+자동 실행 바로가기가 새 폴더로 옮겨 앉는다(`repair_autostart`). 그 뒤 옛 폴더를 지운다.
 
 받는 사람 조건은 하나 — **그 PC 에 Claude Code 가 깔려 있고 로그인돼 있어야 한다.**
 앱은 그 PC 의 ~/.claude/.credentials.json 을 읽어 자기 사용량을 조회한다.
@@ -18,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WIN = os.path.join(ROOT, "windows")
@@ -82,7 +94,7 @@ def make_icon() -> None:
 def build() -> int:
     cmd = [
         sys.executable, "-m", "PyInstaller",
-        "--onefile",
+        "--onedir",             # ★ onefile 금지 — 맨 위 설명 참고 (저장소 센스가 임시 폴더를 비운다)
         "--windowed",           # 검은 콘솔 창 없이
         "--clean", "--noconfirm",
         "--name", NAME,
@@ -98,6 +110,17 @@ def build() -> int:
     return subprocess.call(cmd, cwd=ROOT)
 
 
+def zip_dir(folder: str, out: str) -> None:
+    """폴더를 통째로 zip 에 담는다(맨 위에 폴더 이름이 그대로 남게). 이름은 UTF-8 로 적어
+    윈도우 탐색기가 한글 그대로 푼다."""
+    top = os.path.basename(folder)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for base, _dirs, files in os.walk(folder):
+            for name in files:
+                full = os.path.join(base, name)
+                z.write(full, os.path.join(top, os.path.relpath(full, folder)))
+
+
 def main() -> int:
     make_icon()
     code = build()
@@ -105,27 +128,37 @@ def main() -> int:
         print("빌드 실패")
         return code
 
-    exe = os.path.join(ROOT, "dist", f"{NAME}.exe")
-    size = os.path.getsize(exe) / 1024 / 1024
-    print(f"\n완성: {exe}  ({size:.1f} MB)")
-
-    # **판 번호를 붙인 이름으로도 둔다** — 릴리스에 올리는 것이 이 파일이다
-    # (이름이 곧 판 번호라 어느 판이 도는지 알 수 있다).
-    # ★ 자동 실행 바로가기가 가리키는 것은 **위의 이름 안 바뀌는 exe** 다 —
-    #   판을 올리며 번호 붙은 파일을 지워도 바로가기가 안 끊기게(`stable_twin`).
+    built = os.path.join(ROOT, "dist", NAME)  # PyInstaller 가 지은 폴더 (판 번호 없음)
     ver = version()
-    if ver:
-        named = os.path.join(ROOT, "dist", f"claude-cooldown-v{ver}.exe")
-        try:
-            shutil.copy2(exe, named)
-            print(f"판 번호 붙인 것: {named}")
-        except PermissionError:
-            # 같은 판을 다시 빌드했는데 그게 지금 돌고 있으면 못 덮어쓴다
-            print(f"! {os.path.basename(named)} 을 못 바꿨다 — 지금 돌고 있는 것 같다.")
-            print("  트레이에서 끝내고 다시 돌리거나, 위 파일을 직접 실행할 것.")
-    else:
+    if not ver:
         print("! 판 번호를 못 읽었다 (android/app/build.gradle.kts 의 versionName)")
-    print("이 파일 하나만 주면 된다. 파이썬은 필요 없다.")
+        print(f"완성: {built}  (판 번호 없는 채로 둔다)")
+        shutil.rmtree(os.path.join(ROOT, "build"), ignore_errors=True)
+        return 0
+
+    # **판 번호 붙은 폴더**로 옮긴다 — 돌고 있는 옛 판의 폴더와 안 겹치게(맨 위 설명).
+    final = os.path.join(ROOT, "dist", f"{NAME} v{ver}")
+    if os.path.isdir(final):
+        try:
+            shutil.rmtree(final)
+        except PermissionError:
+            print(f"! {os.path.basename(final)} 을 못 바꿨다 — 지금 그 판이 돌고 있다.")
+            print("  트레이에서 끝내고 다시 돌릴 것.")
+            shutil.rmtree(built, ignore_errors=True)
+            return 1
+    os.rename(built, final)
+    exe = os.path.join(final, f"{NAME}.exe")
+    total = sum(
+        os.path.getsize(os.path.join(b, f)) for b, _d, fs in os.walk(final) for f in fs
+    ) / 1024 / 1024
+    print(f"\n완성: {exe}  (폴더 {total:.1f} MB)")
+
+    # 릴리스에 올리는 것은 이 zip 이다(이름이 곧 판 번호). 폴더째 담는다.
+    named = os.path.join(ROOT, "dist", f"claude-cooldown-v{ver}.zip")
+    zip_dir(final, named)
+    print(f"릴리스용: {named}  ({os.path.getsize(named) / 1024 / 1024:.1f} MB)")
+    print("받는 사람은 zip 을 풀고 안의 exe 를 더블클릭한다. 파이썬은 필요 없다.")
+    print("★ 새 exe 를 한 번 띄워야 자동 실행 바로가기가 이 폴더로 옮겨 앉는다.")
     shutil.rmtree(os.path.join(ROOT, "build"), ignore_errors=True)
     return 0
 

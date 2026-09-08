@@ -290,39 +290,17 @@ def autostart_enabled() -> bool:
     return os.path.exists(STARTUP_LNK)
 
 
-STABLE_EXE = "클로드 쿨다운.exe"  # build_exe 가 판 번호 없는 이름으로도 늘 남긴다
-
-
-def stable_twin(exe: str) -> str:
-    """옆에 있는 **판 번호 없는 쌍둥이 파일** 경로. 없거나 다른 것이면 준 것 그대로.
-
-    ★ 자동 실행 바로가기가 `claude-cooldown-v0.15.exe` 를 가리키면, 판을 올리며
-      그 파일을 지우는 순간 **없는 파일을 가리키는 바로가기**가 된다 — 다음 로그인에
-      아무 일도 안 일어나고 오류도 안 뜬다. `repair_autostart` 는 앱이 떠야 도니까
-      스스로 못 고친다. 이름이 안 바뀌는 쪽을 등록하면 그 구멍이 없어진다.
-    두 파일은 `shutil.copy2` 로 복사한 것이라 크기·수정시각이 정확히 같다 —
-    **그럴 때만** 바꾼다(예전에 만들어 두고 잊은 파일을 잘못 가리키지 않게).
-    """
-    twin = os.path.join(os.path.dirname(exe), STABLE_EXE)
-    if os.path.normcase(twin) == os.path.normcase(exe):
-        return exe
-    try:
-        here, there = os.stat(exe), os.stat(twin)
-    except OSError:
-        return exe
-    same = here.st_size == there.st_size and abs(here.st_mtime - there.st_mtime) < 2
-    return twin if same else exe
-
-
 def launch_command() -> tuple[str, str, str]:
     """(실행 파일, 인자, 작업 폴더) — 지금 이 프로그램을 다시 띄우는 방법.
 
-    exe 로 묶으면 파이썬도 스크립트도 없다. 그때는 exe 자신이 곧 실행 파일이다
-    (단, 판 번호 없는 쌍둥이가 옆에 있으면 그쪽 — `stable_twin` 참고).
+    exe 로 묶으면 파이썬도 스크립트도 없다. 그때는 exe 자신이 곧 실행 파일이다.
+    (exe 는 판마다 제 폴더 `dist/클로드 쿨다운 v0.24/` 에 든 onedir 이라 이름이 늘 같고,
+     새 판을 한 번 띄우면 `repair_autostart` 가 바로가기를 새 폴더로 옮겨 앉힌다.
+     옛 '판 번호 없는 쌍둥이 exe'(`stable_twin`)는 onefile 시절 것이라 2026-09-08 에 뺐다.)
     """
     if getattr(sys, "frozen", False):  # PyInstaller 로 묶인 상태
         exe = os.path.abspath(sys.executable)
-        return stable_twin(exe), "", os.path.dirname(exe)
+        return exe, "", os.path.dirname(exe)
     pyw = sys.executable.replace("python.exe", "pythonw.exe")
     script = os.path.abspath(__file__)
     return pyw, f'"{script}"', os.path.dirname(script)

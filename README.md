@@ -6,14 +6,14 @@
 
 **[👉 최신 버전 받기 (Releases)](https://github.com/kyijgnes/claude-cooldown/releases/latest)**
 
-- 💻 **컴퓨터 (Windows)** — `claude-cooldown-*.exe` (더블클릭)
+- 💻 **컴퓨터 (Windows)** — `claude-cooldown-*.zip` (풀어서 안의 `클로드 쿨다운.exe` 더블클릭)
 - 📱 **폰 (안드로이드)** — `claude-cooldown-*.apk` (설치)
 
 > **Claude Code 에 로그인돼 있어야** 사용량이 보입니다.
 
 ## 쓰는 법
 
-- **컴퓨터** — exe 더블클릭 → 작업표시줄 오른쪽에 막대. 클릭=새로고침 · 끌기=이동 · 우클릭=설정.
+- **컴퓨터** — zip 을 아무 데나 풀고 `클로드 쿨다운.exe` 더블클릭 → 작업표시줄 오른쪽에 막대. 클릭=새로고침 · 끌기=이동 · 우클릭=설정.
 - **폰** — apk 설치 → PC 위젯 **우클릭 > 모바일 > 폰 연결…** 의 QR 을 폰 앱에서 찍기.
 
 ---

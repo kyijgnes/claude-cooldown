@@ -1,4 +1,4 @@
-# 릴리스 만들기 — 폰 APK + 윈도우 exe
+# 릴리스 만들기 — 폰 APK + 윈도우 exe(zip)
 #
 # 태그를 밀면(v0.2 처럼) APK 와 exe 를 만들어 **둘 다** 릴리스에 붙인다.
 # ★ **exe 를 빠뜨리지 않는다.** 예전에는 exe 를 손으로 올려서 v0.14 처럼 APK 만 달린
@@ -83,7 +83,7 @@ jobs:
           generate_release_notes: false
           body: ""
 
-  # 윈도우 위젯 exe. APK 가 릴리스를 먼저 만들고 나서 붙인다(둘이 같이 만들면 겹친다).
+  # 윈도우 위젯 exe(onedir 폴더를 zip 으로). APK 가 릴리스를 먼저 만들고 나서 붙인다(둘이 같이 만들면 겹친다).
   exe:
     runs-on: windows-latest
     needs: apk
@@ -115,7 +115,7 @@ jobs:
       - name: 판 번호가 태그와 같은지
         shell: bash
         run: |
-          want="pc/dist/claude-cooldown-${GITHUB_REF_NAME}.exe"
+          want="pc/dist/claude-cooldown-${GITHUB_REF_NAME}.zip"
           if [ ! -f "$want" ]; then
             echo "::error::$want 가 없다. build.gradle.kts 의 versionName 과 태그가 어긋났다."
             ls -1 pc/dist || true
@@ -125,13 +125,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: exe
-          path: pc/dist/claude-cooldown-${{ github.ref_name }}.exe
+          path: pc/dist/claude-cooldown-${{ github.ref_name }}.zip
 
       - name: 릴리스에 붙이기
         # ★ 여기도 릴리스 노트를 쓰지 않는다 (위 '릴리스에 붙이기' 와 같은 규칙).
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: pc/dist/claude-cooldown-${{ github.ref_name }}.exe
+          files: pc/dist/claude-cooldown-${{ github.ref_name }}.zip
           generate_release_notes: false
           body: ""
