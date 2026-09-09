@@ -51,6 +51,7 @@ from cooldown_core import (  # noqa: E402
 import cooldown_login  # noqa: E402
 import cooldown_ping  # noqa: E402
 import cooldown_push  # noqa: E402
+import cooldown_reboot  # noqa: E402  윈도우 업데이트가 묻지도 않고 재시작하는 것
 import cooldown_remote  # noqa: E402
 import cooldown_stats  # noqa: E402
 import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐지면 지운다
@@ -157,6 +158,9 @@ MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨
 REVIVE_GAP = 600  # 토큰이 낡았을 때 조용히 되살려 보는 간격 (초)
 REVIVE_TRIES = 2  # 연달아 이만큼 실패하면 자동 시도를 멈춘다 (사람이 누를 때까지)
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
+# 윈도우 업데이트가 재시작을 기다리는지 보는 주기 (초). 레지스트리 두 곳을 읽는
+# 것뿐이라 1ms 안쪽이지만, 팻말은 하루에 몇 번 서지도 않으므로 1분이면 넉넉하다.
+REBOOT_TICK = 60
 PING_TICK = 20  # 자동 핑을 쏠 때가 됐는지 보는 주기 (초). 앵커 여유(GRACE_MIN)보다 촘촘히.
 REMOTE_TICK = 30  # 원격 대기가 아직 살아 있는지 보는 주기 (초)
 # 폰이 '켜 달라' 고 적어 뒀는지 릴레이에 물어보는 주기 (초).
@@ -628,6 +632,11 @@ class App:
         #   띄우고 몇 번만 한다(`AUTO_TRIES` · `AUTO_RETRY_GAP`).
         self._update_tries: dict[str, int] = {}
         self._update_last: dict[str, float] = {}
+        # 윈도우 업데이트 재시작 대기 — 이쪽은 클로드만 죽는 게 아니라 **PC 가 통째로**
+        # 꺼진다. 판정은 레지스트리 읽기뿐이라 스레드도 큐도 없이 Tk 차례에서 본다.
+        self._reboot_pending: cooldown_reboot.Pending | None = None
+        # 이미 알린 것 — `대기표|단계`. 대기마다 두 번까지 알린다(밀린 걸 안 때 · 창이 열릴 때).
+        self._reboot_warned: set[str] = set()
         self.height = 0
         self.alive = True
         self.last_usage: Usage | None = None
@@ -717,6 +726,8 @@ class App:
         self.root.after(TICK * 1000, self._tick)
         self.root.after(THEME_TICK * 1000, self._theme_watch)
         self.root.after(3000, self._ping_tick)  # 첫 조회가 들어올 시간을 준 뒤 시작
+        # 재시작 대기는 켜자마자 본다 — 자고 일어나면 이미 밀려 있는 것이 흔하다
+        self.root.after(1000, self._reboot_tick)
         # 원격 대기는 사용량과 무관하므로 곧바로 — 켜 두기로 했으면 여기서 되살아난다
         self.root.after(1500, self._remote_tick)
 
@@ -1646,6 +1657,49 @@ class App:
 
     # ------------------------------------------------ [업데이트 대기] 끝
 
+    # ------------------------------------------- 윈도우 업데이트 재시작 대기
+    # 클로드 앱 업데이트(위)는 클로드만 죽이지만, 이쪽은 **PC 가 통째로** 꺼진다.
+    # 2026-09-09 12:29 에 그렇게 당했다 — 활성 시간(18~12) 이 끝나자마자 윈도우가
+    # 오전에 깔아 둔 세 판을 적용하느라 연달아 세 번 재시작했고, 돌던 세션이 날아갔다.
+    # 판정은 cooldown_reboot 에만 있다. 여기는 언제 알릴지만 정한다.
+
+    def _reboot_tick(self) -> None:
+        """재시작이 밀려 있는지 본다. 레지스트리 읽기뿐이라 스레드로 뺄 것도 없다."""
+        try:
+            self._on_reboot_state(cooldown_reboot.check())
+        except Exception:  # noqa: BLE001  못 읽었으면 다음 차례에 다시
+            pass
+        finally:
+            if self.alive:
+                self.root.after(REBOOT_TICK * 1000, self._reboot_tick)
+
+    def _on_reboot_state(self, pending: cooldown_reboot.Pending | None) -> None:
+        was = self._reboot_pending
+        self._reboot_pending = pending
+
+        if pending is None:
+            self._reboot_warned.clear()  # 재시작이 끝났거나 취소됐다 — 다시 알릴 수 있게
+        else:
+            # **대기마다 두 번까지.** 밀린 걸 안 때 한 번, 재시작 창이 실제로 열릴 때
+            # 한 번. 창이 열리기 전 알림은 '몇 시부터' 를 알려 주는 값이 있고, 열릴 때
+            # 알림은 '지금 피하라' 는 값이 있다. 그 뒤로는 잠자코 위젯에만 남겨 둔다 —
+            # 클로드 업데이트 알림이 하룻밤에 100통 쌓였던 일(2026-08-14)을 되풀이하지 않는다.
+            key = f"{pending.sig}|{'now' if pending.imminent else 'wait'}"
+            if key not in self._reboot_warned:
+                self.tray.notify(
+                    f"{pending.line}\n"
+                    f"{pending.when} — 돌던 작업이 통째로 날아갑니다.\n"
+                    "편할 때 직접 재시작해 두세요.",
+                    "클로드 쿨다운",
+                )
+                self._reboot_warned.add(key)
+
+        # 문구가 실제로 바뀌었을 때만 다시 그린다 (1분마다 깜빡이지 않게)
+        if (was.short if was else "") != (pending.short if pending else ""):
+            self._redraw()
+
+    # --------------------------------------- 윈도우 업데이트 재시작 대기 끝
+
     def _notice_text(self) -> str:
         """위젯에 얹을 알림 문구 (값은 멀쩡할 때) — 자동 시작이 실패했거나 놓쳤을 때.
 
@@ -1653,6 +1707,9 @@ class App:
         '자동 시작'). 시각을 앞세우고 **까닭은 붙이지 않는다** — 까닭은 트레이 알림과
         실행 기록에 있다.
         """
+        # 맨 앞은 윈도우 재시작 대기다 — 클로드만 죽는 게 아니라 PC 가 통째로 꺼진다
+        if self._reboot_pending is not None:
+            return self._reboot_pending.short
         # [업데이트 대기] 핑보다 앞선다 — 이건 놓치면 작업이 통째로 날아간다
         if self._update_pending is not None:
             return self._update_pending.short
@@ -1726,6 +1783,9 @@ class App:
         p = pace(usage)
         if p is not None:
             parts.append(f"이번 주 적정선 {p.due:.0f}%  ·  {p.verdict}")
+        # 위젯 알림 자리는 한 줄뿐이라 '몇 건인지'까지는 못 적는다 — 여기서 마저 말한다
+        if self._reboot_pending is not None:
+            parts.append(f"{self._reboot_pending.line}  ·  {self._reboot_pending.when}")
         if self.ping_cfg.get("enabled"):
             if self._missed_dt is not None:
                 parts.append(f"자동 시작 놓침 {self._missed_dt:%H:%M} (컴퓨터 꺼짐 등)")
