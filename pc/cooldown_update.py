@@ -265,6 +265,10 @@ def _desktop_pids() -> list[int]:
     이름으로 고르면 돌고 있는 세션·원격 대기·핑까지 딸려 들어간다(맨 위 참고).
     거꾸로 **이름은 안 본다** — 패키지 폴더 안에서 도는 것은 이름이 무엇이든 한 식구라,
     하나라도 남아 있으면 등록이 `0x80073D02` 로 튕긴다.
+
+    ★★ **여기엔 패키지 서비스(`CoworkVMService` = `cowork-svc.exe`)가 안 잡힌다.**
+    SYSTEM 으로 도는 프로세스라 사용자 권한으로는 `ExecutablePath` 가 빈 값으로 온다.
+    그것까지 닫는 것은 `register()` 의 `-ForceApplicationShutdown` 이 한다(아래 참고).
     """
     out = _ps(
         "@(Get-CimInstance Win32_Process | "
@@ -296,13 +300,25 @@ def _alive() -> int:
 #
 # 빠져나가는 길은 하나뿐이다 — **다 죽은 그 틈에 등록을 우리가 부른다.**
 # 관리자 권한은 필요 없다(실측). 되돌리지 말 것.
+#
+# ★★★ **그리고 `-ForceApplicationShutdown` 을 꼭 붙인다.** 2026-08-18 판(1.32352.1)부터
+# 클로드 패키지에 **SYSTEM 서비스 `CoworkVMService`(cowork-svc.exe, 자동 시작)** 가 들어
+# 있다. 앱을 다 죽여도 이게 남아 있어, 옵션 없이 부른 등록은 **매번** 이벤트 9641
+# `활성 서비스 Claude_pzs8sxrjxfjjc!Claude(으)로 인해 배포가 중단됩니다` → 419
+# `0x80073D02` 로 튕겼다(2026-09-12 06:52·07:27·08:03 여섯 번 전부). 사용자 권한
+# `taskkill` 로는 그 서비스를 못 죽이고, `_desktop_pids()` 에는 보이지도 않는다.
+# 클로드 자체 업데이터는 같은 사용자 권한으로 이 옵션을 붙여 **세 번 다 성공**했다
+# (09-11 10:48 · 09-12 11:20 · 09-14 05:41 — 이벤트 603 `ForceApplicationShutdownOption`
+# → 9648 `TerminateSingleService CoworkVMService` → 400). 윈도우가 서비스를 대신 멈춰 준다.
+# 떼지 말 것 — 떼면 다시 매번 실패하고, 결국 업데이터가 작업 중에 강제로 적용한다.
+_FORCE = "-ForceApplicationShutdown"
 _REG_TRY = "$ErrorActionPreference='Stop'; try {{ {cmd}; 'OK' }} catch {{ $_.Exception.Message }}"
 
 # 파워셸 오류 문구는 콘솔 코드페이지(cp949)로 나와 utf-8 로 읽으면 깨진다. 그래서
 # **HRESULT 만 뽑아** 우리 말로 바꿔 준다 — 코드는 어느 코드페이지에서나 ASCII 다.
 _HRESULT = re.compile(r"0x[0-9A-Fa-f]{8}")
 _WHY = {
-    "0x80073D02": "클로드가 아직 떠 있습니다",
+    "0x80073D02": "클로드 앱이나 서비스가 아직 떠 있습니다",
     "0x80073CF9": "등록에 실패했습니다",
     "0x80073CFB": "이미 같은 판이 등록돼 있습니다",
 }
@@ -335,6 +351,11 @@ def register(target: str = "") -> tuple[bool, str]:
     두 길을 차례로 해 본다. 먼저 **판 번호로 폴더를 짚어** 등록하고(윈도우가 스스로 할
     때와 같은 길이다 — 이벤트 854 에 그 `AppxManifest.xml` 이 찍힌다), 폴더가 없거나
     거절당하면 **가족 이름**으로 받아 둔 판을 찾아 등록한다.
+
+    둘 다 `-ForceApplicationShutdown` 을 붙인다 — 남은 패키지 서비스는 윈도우가 멈춘다
+    (위 ★★★). 폴더 길을 먼저 두는 까닭이 하나 더 있다: 이벤트 603 의 주 매개 변수가
+    `AppxManifest.xml` 이면 **우리가 부른 것**, `Claude_pzs8sxrjxfjjc` 면 업데이터가
+    부른 것으로 로그에서 갈린다.
     """
     cmds = []
     if target:
@@ -342,8 +363,12 @@ def register(target: str = "") -> tuple[bool, str]:
             PKG_ROOT, f"Claude_{target}_x64__{PUB_ID}", "AppxManifest.xml"
         )
         if os.path.exists(manifest):
-            cmds.append(f"Add-AppxPackage -DisableDevelopmentMode -Register '{manifest}'")
-    cmds.append(f"Add-AppxPackage -RegisterByFamilyName -MainPackage '{PKG_FAMILY}'")
+            cmds.append(
+                f"Add-AppxPackage -DisableDevelopmentMode -Register '{manifest}' {_FORCE}"
+            )
+    cmds.append(
+        f"Add-AppxPackage -RegisterByFamilyName -MainPackage '{PKG_FAMILY}' {_FORCE}"
+    )
 
     why = ""
     for cmd in cmds:
