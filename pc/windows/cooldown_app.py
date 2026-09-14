@@ -48,6 +48,7 @@ from cooldown_core import (  # noqa: E402
     token_stale,
 )
 
+import cooldown_job  # noqa: E402  세션에서 띄워져도 클로드 데스크톱과 같이 죽지 않게
 import cooldown_login  # noqa: E402
 import cooldown_ping  # noqa: E402
 import cooldown_push  # noqa: E402
@@ -180,6 +181,7 @@ STATUS_BOX = 18  # 상태 점 + 새로고침 링을 담는 작은 캔버스 한 
 DOT_R = 2.0  # 상태 점 반지름 — 링(반지름 7) 안쪽에 넉넉히 들어가게 작게
 
 _MUTEX = None  # 중복 실행 판정용. 프로세스가 살아 있는 동안 붙들고 있어야 한다.
+MUTEX_NAME = "claude_cooldown_single_instance"
 
 
 def already_running() -> bool:
@@ -196,7 +198,7 @@ def already_running() -> bool:
             ctypes.c_wchar_p,
         ]
         kernel32.CreateMutexW.restype = ctypes.c_void_p
-        _MUTEX = kernel32.CreateMutexW(None, False, "claude_cooldown_single_instance")
+        _MUTEX = kernel32.CreateMutexW(None, False, MUTEX_NAME)
         return ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
     except Exception:  # noqa: BLE001
         return False
@@ -3390,6 +3392,17 @@ class App:
 
 
 if __name__ == "__main__":
+    # ★ 클로드 코드 세션에서 띄워져 클로드 데스크톱과 한 job 에 들었으면 밖으로 다시 뜨고 끝낸다 —
+    #   그대로 두면 클로드 강제 업데이트 때 같이 죽는다(cooldown_job 맨 위 설명).
+    #   **뮤텍스를 잡기 전에** 한다: 잡고 나서 띄우면 새 프로세스가 '이미 떠 있음' 으로 보고 끝난다.
+    #   이미 딴 위젯이 떠 있으면 다시 띄울 것 없이 아래에서 그쪽을 부르고 끝난다.
+    escaped = cooldown_job.escaped(sys.argv)  # 빠져나오려고 다시 띄운 쪽인가
+    in_claude = cooldown_job.claude_in_my_job()
+    escape_fail = ""
+    if in_claude and not escaped and not cooldown_job.mutex_exists(MUTEX_NAME):
+        ok, escape_fail = cooldown_job.relaunch_outside(*launch_command(), MUTEX_NAME)
+        if ok:
+            sys.exit(0)
     # 두 번 실행해도 위젯이 둘로 늘지 않는다 — 이미 떠 있으면 그쪽을 앞으로 부른다.
     # (시작 프로그램 + 바로가기 + .bat 이 겹쳐 눌리기 쉽다)
     # 로그는 이 판정 뒤에 연다 — 겹쳐 눌린 프로세스가 로그를 어지럽히지 않게.
@@ -3397,6 +3410,13 @@ if __name__ == "__main__":
         summon_running_instance()
         sys.exit(0)
     install_crash_log()
-    applog("시작")
+    if escaped and not in_claude:
+        applog("시작 — 클로드 묶음에서 빠져나와 다시 뜸")
+    elif escaped:
+        applog("시작 — 클로드 묶음에서 빠져나오려 다시 떴지만 아직 묶음 안")
+    elif in_claude:
+        applog(f"시작 — 클로드 묶음 안, 빠져나오지 못함 ({escape_fail})")
+    else:
+        applog("시작")
     App().run()
     applog("종료 — 창이 닫힘")  # quit() 을 안 거치고 mainloop 이 끝난 길
