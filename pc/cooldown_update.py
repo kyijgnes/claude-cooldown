@@ -255,10 +255,16 @@ def user_idle_min() -> float:
 # 클로드 코드 세션은 `...\Claude\claude-code\<판>\claude.exe` 로 돈다. 그 아래에 달린
 # 자손 가운데 지금 **일을 하고 있는 것**이 있으면 돌고 있는 것이다.
 #
-# ★★ **있다/없다로 세면 안 된다.** 세션이 띄운 셸(`bash.exe`)은 일이 끝나도 한참 남는다
-#   (2026-09-20 실측: CPU 가 16분째 0 인 채로 떠 있는 것 둘). 그걸 '작업 중' 으로 세면
-#   자동 적용이 영영 안 돌고, 그러면 **업데이터가 제 시간에 강제로 적용한다** — 막으려던
-#   사고가 그대로 난다. 그래서 **두 번 재서 CPU 가 늘어난 것**(과 그 사이에 새로 생긴 것)만 센다.
+# ★★ **자동 적용을 막는 자리에서는 있다/없다로 세면 안 된다**(`busy_only=True`).
+#   세션이 띄운 셸(`bash.exe`)은 일이 끝나도 한참 남는다(2026-09-20 실측: CPU 가 16분째
+#   0 인 채로 떠 있는 것 둘). 그걸 '작업 중' 으로 세면 자동 적용이 영영 안 돌고, 그러면
+#   **업데이터가 제 시간에 강제로 적용한다** — 막으려던 사고가 그대로 난다. 그래서
+#   **두 번 재서 CPU 가 늘어난 것**(과 그 사이에 새로 생긴 것)만 센다.
+# ★★ **거꾸로 [오래 도는 작업] 알림은 CPU 로 세면 안 된다**(`busy_only=False`, 2026-09-21).
+#   멎은 셸도 3초 사이에 CPU 눈금 하나를 쓸 때가 있고 안 쓸 때가 있어(실측: 멈춘 bash 가
+#   네 번 재는 동안 한 번만 늘었다) 목록에서 **있다 없다 한다.** 그러면 '사라졌다' 로 보고
+#   알림이 다시 무장돼 **같은 프로세스로 밤새 알림이 쌓인다** — 사용자가 6시간짜리
+#   bash 로 겪은 자리다. 알림 쪽은 **살아 있으면 센다**(어차피 업데이트에 같이 죽는다).
 # ★ `conhost.exe` 는 세션마다 하나씩 딸려 오는 콘솔 창이라 뺀다.
 # ★ 세션이 띄운 **클로드 CLI 자신**(핑 `claude -p` · 원격 대기 `claude rc`)도 뺀다 —
 #   그건 위젯이 띄운 것이라 죽여도 잃을 것이 없고, 세면 늘 '작업 중' 이 된다.
@@ -306,18 +312,27 @@ Start-Sleep -Seconds __SAMPLE__
 $b = Snap
 $now = Get-Date
 foreach ($k in $b.Keys) {
-  if ($a.ContainsKey($k) -and $b[$k][1] -le $a[$k][1]) { continue }
+  $busy = 1
+  if ($a.ContainsKey($k) -and $b[$k][1] -le $a[$k][1]) { $busy = 0 }
   $min = [int]([math]::Floor(($now - $b[$k][2]).TotalMinutes))
-  "{0}|{1}" -f $b[$k][0], $min
+  "{0}|{1}|{2}|{3}" -f $b[$k][0], $min, $busy, $k
 }
+'#ok'
 """
 
+# 다 재고 끝났다는 표. 이게 없으면 **못 잰 것**이다 — 한 줄도 없는 것과 가르려고 둔다.
+_JOBS_END = "#ok"
 
-def session_jobs() -> list[tuple[str, int]]:
-    """클로드 코드 세션 아래에서 **지금 도는** 프로세스들. `(이름, 뜬 지 몇 분)`.
 
-    오래 도는 것부터 준다. 못 물어봤으면 빈 목록 — 이 판정만으로 죽이지는 않으므로
-    (앞의 두 빗장이 이미 있다) 모르면 '없다' 쪽으로 둔다.
+def session_jobs(busy_only: bool = True) -> list[tuple[str, int, int]] | None:
+    """클로드 코드 세션 아래에 달린 프로세스들. `(이름, 뜬 지 몇 분, 프로세스 번호)`.
+
+    오래 도는 것부터 준다. **못 쟀으면 `None`** — '한 개도 없다' 와 다르다.
+
+    - `busy_only=True`(기본) — **두 번 재서 CPU 가 늘어난 것**만. 자동 적용이 물러날지
+      정하는 자리(`safe_now`)는 이것만 쓴다.
+    - `busy_only=False` — 살아 있는 것 전부. **[오래 도는 작업] 알림**이 쓰는 쪽이다.
+      (두 갈래인 까닭은 맨 위 ★★ 둘)
 
     ★ **`BUSY_SAMPLE` 초를 잔다.** 작업 스레드에서만 부를 것.
     """
@@ -327,12 +342,20 @@ def session_jobs() -> list[tuple[str, int]]:
         ),
         timeout=BUSY_SAMPLE + 60,
     )
-    jobs: list[tuple[str, int]] = []
-    for line in (out or "").splitlines():
-        name, _sep, mins = line.strip().partition("|")
-        if not name or not mins.strip().lstrip("-").isdigit():
+    lines = [line.strip() for line in (out or "").splitlines()]
+    if _JOBS_END not in lines:  # 파워셸이 없거나 막혔거나 시간이 다 된 것
+        return None
+    jobs: list[tuple[str, int, int]] = []
+    for line in lines:
+        parts = line.split("|")
+        if len(parts) != 4:
             continue
-        jobs.append((name, int(mins.strip())))
+        name, mins, busy, pid = (p.strip() for p in parts)
+        if not name or not mins.lstrip("-").isdigit() or not pid.isdigit():
+            continue
+        if busy_only and busy != "1":
+            continue
+        jobs.append((name, int(mins), int(pid)))
     jobs.sort(key=lambda j: -j[1])
     return jobs
 
@@ -350,10 +373,12 @@ def safe_now(deep: bool = False) -> tuple[bool, str]:
     if idle < IDLE_MIN:
         return False, f"{idle:.0f}분 전까지 쓰는 중"
     if deep:
-        jobs = session_jobs()
+        # 못 쟀으면(None) '없다' 쪽으로 둔다 — 이 판정만으로 죽이지는 않으므로
+        # (앞의 두 빗장이 이미 있다) 모른다고 자동 적용을 영영 막지 않는다.
+        jobs = session_jobs() or []
         if jobs:
             # ★ 이름 뒤에 조사를 붙이지 않는다 — 받침에 따라 `가/이` 가 틀리게 나간다
-            name, mins = jobs[0]
+            name, mins, _pid = jobs[0]
             return False, f"세션 작업 도는 중: {name} ({mins}분째)"
     return True, ""
 
@@ -552,7 +577,10 @@ if __name__ == "__main__":
     ok, why = safe_now()
     print("지금 껐다 켜도 되나:", "예" if ok else f"아니오 ({why})")
     print("데스크톱 앱 프로세스:", len(_desktop_pids()), "개")
-    jobs = session_jobs()
-    print("세션에서 도는 것:", f"{len(jobs)}개" if jobs else "없음")
-    for name, mins in jobs[:8]:
-        print(f"   {name} ({mins}분째)")
+    jobs = session_jobs(busy_only=False)  # 알림이 보는 쪽 — 떠 있으면 다 센다
+    if jobs is None:
+        print("세션 아래 프로세스: 못 쟀음")
+    else:
+        print("세션 아래 프로세스:", f"{len(jobs)}개" if jobs else "없음")
+        for name, mins, pid in jobs[:8]:
+            print(f"   {name} ({mins}분째, {pid})")

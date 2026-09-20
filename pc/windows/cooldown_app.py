@@ -645,8 +645,9 @@ class App:
         # **잊고 켜 둔 백그라운드**를 사람에게 알려 주는 자리이기도 하다 — 그대로 두면
         # 클로드가 강제로 업데이트될 때 통째로 날아간다.
         self.jobs_out: queue.Queue = queue.Queue()
-        self._jobs: list[tuple[str, int]] = []
-        self._jobs_warned = False  # 한 번 알리고 나면 사라질 때까지 다시 안 알린다
+        self._jobs: list[tuple[str, int, int]] = []  # (이름, 몇 분째, 프로세스 번호)
+        # 알린 프로세스 번호. **그 프로세스가 끝날 때까지** 다시 안 알린다.
+        self._jobs_warned: int | None = None
         # 윈도우 업데이트 재시작 대기 — 이쪽은 클로드만 죽는 게 아니라 **PC 가 통째로**
         # 꺼진다. 판정은 레지스트리 읽기뿐이라 스레드도 큐도 없이 Tk 차례에서 본다.
         self._reboot_pending: cooldown_reboot.Pending | None = None
@@ -1631,7 +1632,9 @@ class App:
         # 몇 분 묵었을 수 있지만, 여기서 몇 초를 붙잡아 다시 재면 창이 늦게 뜬다.
         running = ""
         if self._jobs:
-            names = " · ".join(f"{n} ({self._job_age(m)})" for n, m in self._jobs[:3])
+            names = " · ".join(
+                f"{n} ({self._job_age(m)})" for n, m, _pid in self._jobs[:3]
+            )
             running = f"\n지금 도는 것   {names}"
         if not messagebox.askyesno(
             "클로드 껐다 켜서 업데이트 끝내기",
@@ -1699,10 +1702,18 @@ class App:
     # 사람에게 알려 준다.** 자동 적용이 물러나는 까닭도 같은 값에서 나온다.
 
     def _jobs_watch(self) -> None:
-        """JOBS_EVERY 마다 세션이 돌리고 있는 것을 재어 큐에 넣는다. 한 번에 몇 초 걸린다."""
+        """JOBS_EVERY 마다 세션 아래에 달린 것을 재어 큐에 넣는다. 한 번에 몇 초 걸린다.
+
+        ★ **`busy_only=False`** — 여기는 '지금 일하는가' 가 아니라 '떠 있는가' 를 본다.
+          CPU 로 세면 멎은 셸이 목록에서 들락거려 알림이 되풀이된다(`cooldown_update` 맨 위).
+        ★ **못 쟀으면(None) 큐에 안 넣는다** — 빈 목록으로 넘기면 '작업이 끝났다' 로 읽혀
+          알림이 다시 무장되고, 다음 차례에 같은 것으로 또 알린다.
+        """
         while self.alive:
             try:
-                self.jobs_out.put(cooldown_update.session_jobs())
+                jobs = cooldown_update.session_jobs(busy_only=False)
+                if jobs is not None:
+                    self.jobs_out.put(jobs)
             except Exception:  # noqa: BLE001  못 쟀으면 다음 차례에 다시
                 pass
             time.sleep(JOBS_EVERY)
@@ -1712,31 +1723,38 @@ class App:
         """위젯의 좁은 자리에 얹을 기간. 명사형 한 마디."""
         return f"{mins // 60}시간째" if mins >= 120 else f"{mins}분째"
 
-    def _long_job(self) -> tuple[str, int] | None:
-        """LONG_JOB_MIN 을 넘겨 돌고 있는 것. 없으면 None (오래된 것부터 온다)."""
+    def _long_job(self) -> tuple[str, int, int] | None:
+        """LONG_JOB_MIN 을 넘겨 떠 있는 것. 없으면 None (오래된 것부터 온다)."""
         if self._jobs and self._jobs[0][1] >= LONG_JOB_MIN:
             return self._jobs[0]
         return None
 
-    def _on_jobs(self, jobs: list[tuple[str, int]]) -> None:
+    def _on_jobs(self, jobs: list[tuple[str, int, int]]) -> None:
         was = self._long_job()
         self._jobs = jobs
         now = self._long_job()
 
-        if now is None:
-            self._jobs_warned = False  # 사라졌으니 다음에 또 생기면 다시 알린다
-        elif not self._jobs_warned:
-            # ★ **한 번만 알린다.** 개발 서버처럼 온종일 도는 것도 여기 잡히는데,
-            #   5분마다 다시 띄우면 하룻밤에 알림이 쌓인다(업데이트 대기에서 이미 겪었다).
+        # ★★ **무장을 푸는 것은 알린 그 프로세스가 끝났을 때뿐이다**(2026-09-21).
+        #   옛 코드는 '지금 오래 도는 것이 없으면' 풀었는데, 목록이 한 번만 비어도
+        #   (못 쟀거나 CPU 로 세다 놓쳤거나) 다음 차례에 같은 것으로 또 알렸다 —
+        #   6시간째 멎어 있던 bash 하나로 알림이 밤새 쌓였다.
+        live = {pid for _name, _mins, pid in jobs}
+        if self._jobs_warned is not None and self._jobs_warned not in live:
+            self._jobs_warned = None  # 끝났으니 다음에 또 생기면 다시 알린다
+
+        if now is not None and self._jobs_warned is None:
+            # ★ **한 프로세스에 한 번만 알린다.** 개발 서버처럼 온종일 도는 것도 여기
+            #   잡히는데, 5분마다 다시 띄우면 하룻밤에 알림이 쌓인다(업데이트 대기에서
+            #   이미 겪었다).
             # ★ 이름 뒤에 조사를 붙이지 않는다 — `node.exe 를` · `gradle 를` 처럼
             #   받침에 따라 틀린 조사가 그대로 나간다. 이름은 괄호로 값만 보여 준다.
-            name, mins = now
+            name, mins, pid = now
             self.tray.notify(
                 f"오래 도는 세션 작업: {name} ({self._job_age(mins)})\n"
                 "클로드가 업데이트되면 여기서 끊깁니다.",
                 "클로드 쿨다운",
             )
-            self._jobs_warned = True
+            self._jobs_warned = pid
 
         # 문구가 실제로 바뀔 때만 다시 그린다
         if (was is not None) != (now is not None):
