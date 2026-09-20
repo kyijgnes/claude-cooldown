@@ -153,6 +153,10 @@ UPDATE_EVERY = 300
 # **되풀이를 막는 빗장이자, 한 번 어긋났다고 하루를 버리지 않게 하는 여유다.**
 AUTO_TRIES = 3
 AUTO_RETRY_GAP = 1800  # 초 (30분)
+# [오래 도는 작업] 세션 아래에서 도는 것을 얼마나 자주 볼지 · 얼마나 오래 돌면 알릴지.
+# 한 번 보는 데 `cooldown_update.BUSY_SAMPLE`(3초)이 걸리므로 자주 할 일이 아니다.
+JOBS_EVERY = 300
+LONG_JOB_MIN = 90  # 이만큼 넘게 돌고 있으면 알린다 (분)
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
 UNDOCK_SLOP = 120  # 붙여 둔 상태에선 이만큼 넘게 끌어야 떼어 낸다 (그 안이면 클릭으로 보고 제자리로)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
@@ -634,6 +638,12 @@ class App:
         #   띄우고 몇 번만 한다(`AUTO_TRIES` · `AUTO_RETRY_GAP`).
         self._update_tries: dict[str, int] = {}
         self._update_last: dict[str, float] = {}
+        # [오래 도는 작업] 세션이 돌리고 있는 것. 자동 적용이 물러나는 까닭이기도 하고,
+        # **잊고 켜 둔 백그라운드**를 사람에게 알려 주는 자리이기도 하다 — 그대로 두면
+        # 클로드가 강제로 업데이트될 때 통째로 날아간다.
+        self.jobs_out: queue.Queue = queue.Queue()
+        self._jobs: list[tuple[str, int]] = []
+        self._jobs_warned = False  # 한 번 알리고 나면 사라질 때까지 다시 안 알린다
         # 윈도우 업데이트 재시작 대기 — 이쪽은 클로드만 죽는 게 아니라 **PC 가 통째로**
         # 꺼진다. 판정은 레지스트리 읽기뿐이라 스레드도 큐도 없이 Tk 차례에서 본다.
         self._reboot_pending: cooldown_reboot.Pending | None = None
@@ -722,6 +732,8 @@ class App:
         threading.Thread(target=self.tray.run, daemon=True).start()
         # [업데이트 대기] 사용량 조회와 무관하므로 폴러에 얹지 않고 따로 돈다
         threading.Thread(target=self._update_watch, daemon=True).start()
+        # [오래 도는 작업] 재는 동안 몇 초 자므로 반드시 제 스레드에서 돈다
+        threading.Thread(target=self._jobs_watch, daemon=True).start()
 
         self.root.after(200, self._pump)
         self.root.after(STAY_TICK, self._stay_above)
@@ -1347,6 +1359,14 @@ class App:
                 break
             self._on_update_state(pending)
 
+        # [오래 도는 작업] 세션이 돌리고 있는 것 — 재는 스레드가 넣어 둔다
+        while True:
+            try:
+                jobs = self.jobs_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_jobs(jobs)
+
         # 폰이 릴레이에 적어 둔 '원하는 상태' — 물어본 스레드가 넣어 둔다
         while True:
             try:
@@ -1569,8 +1589,11 @@ class App:
         target = pending.target
 
         def worker():
-            # 판정과 실행 사이에 작업이 시작됐을 수 있다 — 죽이기 직전에 한 번 더 본다
-            still, why = cooldown_update.safe_now()
+            # 판정과 실행 사이에 작업이 시작됐을 수 있다 — 죽이기 직전에 한 번 더 본다.
+            # ★ 여기서만 `deep=True` 다: 세션 아래에서 **실제로 도는 프로세스**까지 본다
+            #   (긴 빌드·백그라운드 작업은 도는 동안 세션 기록을 안 써서 '조용함' 으로 보인다).
+            #   몇 초 걸리므로 화면 차례가 아니라 이 작업 스레드에서만 부른다.
+            still, why = cooldown_update.safe_now(deep=True)
             if not still:
                 applog(f"업데이트 자동 적용 접음 — {why}")
                 self.update_done.put((True, True, "", target))  # 조용히 물러난다
@@ -1601,10 +1624,16 @@ class App:
             return
 
         when = f"\n내려받은 시각   {p.since:%m/%d %H:%M}" if p.since else ""
+        # [오래 도는 작업] 무엇이 끊기는지 **이름을 대고** 묻는다. 마지막으로 잰 값이라
+        # 몇 분 묵었을 수 있지만, 여기서 몇 초를 붙잡아 다시 재면 창이 늦게 뜬다.
+        running = ""
+        if self._jobs:
+            names = " · ".join(f"{n} ({self._job_age(m)})" for n, m in self._jobs[:3])
+            running = f"\n지금 도는 것   {names}"
         if not messagebox.askyesno(
             "클로드 껐다 켜서 업데이트 끝내기",
             f"지금 버전   {p.current}\n"
-            f"대기 버전   {p.target}{when}\n\n"
+            f"대기 버전   {p.target}{when}{running}\n\n"
             "클로드를 지금 닫고 새 버전으로 다시 켭니다.\n"
             "돌고 있는 작업은 여기서 중단됩니다 (대화 기록은 남습니다).\n\n"
             "계속할까요?",
@@ -1658,6 +1687,59 @@ class App:
             )
 
     # ------------------------------------------------ [업데이트 대기] 끝
+
+    # ---------------------------------------------------- [오래 도는 작업]
+    # 세션이 백그라운드로 돌려 놓은 것(긴 빌드·스크립트·개발 서버)은 **클로드 데스크톱과
+    # 한 묶음(job)** 이라, 앱이 강제로 업데이트될 때 통째로 죽는다. 그러고 나면 옛 판을
+    # 붙잡은 프로세스가 남아 다음 실행이 `이 파일을 다른 응용 프로그램에서 사용 중입니다`
+    # 로 막히기도 한다. 오래 떠 있을수록 그 창에 걸릴 확률이 올라가므로, **잊고 켜 둔 것을
+    # 사람에게 알려 준다.** 자동 적용이 물러나는 까닭도 같은 값에서 나온다.
+
+    def _jobs_watch(self) -> None:
+        """JOBS_EVERY 마다 세션이 돌리고 있는 것을 재어 큐에 넣는다. 한 번에 몇 초 걸린다."""
+        while self.alive:
+            try:
+                self.jobs_out.put(cooldown_update.session_jobs())
+            except Exception:  # noqa: BLE001  못 쟀으면 다음 차례에 다시
+                pass
+            time.sleep(JOBS_EVERY)
+
+    @staticmethod
+    def _job_age(mins: int) -> str:
+        """위젯의 좁은 자리에 얹을 기간. 명사형 한 마디."""
+        return f"{mins // 60}시간째" if mins >= 120 else f"{mins}분째"
+
+    def _long_job(self) -> tuple[str, int] | None:
+        """LONG_JOB_MIN 을 넘겨 돌고 있는 것. 없으면 None (오래된 것부터 온다)."""
+        if self._jobs and self._jobs[0][1] >= LONG_JOB_MIN:
+            return self._jobs[0]
+        return None
+
+    def _on_jobs(self, jobs: list[tuple[str, int]]) -> None:
+        was = self._long_job()
+        self._jobs = jobs
+        now = self._long_job()
+
+        if now is None:
+            self._jobs_warned = False  # 사라졌으니 다음에 또 생기면 다시 알린다
+        elif not self._jobs_warned:
+            # ★ **한 번만 알린다.** 개발 서버처럼 온종일 도는 것도 여기 잡히는데,
+            #   5분마다 다시 띄우면 하룻밤에 알림이 쌓인다(업데이트 대기에서 이미 겪었다).
+            # ★ 이름 뒤에 조사를 붙이지 않는다 — `node.exe 를` · `gradle 를` 처럼
+            #   받침에 따라 틀린 조사가 그대로 나간다. 이름은 괄호로 값만 보여 준다.
+            name, mins = now
+            self.tray.notify(
+                f"오래 도는 세션 작업: {name} ({self._job_age(mins)})\n"
+                "클로드가 업데이트되면 여기서 끊깁니다.",
+                "클로드 쿨다운",
+            )
+            self._jobs_warned = True
+
+        # 문구가 실제로 바뀔 때만 다시 그린다
+        if (was is not None) != (now is not None):
+            self._redraw()
+
+    # ------------------------------------------------ [오래 도는 작업] 끝
 
     # ------------------------------------------- 윈도우 업데이트 재시작 대기
     # 클로드 앱 업데이트(위)는 클로드만 죽이지만, 이쪽은 **PC 가 통째로** 꺼진다.
@@ -1720,6 +1802,11 @@ class App:
                 return f"{self._ping_fail[0]:%H:%M} 핑 실패"
             if self._missed_dt is not None:
                 return f"{self._missed_dt:%H:%M} 핑 놓침"
+        # [오래 도는 작업] 핑보다 뒤다 — 지금 당장 잃는 것은 없지만, 클로드가 업데이트되면
+        # 끊기므로 사람이 알고는 있어야 한다. 이름은 자리가 없어 빼고 기간만 말한다.
+        long_job = self._long_job()
+        if long_job is not None:
+            return f"세션 작업 {self._job_age(long_job[1])}"
         # 원격 대기는 맨 뒤다 — 지금 잃는 것은 없고 폰에서 새 세션만 못 연다.
         # 여기서도 **까닭은 붙이지 않는다**(자리가 없다. 까닭은 트레이 알림에 있다).
         if self.remote_error:

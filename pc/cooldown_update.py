@@ -194,9 +194,12 @@ def check() -> Pending | None:
 #      **열려 있는 세션 수가 아니라 '쓰이고 있는가' 를 본다** — 답을 기다리며 떠 있는
 #      세션은 죽어도 기록이 남아 이어서 열 수 있지만, 돌고 있는 작업은 통째로 날아간다.
 #   2) 사람이 자리에 있는가 — 눈앞에서 창이 사라지면 그것대로 사고다.
+#   3) 세션 아래에서 **실제로 도는 프로세스**가 있는가 (`session_jobs`).
 #
-# ★ 남는 구멍: **한 번의 도구 호출이 QUIET_MIN 보다 오래 걸리면**(긴 빌드 등) 그동안
-#   기록이 안 쓰여 '조용함' 으로 보인다. 그래서 넉넉하게 잡았다. 더 줄이지 말 것.
+# ★ 1) 만으로는 구멍이 난다: **한 번의 도구 호출이 QUIET_MIN 보다 오래 걸리면**(긴 빌드,
+#   백그라운드로 돌린 스크립트) 그동안 기록이 안 쓰여 '조용함' 으로 보인다. 그래서 값을
+#   넉넉하게 잡아 뒀지만 그것도 45분까지일 뿐이다. 그 구멍을 3) 이 메운다 — 죽이기 직전에
+#   `safe_now(deep=True)` 로 한 번 더 묻는다. 값은 더 줄이지 말 것.
 QUIET_MIN = 45.0  # 세션 기록이 이만큼 조용해야 한다 (분)
 IDLE_MIN = 20.0  # 사람 입력이 이만큼 없어야 한다 (분)
 
@@ -243,14 +246,115 @@ def user_idle_min() -> float:
         return 0.0
 
 
-def safe_now() -> tuple[bool, str]:
-    """지금 껐다 켜도 잃을 것이 없나. 아니면 까닭을 함께 준다(그대로 보여 줄 수 있는 말)."""
+# ------------------------------------------ 세션이 지금 돌리고 있는 것이 있나
+#
+# 세션 기록(jsonl)만 보면 **오래 걸리는 도구 호출 하나**를 놓친다. 긴 빌드나 백그라운드로
+# 돌린 스크립트는 도는 동안 기록을 안 쓰므로, 45분을 넘기면 '조용함' 으로 보여 그 위에
+# 업데이트를 얹게 된다(2026-09-20 에 사용자가 짚은 자리다). 그래서 **프로세스를 직접 본다.**
+#
+# 클로드 코드 세션은 `...\Claude\claude-code\<판>\claude.exe` 로 돈다. 그 아래에 달린
+# 자손 가운데 지금 **일을 하고 있는 것**이 있으면 돌고 있는 것이다.
+#
+# ★★ **있다/없다로 세면 안 된다.** 세션이 띄운 셸(`bash.exe`)은 일이 끝나도 한참 남는다
+#   (2026-09-20 실측: CPU 가 16분째 0 인 채로 떠 있는 것 둘). 그걸 '작업 중' 으로 세면
+#   자동 적용이 영영 안 돌고, 그러면 **업데이터가 제 시간에 강제로 적용한다** — 막으려던
+#   사고가 그대로 난다. 그래서 **두 번 재서 CPU 가 늘어난 것**(과 그 사이에 새로 생긴 것)만 센다.
+# ★ `conhost.exe` 는 세션마다 하나씩 딸려 오는 콘솔 창이라 뺀다.
+# ★ 세션이 띄운 **클로드 CLI 자신**(핑 `claude -p` · 원격 대기 `claude rc`)도 뺀다 —
+#   그건 위젯이 띄운 것이라 죽여도 잃을 것이 없고, 세면 늘 '작업 중' 이 된다.
+# ★ **위젯 제 자손도 뺀다**(`$self`). 위젯이 세션에서 뜬 판이면 제 파워셸을 세어
+#   저를 붙잡고 영영 물러나게 된다.
+
+BUSY_SAMPLE = 3  # CPU 를 재는 두 번 사이 간격(초)
+
+_JOBS_PS = r"""
+$self = __SELF__
+$mark = '*\Claude\claude-code\*'
+function Snap {
+  $all = Get-CimInstance Win32_Process
+  $cli = @{}
+  $map = @{}
+  foreach ($p in $all) {
+    $map[[int]$p.ProcessId] = $p
+    if ($p.ExecutablePath -like $mark) { $cli[[int]$p.ProcessId] = $true }
+  }
+  $out = @{}
+  foreach ($p in $all) {
+    $id = [int]$p.ProcessId
+    if ($id -eq $self) { continue }
+    if ($cli[$id]) { continue }
+    if ($p.Name -eq 'conhost.exe') { continue }
+    $cur = [int]$p.ParentProcessId
+    $hop = 0
+    while ($cur -gt 0 -and $hop -lt 24) {
+      if ($cur -eq $self) { break }
+      if ($cli[$cur]) {
+        $cpu = [int64]$p.KernelModeTime + [int64]$p.UserModeTime
+        $out[$id] = @($p.Name, $cpu, $p.CreationDate)
+        break
+      }
+      $q = $map[$cur]
+      if (-not $q) { break }
+      $cur = [int]$q.ParentProcessId
+      $hop++
+    }
+  }
+  return $out
+}
+$a = Snap
+Start-Sleep -Seconds __SAMPLE__
+$b = Snap
+$now = Get-Date
+foreach ($k in $b.Keys) {
+  if ($a.ContainsKey($k) -and $b[$k][1] -le $a[$k][1]) { continue }
+  $min = [int]([math]::Floor(($now - $b[$k][2]).TotalMinutes))
+  "{0}|{1}" -f $b[$k][0], $min
+}
+"""
+
+
+def session_jobs() -> list[tuple[str, int]]:
+    """클로드 코드 세션 아래에서 **지금 도는** 프로세스들. `(이름, 뜬 지 몇 분)`.
+
+    오래 도는 것부터 준다. 못 물어봤으면 빈 목록 — 이 판정만으로 죽이지는 않으므로
+    (앞의 두 빗장이 이미 있다) 모르면 '없다' 쪽으로 둔다.
+
+    ★ **`BUSY_SAMPLE` 초를 잔다.** 작업 스레드에서만 부를 것.
+    """
+    out = _ps(
+        _JOBS_PS.replace("__SELF__", str(os.getpid())).replace(
+            "__SAMPLE__", str(BUSY_SAMPLE)
+        ),
+        timeout=BUSY_SAMPLE + 60,
+    )
+    jobs: list[tuple[str, int]] = []
+    for line in (out or "").splitlines():
+        name, _sep, mins = line.strip().partition("|")
+        if not name or not mins.strip().lstrip("-").isdigit():
+            continue
+        jobs.append((name, int(mins.strip())))
+    jobs.sort(key=lambda j: -j[1])
+    return jobs
+
+
+def safe_now(deep: bool = False) -> tuple[bool, str]:
+    """지금 껐다 켜도 잃을 것이 없나. 아니면 까닭을 함께 준다(그대로 보여 줄 수 있는 말).
+
+    `deep=True` 면 프로세스까지 본다(`session_jobs`). **`BUSY_SAMPLE` 초가 걸리므로
+    화면 차례에서 부르지 않는다** — 죽이기 직전, 작업 스레드에서 한 번 더 묻는 용도다.
+    """
     quiet = sessions_quiet_min()
     if quiet < QUIET_MIN:
         return False, f"{quiet:.0f}분 전까지 작업 중"
     idle = user_idle_min()
     if idle < IDLE_MIN:
         return False, f"{idle:.0f}분 전까지 쓰는 중"
+    if deep:
+        jobs = session_jobs()
+        if jobs:
+            # ★ 이름 뒤에 조사를 붙이지 않는다 — 받침에 따라 `가/이` 가 틀리게 나간다
+            name, mins = jobs[0]
+            return False, f"세션 작업 도는 중: {name} ({mins}분째)"
     return True, ""
 
 
@@ -446,5 +550,9 @@ if __name__ == "__main__":
         print("등록 지연됨(이벤트 658):", "예" if p.staged else "아니오 (업데이터가 본 판)")
         print("내려받은 시각:", f"{p.since:%m-%d %H:%M}" if p.since else "모름")
     ok, why = safe_now()
-    print("지금 껐다 켜도 되나:", "예" if ok else f"아니오 — {why}")
+    print("지금 껐다 켜도 되나:", "예" if ok else f"아니오 ({why})")
     print("데스크톱 앱 프로세스:", len(_desktop_pids()), "개")
+    jobs = session_jobs()
+    print("세션에서 도는 것:", f"{len(jobs)}개" if jobs else "없음")
+    for name, mins in jobs[:8]:
+        print(f"   {name} ({mins}분째)")
