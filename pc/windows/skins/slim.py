@@ -99,6 +99,23 @@ MAX_SCOPED = "Claude Opus 99%"
 MAX_ERROR = "눌러서 로그인 잇기"
 MAX_NOTICE = "23:59 핑 실패"
 
+# ---------------------------------------------------------------- 좁은 바 (MiniSkin)
+# 같은 바에서 **남은 시간과 모델별 한도를 들어내** 폭을 반으로 줄인 것.
+# 가로: [띠] 5시간칸 |MGAP_C(클로디)| 주간칸 |상태점|. 폭은 글꼴을 재서 build 에서 정한다.
+# 오류·알림은 자리를 따로 두지 않고 **숫자 줄 위에 잠깐 덮어** 보여 주고 물러난다.
+PAD_L_C = 10  # 좁은 바의 내용 시작 (띠 뒤)
+MGAP_C = 36  # 5시간 칸 ↔ 주간 칸 틈 — 여기 가운데에 클로디가 앉는다.
+# ★ 넓은 바의 MGAP(42)보다 좁지만, 여기 틈은 **숫자 줄 오른쪽 끝**부터 재므로
+#   클로디가 실제로 쓰는 30px 남짓에 양쪽 3px 씩 여유가 남는다. 더 줄이지 말 것.
+# 상태 점(과 새로고침 링)은 앱이 **제 캔버스**(18px 네모, `cooldown_app.STATUS_BOX`)로
+# 얹는다 — 넓은 바는 남는 자리라 그냥 겹쳐 뒀지만, 좁은 바는 그 네모만큼 **비워 둔다.**
+# 안 비우면 클로디가 그 자리에 뛰어들 때 네모에 가려 사라진 것처럼 보인다.
+DOT_BOX = 18
+DOT_GAP_C = 4  # 주간 칸 ↔ 상태 점 네모
+# 덮었던 문구가 물러나 **숫자를 다시 보여 주는 시간**(ms). 문구 차례(SLOT_HOLD)보다 훨씬 길다 —
+# 좁은 바에서 정작 보고 싶은 건 숫자고, 알림은 몇 시간씩 남아 있을 수 있다.
+BLANK_HOLD = 15000
+
 
 
 
@@ -218,6 +235,8 @@ class SlimSkin(Skin):
     #   더 줄이면 두 한도 칸의 '23시간 59분 후' 부터 잘린다.
     width = 460
     dockable = True
+    # 좁은 바(`MiniSkin`)는 참이다. 아래 build·show·번갈아 칸이 이 값으로 갈린다.
+    compact = False
 
     def build(self, parent: tk.Misc) -> None:
         self.f_label = tkfont.Font(parent, family=KR, size=9)
@@ -237,71 +256,103 @@ class SlimSkin(Skin):
         self.div_top = top
         self.div_bot = self.bar_y + self.bar_h
 
+        # ---- 가로 나누기 ----
+        # 최대 길이 문자열을 실제 글꼴로 재서 정한다. **캔버스를 만들기 전에** 재는 까닭은
+        # 좁은 바가 이 값으로 제 폭(`self.width`)까지 여기서 정하기 때문이다.
+        num_w = self.f_value.measure(MAX_VALUE)
+        five_w = self.f_label.measure("5시간") + LV_GAP + num_w  # 숫자 줄 폭
+        week_w = self.f_label.measure("주간") + LV_GAP + num_w
+        if self.compact:
+            # 좁은 바: 남은 시간·모델별 칸을 들어내고 두 숫자 줄과 게이지만 남긴다.
+            # 칸 폭 = 그 칸의 숫자 줄 폭 (게이지가 숫자 끝에 맞춰 끝난다).
+            x1, cell_1, cell_2 = PAD_L_C, five_w, week_w
+            x2 = x1 + cell_1 + MGAP_C
+            week_end = x2 + cell_2
+            # 문구는 자리를 따로 안 쓰고 **숫자 줄 위를 덮는다** — 그래서 가로 전체가 칸이다.
+            self.right_w = week_end - x1
+            self.width = week_end + DOT_GAP_C + DOT_BOX
+            self.dot_spot = (self.width - DOT_BOX // 2, DOT_INSET)
+            mascot_cx = (x1 + cell_1 + x2) // 2
+        else:
+            need_cell = max(
+                self.f_label.measure(label)
+                + LV_GAP
+                + num_w
+                + VR_GAP
+                + self.f_small.measure(left)
+                for label, left in zip(("5시간", "주간"), MAX_LEFT)
+            )
+            want_right = max(
+                self.f_small.measure(MAX_SCOPED),
+                self.f_small.measure(MAX_NOTICE),
+                self.f_msg.measure(MAX_ERROR),
+            )
+            # 가로: [띠] 5시간칸 |GAP| 주간칸 |MGAP(마스코트)| 번갈아칸.
+            # 두 한도 칸이 먼저 제 몫을 가져가고, 남는 만큼이 번갈아 칸이다.
+            # (상태 점은 오른쪽 위 구석이라 이 줄의 가로를 먹지 않는다)
+            avail = self.width - PAD_L - PAD_R - GAP - MGAP
+            self.right_w = min(want_right, max(MIN_SLOT, avail - need_cell * 2))
+            cell_1 = cell_2 = (avail - self.right_w) // 2
+            x1 = PAD_L
+            x2 = PAD_L + cell_1 + GAP
+            week_end = x2 + cell_2
+            self.dot_spot = (self.width - DOT_INSET, DOT_INSET)
+            mascot_cx = (week_end + 7 + week_end + MGAP) // 2
+
         self.c = tk.Canvas(
             parent, width=self.width, height=self.h, bg=P.bg,
             highlightthickness=0, bd=0,
         )
         self.c.pack(fill="both", expand=True)
 
-        # 최대 길이 문자열을 실제 글꼴로 재서 폭을 나눈다.
-        # 두 칸이 필요한 만큼 먼저 가져가고, 오른쪽 칸은 남은 폭을 제 몫만큼만 쓴다.
-        need_cell = max(
-            self.f_label.measure(label)
-            + LV_GAP
-            + self.f_value.measure(MAX_VALUE)
-            + VR_GAP
-            + self.f_small.measure(left)
-            for label, left in zip(("5시간", "주간"), MAX_LEFT)
-        )
-        want_right = max(
-            self.f_small.measure(MAX_SCOPED),
-            self.f_small.measure(MAX_NOTICE),
-            self.f_msg.measure(MAX_ERROR),
-        )
-        # 가로: [띠] 5시간칸 |GAP| 주간칸 |MGAP(마스코트)| 번갈아칸.
-        # 두 한도 칸이 먼저 제 몫을 가져가고, 남는 만큼이 번갈아 칸이다.
-        # (상태 점은 오른쪽 위 구석이라 이 줄의 가로를 먹지 않는다)
-        avail = self.width - PAD_L - PAD_R - GAP - MGAP
-        self.right_w = min(want_right, max(MIN_SLOT, avail - need_cell * 2))
-        cell_w = (avail - self.right_w) // 2
-
         self.accent = self.c.create_rectangle(0, 0, ACC, self.h, fill=P.track, width=0)
 
-        x1 = PAD_L
-        x2 = PAD_L + cell_w + GAP
-        rx = self.width - PAD_R
-        self.five = Cell(self, x1, cell_w, "5시간")
-        self.week = Cell(self, x2, cell_w, "주간")
-        week_end = x2 + cell_w
-        right_x0 = week_end + MGAP  # 번갈아 칸 왼쪽 경계
-        # 구분선: 5시간|주간, 그리고 주간|마스코트틈 (오른쪽은 마스코트가 가른다)
-        for dx in (x1 + cell_w + GAP // 2, week_end + 7):
-            self.c.create_line(dx, self.div_top, dx, self.div_bot, fill=P.line, width=1)
+        self.five = Cell(self, x1, cell_1, "5시간")
+        self.week = Cell(self, x2, cell_2, "주간")
+        if not self.compact:
+            # 구분선: 5시간|주간, 그리고 주간|마스코트틈 (오른쪽은 마스코트가 가른다)
+            # 좁은 바에는 안 긋는다 — 틈과 클로디가 이미 가른다.
+            for dx in (x1 + cell_1 + GAP // 2, week_end + 7):
+                self.c.create_line(
+                    dx, self.div_top, dx, self.div_bot, fill=P.line, width=1
+                )
 
         # 번갈아 칸은 **아래 정렬** — 글자 밑선을 게이지 아래끝(div_bot)에 맞춘다.
         # 가운데에 띄우면 두 한도 칸의 두 줄 사이에 붕 떠 보인다.
+        # 좁은 바는 자리가 없어 **숫자 줄을 덮는다** — 있을 때만 보이고(`_slot_face`)
+        # 잠깐 뒤 물러나 숫자를 다시 내준다.
         line = self.f_small.metrics("linespace")
-        slot_h = line + SLOT_RISE * 2
+        # ★ 좁은 바의 문구 칸은 **바 높이를 다 쓴다** — 숫자 줄만 덮으면 그 뒤에서 놀던
+        #   클로디가 허리에서 잘려 다리만 삐죽 나온다(실제로 그랬다).
+        slot_h = self.h if self.compact else (line + SLOT_RISE * 2)
         self.slot_h = slot_h
         # ★ 훑는 글자가 옆으로 흘러넘치지 않게 이 칸만 따로 캔버스로 둔다 (테두리에서 잘림)
         self.slot = tk.Canvas(
             self.c, width=self.right_w, height=slot_h, bg=P.bg,
             highlightthickness=0, bd=0,
         )
-        self.c.create_window(rx, self.div_bot + SLOT_RISE, window=self.slot, anchor="se")
+        if self.compact:
+            self._slot_win = self.c.create_window(
+                x1, self.h // 2, window=self.slot, anchor="w", state="hidden"
+            )
+        else:
+            self._slot_win = self.c.create_window(
+                self.width - PAD_R, self.div_bot + SLOT_RISE,
+                window=self.slot, anchor="se",
+            )
         self.model = self.slot.create_text(
-            self.right_w, slot_h / 2, text="불러오는 중", anchor="e",
+            self.right_w, slot_h / 2, text="" if self.compact else "불러오는 중",
+            anchor="w" if self.compact else "e",
             font=self.f_small, fill=P.faint,
         )
 
-        # 상태 점 자리 — 오른쪽 위 구석. 그리는 건 앱이 한다(새로고침 링과 한 캔버스).
-        self.dot_spot = (self.width - DOT_INSET, DOT_INSET)
-
-        # 클로디는 구분선과 번갈아 칸 사이 빈 틈 가운데에 앉는다. 노는 상자는 **바 전체**다
-        # (완주 축하 폭죽이 바를 가로질러 터진다). **맨 마지막에 켠다** — 매 프레임 다시
-        # 그리므로 늘 맨 위에 온다.
-        self.claudi = Claudi(self.c, (PAD_L, 0, self.width - PAD_R, self.h))
-        self.claudi.home((week_end + 7 + right_x0) // 2)
+        # 클로디는 두 칸 사이 빈 틈 가운데에 앉는다. 노는 상자는 **바 전체**다
+        # (완주 축하 폭죽이 바를 가로질러 터진다). 좁은 바는 상태 점 네모 앞까지만 —
+        # 그 자리에 뛰어들면 앱이 얹은 네모에 가려 사라진 것처럼 보인다.
+        # **맨 마지막에 켠다** — 매 프레임 다시 그리므로 늘 맨 위에 온다.
+        box_r = week_end if self.compact else self.width - PAD_R
+        self.claudi = Claudi(self.c, (x1, 0, box_r, self.h))
+        self.claudi.home(mascot_cx)
         self._slot_init()
         self.claudi.start()  # 코랄 도트 마스코트 — 통통 튀고 눌리면 폴짝
 
@@ -343,11 +394,28 @@ class SlimSkin(Skin):
                 pass
             self._slot_pending = None
 
+    def _with_blank(self, items: list) -> list:
+        """좁은 바는 문구가 **숫자 자리를 덮으므로** 빈 자리 한 칸을 끼워 번갈아 돌린다 —
+        문구를 잠깐 보여 주고 물러나 숫자를 다시 내준다. 넓은 바는 그대로 둔다."""
+        if not items or not self.compact:
+            return items
+        return items + [("", P.faint, False)]
+
+    def _slot_face(self, on: bool) -> None:
+        """좁은 바에서만 — 문구 칸을 숫자 위에 올리거나(참) 물린다(거짓)."""
+        if not self.compact:
+            return
+        try:
+            self.c.itemconfigure(self._slot_win, state="normal" if on else "hidden")
+        except tk.TclError:  # 캔버스가 사라졌다 (스킨·테마 전환)
+            pass
+
     def _slot_commit(self) -> None:
         self._slot_pending = None
         items = list(self._slot_base)[:MAX_SLOTS]
         if self._slot_notice is not None:
             items.append(self._slot_notice)
+        items = self._with_blank(items)
         if items == self._slot:
             return  # 내용이 그대로면 돌던 자리를 지킨다
         # 알림이 새로 떴으면 순서를 기다리지 않고 그것부터 보여 준다
@@ -358,8 +426,14 @@ class SlimSkin(Skin):
                 self.slot.itemconfigure(self.model, text="")
             except tk.TclError:
                 pass
+            self._slot_face(False)
             return
-        self._slot_i = len(items) - 1 if fresh else min(self._slot_i, len(items) - 1)
+        # ★ 좁은 바는 뒤에 빈 칸이 붙으므로 '맨 뒤'가 알림이 아니다 — 자리를 찾아 앉힌다.
+        self._slot_i = (
+            items.index(self._slot_notice)
+            if fresh
+            else min(self._slot_i, len(items) - 1)
+        )
         self._slot_gen += 1  # 돌던 흐름을 은퇴시키고
         self._slot_enter(self._slot_gen, SLOT_FRAMES)  # 지금 것을 곧바로 앉힌다
 
@@ -372,8 +446,11 @@ class SlimSkin(Skin):
         self._slot_pan = max(0.0, font.measure(text) - self.right_w)
         self.slot.itemconfigure(
             self.model, text=text, font=font,
-            anchor="w" if self._slot_pan else "e",
+            # 좁은 바는 문구가 띠 쪽(왼쪽)에서 시작한다 — 숫자를 덮는 자리라
+            # 오른쪽에 붙이면 덮다 만 것처럼 보인다.
+            anchor="w" if (self._slot_pan or self.compact) else "e",
         )
+        self._slot_face(bool(text))
         return text, color, bold
 
     def _slot_paint(self, dx: float = 0.0, dy: float = 0.0, fade: float = 0.0) -> None:
@@ -381,7 +458,8 @@ class SlimSkin(Skin):
         if not self._slot:
             return
         color = self._slot[min(self._slot_i, len(self._slot) - 1)][1]
-        x = dx if self._slot_pan else self.right_w  # 훑을 땐 왼쪽 끝에서 시작한다
+        # 훑을 때(와 좁은 바)는 왼쪽 끝에서 시작한다
+        x = dx if (self._slot_pan or self.compact) else self.right_w
         try:
             self.slot.coords(self.model, x, self.slot_h / 2 + dy)
             self.slot.itemconfigure(
@@ -411,8 +489,14 @@ class SlimSkin(Skin):
         if n < SLOT_FRAMES:
             self._slot_after(gen, SLOT_STEP, lambda g: self._slot_enter(g, n + 1))
         elif self._slot_moves():
-            self._slot_after(gen, PAN_WAIT if self._slot_pan else SLOT_HOLD,
+            # 좁은 바의 빈 칸(숫자를 내준 차례)은 더 오래 머문다
+            hold = BLANK_HOLD if self._slot_blank() else SLOT_HOLD
+            self._slot_after(gen, PAN_WAIT if self._slot_pan else hold,
                              lambda g: self._slot_pan_step(g, 0))
+
+    def _slot_blank(self) -> bool:
+        """지금 차례가 빈 칸인가 (좁은 바에서 숫자를 내준 동안)."""
+        return not self._slot[min(self._slot_i, len(self._slot) - 1)][0]
 
     def _slot_pan_step(self, gen: int, n: int) -> None:
         """칸보다 긴 글자를 왼쪽으로 훑는다. 넘치는 게 없으면 곧바로 나간다."""
@@ -467,12 +551,17 @@ class SlimSkin(Skin):
     def show(self, usage: Usage, stamp: str) -> None:
         self._paint(P.bg, tone(worst(usage)))
         p = pace(usage)
-        self.five.set(usage.five.pct, usage.five.left, five_due(usage))
-        self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
+        # 좁은 바는 남은 시간을 안 적는다 — 게이지의 '지금쯤' 눈금(┃)이 그 자리를 맡고,
+        # 숫자로 보려면 우클릭 > 이번 주 사용 속도 가 있다.
+        five_left = "" if self.compact else usage.five.left
+        week_left = "" if self.compact else usage.week.left
+        self.five.set(usage.five.pct, five_left, five_due(usage))
+        self.week.set(usage.week.pct, week_left, p.due if p else None)
 
         # 번갈아 칸에 띄울 것들 — 모델별 한도(Fable 7%)와 알림. **적정선은 넣지 않는다**:
         # 게이지에 눈금(┃)으로 이미 서 있어서 숫자를 또 적을 까닭이 없다.
-        self._slot_base = [
+        # 좁은 바는 모델별 한도도 안 띄운다 — 문구가 숫자를 덮으므로 **알릴 것만** 덮는다.
+        self._slot_base = [] if self.compact else [
             (f"{s.label} {s.pct:.0f}%", P.label, False)
             for s in usage.scoped
             if s.pct is not None
@@ -490,7 +579,11 @@ class SlimSkin(Skin):
         self._slot_notice = None
         self._slot_on = True
         self._slot_i = 0
-        self._slot = [(text, P.red, True)]
+        # 값이 남아 있으면(일시적 연결 실패) 좁은 바는 문구와 숫자를 번갈아 보여 준다.
+        # 값이 없으면(로그인 막힘) 숫자 자리가 '--' 뿐이라 **문구를 그대로 세워 둔다** —
+        # 누르면 로그인 상태 창이 열리므로 그 한 줄이 곧 할 일이다.
+        one = [(text, P.red, True)]
+        self._slot = one if not keep_values else self._with_blank(one)
         self._slot_gen += 1
         self._slot_enter(self._slot_gen, SLOT_FRAMES)
         if not keep_values:
@@ -505,3 +598,23 @@ class SlimSkin(Skin):
             return
         self._slot_notice = (text, P.amber, False)
         self._slot_queue()
+
+
+# ---------------------------------------------------------------- 좁은 바
+class MiniSkin(SlimSkin):
+    """같은 슬림 바를 **폭 절반**으로 줄인 것 (약 226px).
+
+        ┃ 5시간 17%   주간 56%  ◆    ●
+        ┃ ▪▪▪▪▫▫▫▫▫  ▪▪▪▪▪▪┃▫▫▫
+
+    남은 시간(`4시간 12분 후`)과 모델별 한도(`Fable 7%`)를 들어내고 숫자·게이지·클로디·
+    상태 점만 남긴다. 오류·알림은 자리를 따로 두지 않고 **숫자 줄 위를 잠깐 덮었다가**
+    물러나 숫자를 다시 내준다(`_with_blank`·`_slot_face`·`BLANK_HOLD`).
+    폭은 글꼴을 재서 `build` 가 정한다 — 여기 값은 재기 전에 쓰는 어림수다.
+    """
+
+    key = "mini"
+    name = "작업표시줄 슬림 바 (좁게)"
+    width = 226
+    dockable = True
+    compact = True

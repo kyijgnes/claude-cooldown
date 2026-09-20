@@ -17,6 +17,7 @@ _MODULES = [
     ("arc", "ArcSkin"),
     ("table", "TableSkin"),
     ("slim", "SlimSkin"),
+    ("slim", "MiniSkin"),  # 같은 파일 — 슬림 바를 폭 절반으로 줄인 것
 ]
 
 
