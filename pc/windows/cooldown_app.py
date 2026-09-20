@@ -271,7 +271,10 @@ def load_state() -> dict:
         "auto_update": False,
     }
     try:
-        with open(STATE_PATH, encoding="utf-8") as f:
+        # ★ `utf-8-sig` 로 읽는다 — 손으로 고치다(메모장·파워셸 `Set-Content -Encoding utf8`)
+        #   BOM 이 붙으면 `utf-8` 로는 통째로 못 읽고 **자리·밝기·디자인이 조용히 기본값으로
+        #   되돌아간다**(오류도 안 난다). `cooldown_remote` 가 이미 겪은 것과 같은 함정.
+        with open(STATE_PATH, encoding="utf-8-sig") as f:
             state.update(json.load(f))
     except (OSError, ValueError):
         pass
