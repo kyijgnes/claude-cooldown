@@ -56,6 +56,7 @@ import cooldown_reboot  # noqa: E402  윈도우 업데이트가 묻지도 않고
 import cooldown_remote  # noqa: E402
 import cooldown_stats  # noqa: E402
 import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐지면 지운다
+import cooldown_leftover  # noqa: E402  [남은 식구] 클로드가 고쳐지면 지운다
 import skins  # noqa: E402
 from skins.base import (  # noqa: E402
     KR,
@@ -160,6 +161,9 @@ JOBS_EVERY = 300
 #   기다리기가 2시간이다. 그보다 오래 돌고 있으면 한도 대기이거나 잊고 켜 둔 것이다.
 #   짧게 잡으면 멀쩡히 도는 빌드마다 알림이 떠 잔소리가 된다.
 LONG_JOB_MIN = 120  # 이만큼 넘게 돌고 있으면 알린다 (분)
+# [남은 식구] 클로드 식구를 적어 두는 간격(초). 한 번에 0.1초라 자주 해도 된다 —
+# 드물면 마지막으로 적은 뒤에 뜬 것을 못 알아본다(그 자식까지는 `leftovers` 가 잡는다).
+FAMILY_EVERY = 15
 DRAG_SLOP = 4  # 이만큼 안 움직였으면 '끌었다' 로 치지 않는다 (px)
 UNDOCK_SLOP = 120  # 붙여 둔 상태에선 이만큼 넘게 끌어야 떼어 낸다 (그 안이면 클릭으로 보고 제자리로)
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
@@ -651,6 +655,8 @@ class App:
         self._jobs: list[tuple[str, int, int]] = []  # (이름, 몇 분째, 프로세스 번호)
         # 알린 프로세스 번호. **그 프로세스가 끝날 때까지** 다시 안 알린다.
         self._jobs_warned: int | None = None
+        # [남은 식구] 강제 업데이트 뒤 세션이 띄운 것이 남아 클로드가 안 켜지면 치우고 다시 켠다
+        self.leftover_out: queue.Queue = queue.Queue()
         # 윈도우 업데이트 재시작 대기 — 이쪽은 클로드만 죽는 게 아니라 **PC 가 통째로**
         # 꺼진다. 판정은 레지스트리 읽기뿐이라 스레드도 큐도 없이 Tk 차례에서 본다.
         self._reboot_pending: cooldown_reboot.Pending | None = None
@@ -741,6 +747,8 @@ class App:
         threading.Thread(target=self._update_watch, daemon=True).start()
         # [오래 도는 작업] 재는 동안 몇 초 자므로 반드시 제 스레드에서 돈다
         threading.Thread(target=self._jobs_watch, daemon=True).start()
+        # [남은 식구] 치울 때는 수십 초를 기다리므로 제 스레드에서 돈다
+        threading.Thread(target=self._leftover_watch, daemon=True).start()
 
         self.root.after(200, self._pump)
         self.root.after(STAY_TICK, self._stay_above)
@@ -1374,6 +1382,14 @@ class App:
                 break
             self._on_jobs(jobs)
 
+        # [남은 식구] 치운 결과 — 지켜보는 스레드가 넣어 둔다
+        while True:
+            try:
+                res = self.leftover_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_leftover(res)
+
         # 폰이 릴레이에 적어 둔 '원하는 상태' — 물어본 스레드가 넣어 둔다
         while True:
             try:
@@ -1764,6 +1780,47 @@ class App:
             self._redraw()
 
     # ------------------------------------------------ [오래 도는 작업] 끝
+
+    # ---------------------------------------------------- [남은 식구]
+    # 강제 업데이트는 클로드 본체만 죽이고 세션이 띄운 셸·스크립트는 남길 수 있다. 그것이
+    # 옛 앱 컨테이너(job)를 붙잡아 새 판이 `이 파일을 다른 응용 프로그램에서 사용 중입니다`
+    # 로 안 켜진다(2026-09-23 02:14~05:22, 재부팅으로만 풀림). 판정·치우기는
+    # `cooldown_leftover` 에만 있다. 클로드가 고쳐지면 이 블록째로 지운다.
+
+    def _leftover_watch(self) -> None:
+        """FAMILY_EVERY 마다 클로드 식구를 적고, 앱이 사라진 채 막혀 있으면 치운다."""
+        watch = cooldown_leftover.Watch()
+        while self.alive:
+            try:
+                res = watch.step()
+                if res is not None:
+                    self.leftover_out.put(res)
+            except Exception as e:  # noqa: BLE001  못 봤으면 다음 차례에 다시
+                applog(f"남은 식구 보기 오류 — {e}")
+            time.sleep(FAMILY_EVERY)
+
+    def _on_leftover(self, res: cooldown_leftover.Result) -> None:
+        names = " · ".join(res.names[:4])
+        applog(
+            f"클로드 안 켜짐 풀기 — {res.why} — 남은 것 {names}"
+            + (f" — 안 죽은 것 {' · '.join(res.stuck)}" if res.stuck else "")
+            + f" — {'다시 켜짐' if res.ok else '안 켜짐'}"
+        )
+        if res.ok:
+            self.tray.notify(
+                f"클로드가 다시 켜졌습니다 ({res.why})\n"
+                f"옛 세션이 남긴 것 정리: {names}",
+                "클로드 쿨다운",
+            )
+        else:
+            # ★ 안 되면 되풀이하지 않는다(`Watch` 가 사라질 때마다 한 번만 한다).
+            #   남은 길은 재부팅뿐이라 그렇게 말한다.
+            self.tray.notify(
+                "클로드가 안 켜집니다\n윈도우를 다시 시작해야 합니다",
+                "클로드 쿨다운",
+            )
+
+    # ------------------------------------------------ [남은 식구] 끝
 
     # ------------------------------------------- 윈도우 업데이트 재시작 대기
     # 클로드 앱 업데이트(위)는 클로드만 죽이지만, 이쪽은 **PC 가 통째로** 꺼진다.

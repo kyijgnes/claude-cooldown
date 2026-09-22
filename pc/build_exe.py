@@ -65,6 +65,7 @@ HIDDEN = [
     "cooldown_remote",  # 클로드 코드 원격 대기 (claude rc 상주)
     "cooldown_stats",  # 사용량 기록·통계
     "cooldown_update",  # [업데이트 대기] 클로드 업데이트 감시
+    "cooldown_leftover",  # [남은 식구] 강제 업데이트 뒤 안 켜지는 클로드 풀기
     "cooldown_reboot",  # 윈도우 업데이트 재시작 대기 감시
     "cooldown_job",  # 세션에서 띄워지면 클로드 데스크톱 job 밖으로 다시 뜨기
     "qrcode",  # 폰 연결 QR. 함수 안에서 늦게 import 해 PyInstaller 가 못 찾는다
