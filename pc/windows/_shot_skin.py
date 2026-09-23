@@ -15,13 +15,18 @@ from __future__ import annotations
 
 import os
 import sys
-import time
-import tkinter as tk
-from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
+
+import cooldown_env  # noqa: E402
+
+cooldown_env.heal_self()  # ★ tkinter 보다 먼저 — 물려받은 남의 Tcl 경로를 걷어낸다
+
+import time  # noqa: E402
+import tkinter as tk  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 from cooldown_core import Limit, Usage  # noqa: E402
 

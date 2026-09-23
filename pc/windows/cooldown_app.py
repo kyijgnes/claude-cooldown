@@ -14,25 +14,33 @@ pip install -r ../requirements.txt
 
 from __future__ import annotations
 
-import atexit
-import faulthandler
-import json
 import os
-import queue
 import sys
-import threading
-import time
-import tkinter as tk
-import traceback
-from datetime import datetime
-from tkinter import filedialog, messagebox
-
-import pystray
-from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
+
+import cooldown_env  # noqa: E402
+
+# ★★ tkinter·PIL(ImageTk) 보다 **먼저** 부른다. 오염된 셸에서 띄워지면(클로드 세션 아래,
+#   또는 다른 PyInstaller 앱이 물려준 환경) 없어진 `_tcl_data` 폴더에서 Tcl 을 찾다가
+#   `Can't find a usable init.tcl` 로 창이 아예 안 뜬다. 자세한 것은 `cooldown_env`.
+_ENV_HEALED = cooldown_env.heal_self()
+
+import atexit  # noqa: E402
+import faulthandler  # noqa: E402
+import json  # noqa: E402
+import queue  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import tkinter as tk  # noqa: E402
+import traceback  # noqa: E402
+from datetime import datetime  # noqa: E402
+from tkinter import filedialog, messagebox  # noqa: E402
+
+import pystray  # noqa: E402
+from PIL import Image, ImageDraw, ImageFont, ImageTk  # noqa: E402
 
 from cooldown_core import (  # noqa: E402
     DAY_PP,
@@ -3586,5 +3594,7 @@ if __name__ == "__main__":
         applog(f"시작 — 클로드 묶음 안, 빠져나오지 못함 ({escape_fail})")
     else:
         applog("시작")
+    if _ENV_HEALED:  # 물려받은 남의 PyInstaller 자국을 걷어냈다
+        applog("환경 정리 — " + ", ".join(_ENV_HEALED))
     App().run()
     applog("종료 — 창이 닫힘")  # quit() 을 안 거치고 mainloop 이 끝난 길

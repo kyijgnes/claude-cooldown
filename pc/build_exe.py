@@ -31,6 +31,9 @@ import subprocess
 import sys
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cooldown_env  # noqa: E402
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WIN = os.path.join(ROOT, "windows")
 ICON = os.path.join(WIN, "앱아이콘.ico")
@@ -59,6 +62,7 @@ HIDDEN = [
     "skins.table",
     "skins.slim",
     "cooldown_core",  # 루트 모듈 (--paths 로 찾지만 명시해 확실히)
+    "cooldown_env",  # 자식에게 줄 환경변수 (내 PyInstaller 자국 걷어내기)
     "cooldown_ping",  # 자동 핑(모닝 스타터) 로직
     "cooldown_login",  # 로그인 상태 확인·잇기
     "cooldown_push",  # 폰으로 보내기 (릴레이 업로드)
@@ -110,7 +114,9 @@ def build() -> int:
         cmd += ["--hidden-import", mod]
 
     print("빌드 중… (처음이면 1~2분 걸린다)")
-    return subprocess.call(cmd, cwd=ROOT)
+    # ★ 환경을 걷어내고 부른다. 오염된 셸에서 빌드하면(다른 PyInstaller 앱이 물려준
+    #   `TCL_LIBRARY`) PyInstaller 가 `tkinter is not installed` 로 멈춘다(`cooldown_env`).
+    return subprocess.call(cmd, cwd=ROOT, env=cooldown_env.clean_env())
 
 
 def zip_dir(folder: str, out: str) -> None:

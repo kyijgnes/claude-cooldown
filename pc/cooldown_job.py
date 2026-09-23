@@ -44,6 +44,8 @@ import sys
 import time
 from ctypes import wintypes
 
+import cooldown_env
+
 MARK = "--job-escaped"  # 다시 띄운 프로세스에 붙는 표시
 CLAUDE_MARK = "\\windowsapps\\claude_"  # 클로드 데스크톱 본체 경로(소문자로 견줌). cooldown_update.PKG_MARK 와 같은 결
 # 다시 띄운 것이 뮤텍스를 잡을 때까지 기다리는 한도 (초). 새 판 exe 를 처음 켤 땐 디펜더가 훑느라 오래 걸린다.
@@ -164,7 +166,9 @@ def relaunch_outside(exe: str, args: str, workdir: str, mutex: str) -> tuple[boo
         link.Save()
         # 이렇게 띄운 explorer.exe 는 떠 있는 셸에게 넘기고 바로 끝난다 — 바로가기를 여는 것은 그 셸이다.
         explorer = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
-        subprocess.Popen([explorer, LNK_PATH])
+        # ★ 환경은 걷어내고 넘긴다. 지금 내가 오염된 셸에서 떴다면(클로드 세션 아래) 그
+        #   값이 다시 뜨는 나에게, 나아가 탐색기 쪽으로까지 번진다(`cooldown_env` 참고).
+        subprocess.Popen([explorer, LNK_PATH], env=cooldown_env.clean_env())
     except Exception as e:  # noqa: BLE001
         return False, f"바로가기 못 엶 {e}"
     end = time.monotonic() + WAIT_UP

@@ -29,6 +29,8 @@ import subprocess
 import sys
 from datetime import datetime, time as dtime, timedelta
 
+import cooldown_env
+
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_ping.json")
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_ping.log")
 # 핑을 이 폴더에서 실행한다. 큰 프로젝트 CLAUDE.md 를 딸려 읽어 입력 토큰이
@@ -259,6 +261,10 @@ def find_claude() -> str | None:
 def child_env() -> dict:
     """claude CLI 자식에게 물려줄 환경변수 — **`CLAUDE_CODE_OAUTH_TOKEN` 을 뺀다.**
 
+    내 PyInstaller 런타임 자국(`TCL_LIBRARY`·`TK_LIBRARY`·PATH 앞머리)도 같이 걷힌다
+    (`cooldown_env.clean_env`). 그것이 자식에게 내려가면 그 아래 파이썬·빌드가
+    쿨다운 폴더에서 Tcl 을 찾다 죽는다.
+
     ★★ `claude setup-token` 으로 만든 장기 토큰이 그 환경변수에 있으면 CLI 는 저장된
     로그인(claude.ai)보다 **그것을 먼저 쓴다.** 실측(2026-08-14):
 
@@ -273,7 +279,7 @@ def child_env() -> dict:
     그 환경변수 자체는 예약 작업이 밤에 죽지 말라고 일부러 등록해 둔 것이라
     **지우면 안 되고**, 자식에게만 뺀다. 토큰 발급·갱신은 늘 저장된 로그인이 하게 둔다.
     """
-    env = dict(os.environ)
+    env = cooldown_env.clean_env()
     env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     return env
 

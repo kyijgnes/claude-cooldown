@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 
+import cooldown_env
+
 # 클로드 앱 식별자 — 실행·종료·등록에 쓴다
 PUB_ID = "pzs8sxrjxfjjc"  # 게시자 꼬리표. 패키지 이름·가족 이름·폴더 이름에 다 들어간다
 APP_LINK = rf"shell:AppsFolder\Claude_{PUB_ID}!Claude"
@@ -69,6 +71,7 @@ def _run(args: list[str], timeout: float = 25.0) -> str:
             capture_output=True,
             timeout=timeout,
             creationflags=_NO_WINDOW,
+            env=cooldown_env.clean_env(),  # ★ 내 PyInstaller 자국을 자식에게 안 넘긴다
         )
     except Exception:  # noqa: BLE001  파워셸이 없거나 막혔을 때 — 조용히 포기한다
         return ""
@@ -88,6 +91,27 @@ def _ps(script: str, timeout: float = 25.0) -> str:
         ],
         timeout,
     )
+
+
+def start_app() -> bool:
+    r"""클로드 데스크톱을 켠다. **켜는 길은 여기 하나뿐이다.**
+
+    ★★ `os.startfile(APP_LINK)` 로 켜지 않는다. 그 길은 **지금 내 환경을 그대로
+      물려준다** — exe 로 돌 때 부트로더가 넣어 둔 `TCL_LIBRARY`·`TK_LIBRARY`·PATH
+      앞머리가 클로드와 그 아래 모든 세션·셸·빌드로 내려가, 남의 파이썬이 쿨다운
+      폴더에서 Tcl 을 찾다 죽는다(2026-09-23 어드민 빌드가 이것으로 멈췄다).
+      `cooldown_env` 맨 위에 자세히 적어 뒀다.
+    """
+    explorer = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
+    try:
+        subprocess.Popen(
+            [explorer, APP_LINK],
+            creationflags=_NO_WINDOW,
+            env=cooldown_env.clean_env(),
+        )
+        return True
+    except OSError:
+        return False
 
 
 def _ver(s: str) -> tuple[int, ...]:
@@ -553,10 +577,7 @@ def apply(relaunch: bool = True, target: str = "") -> tuple[bool, str]:
     done = bool(cur) and _ver(cur) >= _ver(target)
 
     if relaunch:
-        try:
-            os.startfile(APP_LINK)  # noqa: S606
-        except OSError:
-            _run(["explorer.exe", APP_LINK], timeout=10)
+        start_app()  # ★ 환경을 걷어내고 켠다 (`start_app` 설명 참고)
 
     if done:
         return True, f"업데이트 완료 — {target}"

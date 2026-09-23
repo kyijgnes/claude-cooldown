@@ -43,7 +43,6 @@ from __future__ import annotations
 import ctypes
 import os
 import re
-import subprocess
 import time
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -51,7 +50,6 @@ from dataclasses import dataclass
 import cooldown_update
 
 PKG_MARK = cooldown_update.PKG_MARK.lower()  # 클로드 데스크톱 본체가 앉은 곳
-APP_LINK = cooldown_update.APP_LINK
 _VER = re.compile(r"\\claude_([\d.]+)_", re.I)
 
 SETTLE = 20  # 앱이 사라진 뒤 이만큼은 기다린다(초) — 세션 CLI 는 부모가 죽으면 스스로 끝난다
@@ -62,7 +60,6 @@ ASK_EVERY = 45  # 앱이 없는 동안 '켜려다 막혔나' 를 물어보는 �
 _TH32CS_SNAPPROCESS = 0x2
 _QUERY_LIMITED = 0x1000
 _INVALID = ctypes.c_void_p(-1).value
-_NO_WINDOW = 0x08000000
 _WM_CLOSE = 0x0010
 _k32 = None
 
@@ -269,11 +266,12 @@ def desktop_up() -> bool:
 
 
 def start_desktop() -> bool:
-    """탐색기를 거쳐 클로드를 켜고, 뜨는 것을 본다(`UP_WAIT` 초까지)."""
-    explorer = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
-    try:
-        subprocess.Popen([explorer, APP_LINK], creationflags=_NO_WINDOW)
-    except OSError:
+    """탐색기를 거쳐 클로드를 켜고, 뜨는 것을 본다(`UP_WAIT` 초까지).
+
+    켜는 것은 `cooldown_update.start_app` 하나로 모았다 — 내 PyInstaller 환경을
+    클로드에게 물려주지 않으려고 걷어내고 띄운다(`cooldown_env` 참고).
+    """
+    if not cooldown_update.start_app():
         return False
     end = time.monotonic() + UP_WAIT
     while time.monotonic() < end:
