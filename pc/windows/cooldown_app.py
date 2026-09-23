@@ -56,6 +56,7 @@ from cooldown_core import (  # noqa: E402
     token_stale,
 )
 
+import cooldown_cli  # noqa: E402  클로드 코드(npm) 새 판이 나오면 바로 받기
 import cooldown_job  # noqa: E402  세션에서 띄워져도 클로드 데스크톱과 같이 죽지 않게
 import cooldown_login  # noqa: E402
 import cooldown_ping  # noqa: E402
@@ -188,6 +189,14 @@ REMOTE_TICK = 30  # 원격 대기가 아직 살아 있는지 보는 주기 (초)
 #   쓴다. 60초로 하면 20명 기준 한도를 넘긴다. 계산은 server/README.md.
 REMOTE_POLL = 120
 REMOTE_GIVEUP = 3  # 연달아 이만큼 못 붙으면 스스로 끈다 (안 될 일에 계속 프로세스를 띄우지 않는다)
+# 원격 대기를 갈아 끼울 때가 됐는지(`Remote.stale`) 보는 간격 (초). 갈아 끼우면 그 아래
+# 세션이 다 죽으므로 조용할 때만 한다 — 그 판정이 몇 초 걸려 30초마다 할 일은 아니다.
+RC_REFRESH_EVERY = 300
+# 클로드 코드(npm) 새 판을 묻는 간격 (초). 새 모델이 새 판과 같이 나오므로 반나절씩
+# 늦지 않게 — npm 에 묻는 것은 작은 JSON 하나라 30분이면 부담이 없다.
+CLI_EVERY = 1800
+CLI_FIRST = 90  # 켜고 나서 처음 묻기까지 (초). 조회·원격 대기가 먼저 자리 잡게.
+CLI_TRIES = 3  # 한 판을 몇 번까지 깔아 볼지. 안 되는 것을 30분마다 영영 되풀이하지 않는다.
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
 STATS_TABS = ("일별", "주별", "달별", "전체")  # 사용량 통계에서 볼 수 있는 기간
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
@@ -725,6 +734,15 @@ class App:
         self._remote_busy = False
         self._remote_poll_at = 0.0  # 마지막 물어본 때 (monotonic)
         self._remote_said = ""  # 릴레이에 마지막으로 적어 둔 상태 (같으면 다시 안 적는다)
+        # 원격 대기 갈아 끼우기 — 옛 판 위젯이 띄운 것(오염된 환경)·클로드 코드가 올라간 것
+        self.rc_refresh_out: queue.Queue = queue.Queue()
+        self._rc_refresh_busy = False
+        self._rc_refresh_at = 0.0  # 마지막으로 본 때 (monotonic)
+        self._rc_refresh_said = ""  # 로그에 '미룸' 을 적어 둔 까닭 (같은 까닭은 한 번만 적는다)
+
+        # 클로드 코드(npm) 새 판 받기 — 결과만 큐로 받는다(까는 데 몇 분 걸린다)
+        self.cli_out: queue.Queue = queue.Queue()
+        self._cli_tries: dict[str, int] = {}  # 판마다 깔아 본 횟수 (감시 스레드만 만진다)
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -757,6 +775,8 @@ class App:
         threading.Thread(target=self._jobs_watch, daemon=True).start()
         # [남은 식구] 치울 때는 수십 초를 기다리므로 제 스레드에서 돈다
         threading.Thread(target=self._leftover_watch, daemon=True).start()
+        # 클로드 코드 새 판 받기 — 까는 데 몇 분 걸리므로 제 스레드에서 돈다
+        threading.Thread(target=self._cli_watch, daemon=True).start()
 
         self.root.after(200, self._pump)
         self.root.after(STAY_TICK, self._stay_above)
@@ -1406,6 +1426,22 @@ class App:
                 break
             self._on_want(got)
 
+        # 원격 대기를 갈아 끼워도 되는지 — 재는 스레드가 넣어 둔다
+        while True:
+            try:
+                got = self.rc_refresh_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_rc_refresh(*got)
+
+        # 클로드 코드 새 판을 깐 결과
+        while True:
+            try:
+                got = self.cli_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_cli(*got)
+
         while True:
             try:
                 auto, ok, detail, target = self.update_done.get_nowait()
@@ -1829,6 +1865,51 @@ class App:
             )
 
     # ------------------------------------------------ [남은 식구] 끝
+
+    # --------------------------------------------- 클로드 코드(npm) 새 판 받기
+    # 새 모델은 클로드 코드 새 판과 같이 나온다. 원격 대기·그 아래 세션·핑이 쓰는 npm 전역
+    # 클로드 코드는 스스로 안 올라가서(대화형으로 켤 때만 올라간다), 2026-09-23 Opus 5.5 를
+    # 반나절 넘게 못 썼다. 판정·설치는 `cooldown_cli` 에만 있다.
+
+    def _cli_watch(self) -> None:
+        """CLI_EVERY 마다 npm 에 새 판을 묻고, 있으면 바로 깐다. 결과만 큐로 넘긴다.
+
+        ★ 까는 것은 돌던 세션을 안 죽인다(`cooldown_cli` 맨 위) — 그래서 조용할 때를
+          기다리지 않는다. 새로 여는 세션부터 새 판이다.
+        """
+        time.sleep(CLI_FIRST)
+        said = None  # 손대지 않는 까닭 — 바뀔 때만 로그에 적는다
+        while self.alive:
+            try:
+                c = cooldown_cli.check()
+                if c.skip != said and c.skip not in ("", "npm 에 못 물어봄"):
+                    applog(f"클로드 코드 새 판 받기 안 함 — {c.skip}")
+                said = c.skip
+                if c.behind:
+                    n = self._cli_tries.get(c.latest, 0)
+                    if n < CLI_TRIES:
+                        self._cli_tries[c.latest] = n + 1
+                        ok, detail = cooldown_cli.install(c.latest)
+                        self.cli_out.put((ok, c.current, c.latest, detail, n + 1))
+                        if ok:
+                            # 전에 옆으로 치워 둔 옛 판 폴더 중 이제 놓인 것을 지운다
+                            gone = cooldown_cli.sweep()
+                            if gone:
+                                applog(f"클로드 코드 옛 판 폴더 지움 — {gone}개")
+            except Exception as e:  # noqa: BLE001  못 했으면 다음 차례에 다시
+                applog(f"클로드 코드 새 판 받기 오류 — {e}")
+            time.sleep(CLI_EVERY)
+
+    def _on_cli(self, ok: bool, was: str, new: str, detail: str, tries: int) -> None:
+        applog(f"클로드 코드 새 판 {'받음' if ok else '못 받음'} — {was} → {new} — {detail}")
+        if ok:
+            # ★ 성공만 알린다(업데이트 자동 적용과 같은 결). 실패는 30분 뒤 다시 하고,
+            #   `CLI_TRIES` 번 다 안 되면 로그에만 남는다.
+            # ★ 원격 대기는 갈아 끼우지 않는다 — 세션을 경로로 띄우므로 새로 여는 세션은
+            #   이미 새 판이다(`Remote.stale` 설명). 갈아 끼우면 열어 둔 세션만 죽는다.
+            self._tray_say(f"클로드 코드 {new} 설치됨\n새로 여는 세션부터 새 판")
+        elif tries >= CLI_TRIES:
+            applog(f"클로드 코드 {new} 받기 그만둠 (다음 판을 기다림)")
 
     # ------------------------------------------- 윈도우 업데이트 재시작 대기
     # 클로드 앱 업데이트(위)는 클로드만 죽이지만, 이쪽은 **PC 가 통째로** 꺼진다.
@@ -2285,6 +2366,7 @@ class App:
                 self._remote_fails = 0
                 self._apply_notice()
             self._say_state("on")
+            self._rc_refresh_check()
             return
 
         why = self.remote.died()  # 아직 한 번도 안 띄웠으면 None
@@ -2320,6 +2402,81 @@ class App:
             self._remote_fails += 1
             self.remote_error = cooldown_remote.friendly_error(msg)
         self._apply_notice()
+
+    def _rc_refresh_check(self) -> None:
+        """이어받은 원격 대기를 갈아 끼울 때가 됐으면, 조용한지 재 보게 한다.
+
+        ★★ **이어받기만 하면 원격 대기는 며칠이고 산다.** 옛 판 위젯이 띄운 것이면 그
+          환경(`TCL_LIBRARY` 등)이 폰에서 여는 세션마다 내려간다(2026-09-23 어드민 빌드가
+          멈춘 뿌리). 그래서 까닭이 있으면(`Remote.stale`) 새로 띄운다.
+        ★ 가지째 끄므로 **그 아래 세션도 같이 죽는다** — 업데이트 자동 적용과 같은 잣대로
+          조용할 때만 한다: 세션 기록 45분 조용 · 사람 입력 20분 없음 · 세션이 띄운 것 중
+          지금 CPU 를 쓰는 것 없음(`busy_under`). 몇 초 걸리므로 재는 것은 작업 스레드에서.
+        """
+        if self._rc_refresh_busy:
+            return
+        now = time.monotonic()
+        if now - self._rc_refresh_at < RC_REFRESH_EVERY:
+            return
+        self._rc_refresh_at = now
+        why = self.remote.stale()
+        if not why:
+            return
+        pid = self.remote.pid
+        self._rc_refresh_busy = True
+
+        def worker():
+            ok, block = False, ""
+            try:
+                ok, block = cooldown_update.safe_now()
+                if ok:
+                    busy = cooldown_remote.busy_under(pid)
+                    if busy is None:
+                        ok, block = False, "세션 작업을 못 잼"
+                    elif busy:
+                        ok, block = False, f"세션 작업 도는 중: {busy[0][0]}"
+            except Exception as e:  # noqa: BLE001
+                ok, block = False, str(e)[:80]
+            finally:
+                # ★ 무슨 일이 있어도 돌려준다 — 빠지면 `_rc_refresh_busy` 가 굳는다
+                self.rc_refresh_out.put((ok, why, block, pid))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_rc_refresh(self, ok: bool, why: str, block: str, pid: int) -> None:
+        self._rc_refresh_busy = False
+        if not ok:
+            # 까닭 하나에 한 번만 적는다 — '12분 전까지 작업 중' 처럼 숫자가 바뀌어도 같은 일이다
+            if self._rc_refresh_said != why:
+                applog(f"원격 대기 새로 띄우기 미룸 — {why} — {block}")
+                self._rc_refresh_said = why
+            return
+        # 재는 사이에 사람이 끄거나 다른 것으로 바뀌었으면 손대지 않는다
+        if (
+            not self.remote_cfg.get("enabled")
+            or self.remote.pid != pid
+            or not self.remote.running()
+        ):
+            return
+        self.remote.stop()
+        started, msg = self.remote.start(self.remote_cfg["folder"])
+        self._rc_refresh_said = ""
+        applog(f"원격 대기 새로 띄움 — {why}" + ("" if started else f" — 실패 {msg}"))
+        if not started:
+            self._remote_fails += 1
+            self.remote_error = cooldown_remote.friendly_error(msg)
+        self._apply_notice()
+
+        def sweep():
+            time.sleep(20)  # 옛 원격 대기가 파일을 놓을 때까지
+            try:
+                n = cooldown_cli.sweep()
+                if n:
+                    applog(f"클로드 코드 옛 판 폴더 지움 — {n}개")
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=sweep, daemon=True).start()
 
     def _remote_ask(self) -> None:
         """폰이 릴레이에 적어 둔 '원하는 상태' 를 REMOTE_POLL 마다 물어본다.

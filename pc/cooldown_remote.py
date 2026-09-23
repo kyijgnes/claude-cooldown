@@ -34,6 +34,7 @@ import subprocess
 import sys
 from datetime import datetime
 
+import cooldown_cli  # 띄울 때 클로드 코드 판을 적어 둔다 (무엇이 돌고 있나 볼 때)
 import cooldown_push  # 릴레이 주소·키는 '폰으로 보내기' 설정을 그대로 쓴다
 # claude 실행 파일 찾기·자식 환경변수는 한 곳(cooldown_ping)에만 둔다
 from cooldown_ping import child_env, find_claude
@@ -42,6 +43,10 @@ CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.jso
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.log")
 # 앱이 죽어도 자식은 살아남는다. 다시 켰을 때 그 놈을 알아보려고 PID 를 적어 둔다.
 PID_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.pid")
+# 그 놈을 **어떻게** 띄웠나 — `{pid, clean_env, cli}`. PID 파일과 따로 두는 까닭:
+# 옛 판 위젯은 PID 파일을 숫자 하나로 읽어서, 거기 뭘 덧붙이면 이어받기에 실패하고
+# 원격을 하나 더 띄운다(폰에 이 PC 가 두 번 뜬다). 옛 판은 이 파일을 모르고 지나간다.
+META_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.meta.json")
 
 # 띄운 뒤 이만큼 안에 죽으면 '뜨다 만 것' 으로 본다 (등록까지 3초쯤 걸린다)
 SETTLE_SEC = 12
@@ -164,10 +169,121 @@ def _write_pid(pid: int) -> None:
         if pid:
             with open(PID_PATH, "w", encoding="utf-8") as f:
                 f.write(str(pid))
-        elif os.path.exists(PID_PATH):
-            os.remove(PID_PATH)
+        else:
+            for path in (PID_PATH, META_PATH):
+                if os.path.exists(path):
+                    os.remove(path)
     except OSError:
         pass
+
+
+def _read_meta() -> dict:
+    try:
+        with open(META_PATH, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_meta(pid: int, cli: str) -> None:
+    """띄운 모양을 적어 둔다. `clean_env` = 내 PyInstaller 자국을 걷어내고 띄웠다.
+    `cli` 는 띄울 때의 클로드 코드 판 — 판정에는 안 쓰고, 무엇이 돌고 있나 볼 때 쓴다."""
+    try:
+        with open(META_PATH, "w", encoding="utf-8") as f:
+            json.dump({"pid": pid, "clean_env": True, "cli": cli}, f)
+    except OSError:
+        pass
+
+
+# ------------------------------------------------ 그 아래 세션이 일하고 있나
+#
+# 원격 대기를 갈아 끼우면(`Remote.stale`) 그 아래 세션도 **통째로 같이 죽는다**(가지째
+# 끄므로). 그래서 조용할 때만 한다 — 세션 기록이 조용한가·사람이 자리를 비웠나는
+# `cooldown_update.safe_now()` 가 보고, 여기서는 **세션이 띄운 것이 지금 도는가**를 본다.
+# 긴 빌드·백그라운드 스크립트는 도는 동안 세션 기록을 안 써서 '조용함' 으로 보이기 때문이다.
+#
+# 재는 법은 `cooldown_update.session_jobs` 와 같다: **두 번 재서 CPU 가 는 것**과 그 사이에
+# 새로 생긴 것만 센다(끝나고 남은 셸은 CPU 0 인 채로 한참 떠 있다 — 거기 적힌 ★★ 참고).
+# 빼는 것: `conhost.exe` · 세션 자신(원격 대기와 같은 exe — 쉬는 세션도 조금씩 돈다).
+
+BUSY_SAMPLE = 3  # CPU 를 재는 두 번 사이 간격(초)
+
+_BUSY_PS = r"""
+$root = __ROOT__
+function Snap {
+  $all = Get-CimInstance Win32_Process
+  $map = @{}
+  foreach ($p in $all) { $map[[int]$p.ProcessId] = $p }
+  $cli = ''
+  foreach ($p in $all) {
+    if ([int]$p.ParentProcessId -eq $root -and $p.Name -ne 'conhost.exe') { $cli = [string]$p.ExecutablePath }
+  }
+  $out = @{}
+  foreach ($p in $all) {
+    $id = [int]$p.ProcessId
+    if ($id -eq $root) { continue }
+    if ($p.Name -eq 'conhost.exe') { continue }
+    if ($cli -and [string]$p.ExecutablePath -eq $cli) { continue }
+    $cur = [int]$p.ParentProcessId
+    $hop = 0
+    while ($cur -gt 0 -and $hop -lt 24) {
+      if ($cur -eq $root) {
+        $out[$id] = @($p.Name, ([int64]$p.KernelModeTime + [int64]$p.UserModeTime))
+        break
+      }
+      $q = $map[$cur]
+      if (-not $q) { break }
+      $cur = [int]$q.ParentProcessId
+      $hop++
+    }
+  }
+  return $out
+}
+$a = Snap
+Start-Sleep -Seconds __SAMPLE__
+$b = Snap
+foreach ($k in $b.Keys) {
+  if ($a.ContainsKey($k) -and $b[$k][1] -le $a[$k][1]) { continue }
+  "{0}|{1}" -f $b[$k][0], $k
+}
+'#ok'
+"""
+
+
+def busy_under(root: int) -> list[tuple[str, int]] | None:
+    """원격 대기(`root`) 아래 세션이 띄워 **지금 일하는** 것들 `(이름, 번호)`.
+
+    **못 쟀으면 None** — '하나도 없다' 와 다르다. 부르는 쪽은 모르면 갈아 끼우지 않는다.
+    ★ `BUSY_SAMPLE` 초를 잔다 — 작업 스레드에서만 부를 것.
+    """
+    if not root:
+        return None
+    script = _BUSY_PS.replace("__ROOT__", str(int(root))).replace(
+        "__SAMPLE__", str(BUSY_SAMPLE)
+    )
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=BUSY_SAMPLE + 60,
+            creationflags=NO_WINDOW,
+            env=child_env(),
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    lines = [ln.strip() for ln in (r.stdout or "").splitlines()]
+    if "#ok" not in lines:
+        return None
+    out: list[tuple[str, int]] = []
+    for ln in lines:
+        name, _, pid = ln.partition("|")
+        if name and pid.isdigit():
+            out.append((name, int(pid)))
+    return out
 
 
 def _kill_tree(pid: int) -> None:
@@ -220,6 +336,33 @@ class Remote:
     def since(self) -> datetime | None:
         return self._since
 
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    def stale(self) -> str:
+        """갈아 끼워야 할 까닭이 있으면 그 까닭(명사형), 아니면 빈 문자열.
+
+        **옛 판 위젯이 띄운 것**뿐이다 — 띄운 모양이 안 적혀 있다(v0.29 앞). 그때는 위젯의
+        PyInstaller 환경(`TCL_LIBRARY` 등)을 그대로 물려줬고, 이 원격 아래로 새로 여는
+        세션이 **전부** 그것을 이어받는다(`cooldown_env`). 이어받기만 하면 며칠이고 간다.
+
+        ★ **클로드 코드가 새 판으로 올라간 것은 까닭이 아니다.** 원격 대기는 세션을 경로로
+          띄우므로 새로 여는 세션은 이미 새 판이다(2026-09-23 실측: 05:25 에 띄운 원격 아래
+          14:09 에 연 세션이 13:42 에 올린 새 판·새 모델로 돌았다). 그걸로 갈아 끼우면 클로드
+          코드가 나올 때마다(거의 날마다) 폰에서 열어 둔 세션이 다 죽는다.
+        """
+        if not self._pid:
+            return ""
+        # 이번에 내가 띄운 것은 늘 깨끗하다(`child_env`). 적어 두기가 실패했어도 되풀이해
+        # 갈아 끼우지 않게 파일보다 먼저 본다.
+        if self._p is not None:
+            return ""
+        meta = _read_meta()
+        if meta.get("pid") != self._pid or not meta.get("clean_env"):
+            return "옛 판 위젯이 띄운 것"
+        return ""
+
     # -------------------------------------------------- 켜기 · 끄기
 
     def start(self, folder: str) -> tuple[bool, str]:
@@ -263,7 +406,9 @@ class Remote:
         self._since = datetime.now()
         self.last_error = ""
         _write_pid(p.pid)
-        _log(f"켬: pid={p.pid} 폴더={folder}")
+        cli = cooldown_cli.installed()
+        _write_meta(p.pid, cli)
+        _log(f"켬: pid={p.pid} 폴더={folder} 판={cli or '?'}")
         return True, "켜짐"
 
     def stop(self) -> None:

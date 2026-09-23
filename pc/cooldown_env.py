@@ -136,12 +136,15 @@ def clean_env(base: dict | None = None) -> dict:
         elif var in env and _mine(env[var]):
             env.pop(var, None)
 
+    # 내 런타임 자리와, **남의 exe 가 물려준 것**(`…\_internal\pywin32_system32`)도 뺀다.
+    # 파이썬으로 돌 때는 `runtime_dirs()` 가 비어 있어 뒤엣것만 걸린다 — 오염된 셸에서
+    # `build_exe.py` 를 돌리면 PyInstaller 가 남의 `_internal` 에서 dll 을 주워 갈 뻔했다.
     mine = runtime_dirs()
-    if mine and env.get("PATH"):
+    if env.get("PATH"):
         kept = [
             part
             for part in env["PATH"].split(os.pathsep)
-            if part and not any(_under(part, d) for d in mine)
+            if part and not _packed(part) and not any(_under(part, d) for d in mine)
         ]
         env["PATH"] = os.pathsep.join(kept)
 
