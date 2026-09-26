@@ -106,7 +106,18 @@ class RenderPreviewTest {
         claudi(ctx, "클로디_자리비움", "away", 1)     // 화면 아래로 내려가는 중
         // 완주 축하 — 크래커를 들고 쏘는 중(날아가는 알 + 터진 것이 같이 보이는 즈음)
         claudi(ctx, "클로디_축하", "party", 26)
-        claudi(ctx, "클로디_공룡", "dino", 3)          // 아주 오래 꾹 눌러 변신한 채 (공룡 점프 판이 떠 있는 동안)
+        claudi(ctx, "클로디_공룡", "dino", 3)          // 판 속에 들어가 있는 채 (앱 첫 화면에서는 숨는다)
+        claudi(ctx, "클로디_공룡알", "egg", 3)        // 기절에서 깨어나 굴러 나온 알 — 금 하나
+        claudi(ctx, "클로디_알깨짐", "hatch", 2)      // 뚜껑이 튀고 작은 공룡이 올라온다
+
+        // 홈 화면에서 알을 깨면 — 미터기 자리가 판이 된다 (클로디는 판 속에, 미터기는 안 그린다)
+        val home = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+        WallpaperArt.render(ctx, Canvas(home), snap(37f, 62f), now, Look.DEFAULT, null, meter = false)
+        val play = com.kyijgnes.cooldown.dino.DinoBoard(ctx, 312, seed = 3L)
+        play.game.pressJump(); play.game.releaseJump()
+        repeat(900) { if (play.game.state == "run") { dinoBot(play.game); play.game.step() } }
+        play.paint(Canvas(home), WallpaperArt.boardTop(W, H, Look.DEFAULT, play.heightFor(W)), W)
+        save(home, "배경화면_공룡점프.png")
 
         // 꾸미기 — 고를 수 있는 것들을 한 장씩 (CustomizeActivity 의 선택지와 같은 순서)
         wallpaper(ctx, "꾸미기_링", look = Look.DEFAULT.copy(meter = Look.RINGS))
@@ -350,43 +361,62 @@ class RenderPreviewTest {
         assertEquals(0, idle.score)
     }
 
+    /** 마구 두드려 기절시킨다 — 뻗었으면 참. */
+    private fun mash(m: Mascot, cx: Float, cy: Float, u: Float): Boolean {
+        repeat(40) {
+            m.press()
+            m.release()
+            repeat(2) { m.step(cx, cy, u, W, H) }
+            if (m.debug().fainted) return true
+        }
+        return false
+    }
+
     /**
-     * 끝까지 눌린 뒤로도 더 누르고 있으면 공룡으로 변신해 판을 부른다. 일찍 떼면 그냥 튕긴다.
-     * 판을 열 곳(`onMorph`)이 없는 클로디는 변신하지 않는다(홈 화면에서는 런처가 길게 누르기를 채 간다).
+     * 폰에서 공룡 점프로 들어가는 길 — **기절시키면 깨어날 때 알이 나오고, 금 둘 + 한 번 더 두드리면
+     * 깨져 판을 부른다.** 판을 열 곳(`onHatch`)이 없는 클로디(꾸미기 미리보기)는 알을 안 낳고,
+     * 아무도 안 깨면 알은 사라진다.
      */
     @Test
-    fun `아주 오래 꾹 누르면 공룡으로 변신한다`() {
+    fun `기절시키면 알이 나오고 깨면 판을 부른다`() {
         val u = WallpaperArt.mascotCell(W)
         val cx = Look.DEFAULT.mascotX * W
         val cy = Look.DEFAULT.mascotY * H
 
         val m = Mascot()
         var opened = 0
-        m.onMorph = { opened++ }
-        m.press()
-        repeat(m.morphHoldFrames()) { m.step(cx, cy, u, W, H) }
-        assertTrue("오래 누르면 공룡이 된다", m.dino)
-        repeat(20) { m.step(cx, cy, u, W, H) }
+        m.onHatch = { opened++ }
+        assertTrue("마구 두드리면 기절한다", mash(m, cx, cy, u))
+        assertFalse("기절한 동안엔 알이 없다", m.hasEgg)
+        repeat(m.faintFrames() + 20) { m.step(cx, cy, u, W, H) }
+        assertTrue("깨어나면 알이 굴러 나온다", m.hasEgg)
+        // 알은 클로디 곁 땅 위 — 한가운데는 옆으로 11칸, 위아래로는 발끝에 밑동이 닿는다
+        val restY = com.kyijgnes.cooldown.wallpaper.MascotSprite.ROWS / 2f -
+            com.kyijgnes.cooldown.dino.DinoSpec.EGG.size / 2f
+        val onEgg = m.hitsEgg(cx, cy, u, cx + 11f * u, cy + restY * u) ||
+            m.hitsEgg(cx, cy, u, cx - 11f * u, cy + restY * u)
+        assertTrue("알 위를 누르면 알이 맞는다", onEgg)
+        repeat(3) { m.crackEgg(); repeat(4) { m.step(cx, cy, u, W, H) } }
+        assertEquals("깨지는 장면이 끝나야 판을 연다", 0, opened)
+        repeat(30) { m.step(cx, cy, u, W, H) }
         assertEquals("판은 한 번만 부른다", 1, opened)
-        m.release()
-        assertTrue("변신한 뒤 손을 떼도 공룡 그대로", m.dino)
+        assertTrue("클로디는 판 속으로", m.dino)
         m.unmorph()
-        assertFalse("판에서 돌아오면 클로디로", m.dino)
+        assertFalse("판을 접으면 클로디로", m.dino)
+        assertFalse(m.hasEgg)
 
-        // 판을 열 곳이 없는 클로디(배경화면·꾸미기 미리보기)는 오래 눌러도 변신하지 않는다
-        val wall = Mascot()
-        wall.press()
-        repeat(wall.morphHoldFrames() + 20) { wall.step(cx, cy, u, W, H) }
-        assertFalse("판을 열 곳이 없으면 변신하지 않는다", wall.dino)
-        wall.release()
+        val wall = Mascot()                    // 판을 열 곳이 없다 (꾸미기 미리보기)
+        assertTrue(mash(wall, cx, cy, u))
+        repeat(wall.faintFrames() + 20) { wall.step(cx, cy, u, W, H) }
+        assertFalse("판을 열 곳이 없으면 알도 안 나온다", wall.hasEgg)
 
-        val early = Mascot()
-        early.onMorph = { opened++ }
-        early.press()
-        repeat(early.morphHoldFrames() - 20) { early.step(cx, cy, u, W, H) }
-        early.release()
-        repeat(40) { early.step(cx, cy, u, W, H) }
-        assertFalse("그 전에 떼면 변신하지 않는다", early.dino)
+        val lone = Mascot()                    // 알을 두고 간다
+        lone.onHatch = { opened++ }
+        assertTrue(mash(lone, cx, cy, u))
+        repeat(lone.faintFrames() + 20) { lone.step(cx, cy, u, W, H) }
+        assertTrue(lone.hasEgg)
+        repeat(400) { lone.step(cx, cy, u, W, H) }
+        assertFalse("아무도 안 깨면 알은 사라진다", lone.hasEgg)
         assertEquals(1, opened)
     }
 

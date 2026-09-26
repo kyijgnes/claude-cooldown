@@ -11,6 +11,7 @@ import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import com.kyijgnes.cooldown.Look
 import com.kyijgnes.cooldown.Store
+import com.kyijgnes.cooldown.dino.DinoBoard
 
 /**
  * 클로드 전용 라이브 배경화면 — 홈 화면과 잠금 화면에 그대로 걸린다.
@@ -18,6 +19,11 @@ import com.kyijgnes.cooldown.Store
  *
  * 배터리 규칙: **보일 때만 그린다.** 화면이 꺼지거나 다른 앱이 앞에 오면 시스템이
  * `onVisibilityChanged(false)` 를 주고, 그 순간 루프를 세운다.
+ *
+ * **공룡 점프도 여기서 한다**(2026-09-26) — 앱을 안 열고 홈 화면에서 바로. 클로디를 기절시키면
+ * 알이 굴러 나오고, 톡톡 깨면 미터기 자리가 판이 된다(`DinoBoard`, `WallpaperArt.boardTop`). 홈 화면 빈 곳
+ * 어디를 눌러도 뛴다. 닫기는 판 왼쪽 위 ✕ · 20초 그대로 · 잠금화면 · 한참 딴 데 갔다 옴.
+ * 판이 떠 있는 동안만 60fps(`GAME_FRAME_MS`)로 그린다.
  */
 class CooldownWallpaperService : WallpaperService() {
 
@@ -33,11 +39,35 @@ class CooldownWallpaperService : WallpaperService() {
         private var lastW = 0f
         private var lastH = 0f
 
+        /** 공룡 점프 판 — 알이 깨진 동안만 있다. 클로디는 그동안 판 속에 있다. */
+        private var board: DinoBoard? = null
+        private var hiddenAt = 0L
+
         override fun onCreate(holder: SurfaceHolder?) {
             super.onCreate(holder)
             // ★ 이걸 켜야 런처가 홈 화면 터치를 흘려 준다 — 클로디를 누를 수 있게 된다.
             //   아이콘·위젯 위를 누르면 그쪽이 먹으므로 우리에게는 안 온다.
             setTouchEventsEnabled(true)
+            mascot.onHatch = { startGame() }   // 기절 → 알 → 깨면 여기
+        }
+
+        private fun startGame() {
+            if (board != null) return
+            val ctx = this@CooldownWallpaperService
+            val prefs = ctx.getSharedPreferences(DINO_PREFS, MODE_PRIVATE)
+            val b = DinoBoard(ctx, prefs.getInt(DINO_BEST, 0))
+            b.onBest = { best -> prefs.edit().putInt(DINO_BEST, best).apply() }
+            b.onExit = { handler.post { endGame() } }   // 그리는 중에 판을 치우지 않게 한 박자 뒤로
+            board = b
+            b.resume()
+        }
+
+        /** 판을 접는다 — 클로디가 펑 하고 돌아온다. */
+        private fun endGame() {
+            val b = board ?: return
+            board = null
+            b.pause()
+            mascot.unmorph()
         }
 
         /** 클로디를 짚고 있는 중인가 — 누른 채로 있으면 납작해지고 떼면 튕겨 오른다. */
@@ -52,9 +82,22 @@ class CooldownWallpaperService : WallpaperService() {
          */
         override fun onTouchEvent(event: android.view.MotionEvent) {
             if (lastW <= 0f) return
+            val b = board
+            if (b != null) {                   // 공룡 점프 중 — 빈 곳 어디를 눌러도 뛴다 (✕ 는 닫기)
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> b.down(event.x, event.y)
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> b.up()
+                }
+                return
+            }
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     val look = Look.read(this@CooldownWallpaperService)
+                    // 알이 있으면 알부터 — 클로디 곁이라 누르는 자리가 겹칠 수 있다
+                    if (WallpaperArt.hitsEgg(lastW, lastH, look, mascot, event.x, event.y)) {
+                        mascot.crackEgg()
+                        return
+                    }
                     holding = WallpaperArt.hitsMascot(lastW, lastH, look, mascot, event.x, event.y)
                     if (holding) mascot.press()
                 }
@@ -75,9 +118,19 @@ class CooldownWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             showing = visible
             if (visible) {
-                mascot.rest()          // 오래 안 보다 왔다 — 지친 것도 하던 딴짓도 잊는다
+                val b = board
+                if (b == null) {
+                    mascot.rest()      // 오래 안 보다 왔다 — 지친 것도 하던 딴짓도 잊는다
+                } else if (System.currentTimeMillis() - hiddenAt > GAME_AWAY_MS) {
+                    endGame()          // 한참 딴 데 있다 왔다 — 판은 접는다
+                    mascot.rest()
+                } else {
+                    b.resume()         // 잠깐 다녀왔다 — 멈춘 판 그대로 (눌러서 이어 하기)
+                }
                 drawFrame()
             } else {
+                hiddenAt = System.currentTimeMillis()
+                board?.pause()
                 if (holding) { holding = false; mascot.cancel() }   // 런처 메뉴가 채 갔다
                 handler.removeCallbacks(runner)
             }
@@ -127,6 +180,7 @@ class CooldownWallpaperService : WallpaperService() {
 
         private fun drawFrame() {
             val locked = locked()
+            if (locked) endGame()              // 잠금화면에서는 못 논다 (누르는 것이 잠금화면으로 간다)
             var canvas: Canvas? = null
             try {
                 canvas = surfaceHolder.lockCanvas()
@@ -135,10 +189,17 @@ class CooldownWallpaperService : WallpaperService() {
                     val now = System.currentTimeMillis()
                     lastW = canvas.width.toFloat()
                     lastH = canvas.height.toFloat()
+                    val look = Look.read(ctx)
+                    val b = board
+                    // 판이 떠 있으면 클로디는 판 속에 있다 — 안 그리고 안 굴린다. 미터기 자리는 판이 쓴다
                     WallpaperArt.render(
-                        ctx, canvas, Store.snapshot(ctx).settled(now), now, Look.read(ctx),
-                        mascot, locked,
+                        ctx, canvas, Store.snapshot(ctx).settled(now), now, look,
+                        if (b == null) mascot else null, locked, meter = b == null,
                     )
+                    if (b != null) {
+                        b.advance()
+                        b.paint(canvas, WallpaperArt.boardTop(lastW, lastH, look, b.heightFor(lastW)), lastW)
+                    }
                 }
             } catch (e: Exception) {
                 // 표면이 사라지는 중 — 다음 프레임에 다시 온다
@@ -152,7 +213,7 @@ class CooldownWallpaperService : WallpaperService() {
                 }
             }
             handler.removeCallbacks(runner)
-            if (showing) handler.postDelayed(runner, FRAME_MS)
+            if (showing) handler.postDelayed(runner, if (board != null) GAME_FRAME_MS else FRAME_MS)
         }
     }
 
@@ -163,5 +224,14 @@ class CooldownWallpaperService : WallpaperService() {
          * **보일 때만 돈다**(`onVisibilityChanged`)라 홈 화면을 보고 있을 때만 쓴다.
          */
         const val FRAME_MS = 33L
+
+        /** 공룡 점프 중에만 60fps — 판은 1/60초 걸음이라 30fps 로 그리면 두 걸음씩 뛰어 끊겨 보인다. */
+        const val GAME_FRAME_MS = 16L
+
+        /** 이보다 오래 딴 데 있다 오면(앱을 열었다 오는 등) 멈춘 판을 접고 클로디로 돌아온다. */
+        const val GAME_AWAY_MS = 30_000L
+
+        const val DINO_PREFS = "dino"   // 앱 첫 화면과 같은 최고 기록
+        const val DINO_BEST = "best"
     }
 }

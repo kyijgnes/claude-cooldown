@@ -10,9 +10,9 @@ import com.kyijgnes.cooldown.wallpaper.Mascot
 /**
  * 앱 첫 화면 제목 옆에 사는 클로디 — 배경화면·꾸미기와 같은 `Mascot` 이다(노는 규칙이 같다).
  *
- * ★ **여기 있는 까닭은 '아주 오래 꾹' 이다**(2026-09-26). 홈 화면 배경화면은 런처가 길게 누르기를
- *   자기 메뉴로 채 가서 공룡 변신이 안 된다. 앱 안에서는 손가락이 끝까지 우리 것이라 PC 위젯과
- *   똑같이 끝까지 납작해진 뒤 더 누르면 공룡이 된다(`mascot.onMorph` 를 화면이 걸어 둔다).
+ * 공룡 점프로 들어가는 길은 배경화면과 같다 — **마구 두드려 기절시키면 알이 굴러 나오고,
+ *   톡톡 깨면** 아래 게이지 자리가 판이 된다(`mascot.onHatch` 를 화면이 걸어 둔다).
+ *   (처음엔 '아주 오래 꾹' 이었다가 2026-09-26 에 알로 바꿨다. 홈 화면에서 앱을 안 열고 하려고)
  * - 30fps 로 굴린다(`Mascot` 의 프레임 수가 30fps 기준이다). 화면이 안 보이면 멈춘다(`pause`).
  * - 칸 크기는 3dp — 뷰 아래쪽에 앉히고 위는 뛰어오를 자리로 비워 둔다.
  */
@@ -61,6 +61,10 @@ class ClaudiView(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (mascot.hitsEgg(cx(), cy(), u, ev.x, ev.y)) {   // 알부터 — 클로디 곁이라 겹칠 수 있다
+                    mascot.crackEgg()
+                    return true
+                }
                 holding = mascot.hits(cx(), cy(), u, ev.x, ev.y)
                 if (!holding) return false
                 parent?.requestDisallowInterceptTouchEvent(true)   // 누르고 있는 동안 스크롤이 채 가지 않게

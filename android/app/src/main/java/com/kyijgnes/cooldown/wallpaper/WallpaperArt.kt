@@ -42,10 +42,12 @@ object WallpaperArt {
      * @param look   지금 그릴 값 한 벌. 꾸미기 화면은 **저장 전 값**을 넘겨 미리보기를 그린다.
      * @param mascot 클로디를 그릴 상태 뭉치. 상태를 들고 있으므로 **그리는 쪽이 하나씩 갖고**
      *               넘겨 준다(이 파일은 상태를 안 갖는다). null 이면 안 그린다.
+     * @param meter  미터기를 그릴지 — 공룡 점프 중에는 그 자리가 판이라 안 그린다(`boardTop`).
      */
     fun render(
         ctx: Context, c: Canvas, snap: Snapshot, now: Long,
         look: Look.Values = Look.read(ctx), mascot: Mascot? = null, locked: Boolean = true,
+        meter: Boolean = true,
     ) {
         val p = Palette(ctx)
         val w = c.width.toFloat()
@@ -60,7 +62,7 @@ object WallpaperArt {
         }
         if (!drawn && !shark) drawSea(c, w, h, p)
 
-        drawMeter(ctx, c, w, h, snap, now, p, look)
+        if (meter) drawMeter(ctx, c, w, h, snap, now, p, look)
 
         // ★ 클로디는 **미터기 판 위에** 그린다 — 판 안쪽에 앉혀 두므로 뒤로 가면 가려진다.
         //   자리 비움·축하 폭죽이 화면 크기를 알아야 해서 `step` 에도 그릴 자리를 넘긴다.
@@ -83,6 +85,21 @@ object WallpaperArt {
     /** 누른 자리가 클로디 위인가 — 배경화면 터치와 꾸미기 화면 끌기가 같은 판정을 쓴다. */
     fun hitsMascot(w: Float, h: Float, look: Look.Values, mascot: Mascot, x: Float, y: Float) =
         look.mascot && mascot.hits(look.mascotX * w, look.mascotY * h, mascotCell(w), x, y)
+
+    /** 누른 자리가 클로디 곁의 공룡알 위인가 (알이 없으면 거짓). */
+    fun hitsEgg(w: Float, h: Float, look: Look.Values, mascot: Mascot, x: Float, y: Float) =
+        look.mascot && mascot.hitsEgg(look.mascotX * w, look.mascotY * h, mascotCell(w), x, y)
+
+    /**
+     * 알에서 깬 공룡 점프 판의 위끝 — **미터기 자리가 판이 된다**(앱 첫 화면에서 게이지 자리가
+     * 판이 되는 것과 같다). 미터기 자리는 사용자가 홈 화면 빈 곳에 맞춰 둔 곳이라 거기가 가장 덜
+     * 가린다. 판이 떠 있는 동안 미터기는 안 그린다(`render(meter = false)`) — 반쯤 가리면 지저분했다.
+     * 상태바·아래 끝에 걸리지 않게 화면 안으로 가둔다.
+     */
+    fun boardTop(w: Float, h: Float, look: Look.Values, boardH: Float): Float {
+        val top = meterRect(w, h, look).centerY() - boardH / 2f
+        return top.coerceIn(h * 0.06f, h * 0.96f - boardH)
+    }
 
     /** 배경으로 쓸 그림이 없을 때의 밋밋한 바탕. 밝게는 단색, 어둡게는 위아래로 깊어진다. */
     private fun drawSea(c: Canvas, w: Float, h: Float, p: Palette) {

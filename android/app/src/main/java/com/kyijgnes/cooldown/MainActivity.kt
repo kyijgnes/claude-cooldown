@@ -24,8 +24,9 @@ import com.kyijgnes.cooldown.work.ResetAlarm
  *   [PC 연결하기] 가 대신 서고, 앱을 켤 때 한 번은 옵션 화면으로 곧장 보낸다.
  *   연결 전에는 새로고침할 것도 없다.
  *
- * 제목 옆에 클로디가 산다(`ClaudiView`). **아주 오래 꾹 누르면 공룡으로 변신해 게이지 자리가
+ * 제목 옆에 클로디가 산다(`ClaudiView`). **기절시키면 알이 굴러 나오고, 깨면 게이지 자리가
  * 공룡 점프 판이 된다**(새 화면을 띄우지 않는다). ✕ · 뒤로 가기 · 20초 그대로 두면 게이지로 돌아온다.
+ * 홈 화면 배경화면에서도 같은 길로 바로 한다(`CooldownWallpaperService`).
  */
 class MainActivity : Activity() {
 
@@ -55,7 +56,7 @@ class MainActivity : Activity() {
         refresh = findViewById(R.id.refresh)
         claudi = findViewById(R.id.claudi)
         stage = findViewById(R.id.stage)
-        claudi.mascot.onMorph = { startGame() }
+        claudi.mascot.onHatch = { startGame() }
 
         connect.setOnClickListener { openOptions() }
         refresh.setOnClickListener { reload() }
@@ -99,7 +100,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- 공룡 점프
 
     /**
-     * 클로디가 공룡으로 변신했다 — **게이지 자리가 판이 된다.** 게이지는 자리만 지키고(INVISIBLE)
+     * 알이 깨졌다 — **게이지 자리가 판이 된다.** 게이지는 자리만 지키고(INVISIBLE)
      * 판이 그 크기를 그대로 쓴다(판은 세로 가운데). 연결 전이라 게이지가 없으면 판 비율대로 선다.
      * 클로디는 판 속으로 들어갔으니 제목 옆에서는 숨는다.
      */
@@ -107,8 +108,8 @@ class MainActivity : Activity() {
         if (board != null) return
         val prefs = getSharedPreferences(DINO_PREFS, MODE_PRIVATE)
         val v = DinoView(this, prefs.getInt(DINO_BEST, 0))
-        v.onBest = { best -> prefs.edit().putInt(DINO_BEST, best).apply() }
-        v.onExit = { endGame() }
+        v.board.onBest = { best -> prefs.edit().putInt(DINO_BEST, best).apply() }
+        v.board.onExit = { stage.post { endGame() } }   // 그리는 중에 판을 치우지 않게 한 박자 뒤로
         board = v
         claudi.pause()
         claudi.visibility = View.INVISIBLE

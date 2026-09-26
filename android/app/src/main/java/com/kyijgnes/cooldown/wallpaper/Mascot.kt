@@ -24,9 +24,9 @@ import kotlin.math.sin
  *  - **꾹 누르기** — 손가락에 눌려 납작해지고, 떼면 눌린 만큼 튕겨 오른다.
  *    ★ 홈 화면에서는 런처가 길게 누르기를 자기 메뉴로 채 가므로 꾸미기 미리보기에서 제대로 된다.
  *      홈에서 노는 길은 **콕 찌르기와 박자 콤보**다(둘 다 누르는 순간 반응하므로 채여도 된다).
- *  - **아주 오래 꾹 누르면**(끝까지 납작해진 뒤로도 더) 부르르 떨다 **공룡으로 변신**하고
- *    공룡 점프 판(크롬 공룡 게임)이 열린다 — **앱 첫 화면(`ClaudiView`)에서만.** 판을 열 곳을
- *    `onMorph` 로 걸어 둔 쪽만 변신하고, 배경화면·꾸미기 미리보기는 지금처럼 눌렸다 튕긴다.
+ *  - **기절시키면 공룡알**이 굴러 나온다. 톡톡 두드려 깨면 공룡이 나와 **공룡 점프**(크롬 공룡
+ *    게임) 판이 된다(`onHatch`). 홈 화면에서 앱을 안 열고 바로 한다. 판을 열 곳을 걸어 둔 쪽
+ *    (배경화면·앱 첫 화면)만 알이 나오고, 꾸미기 미리보기는 지금처럼 기절했다 깨기만 한다.
  *  - **마구 두드리면 기절**한다(X_X + 별). 박자를 맞히면 덜 지친다.
  *  - **오래 안 건드리면 딴짓**을 한다 — 노트북 두드리기·낮잠·공 놀이·자리 비움.
  *
@@ -85,15 +85,22 @@ class Mascot {
     private var press = 0f           // 눌린 정도 0~1
     private var launch = 0           // 이 동안은 높이 가둠을 푼다 (꾹 누르기의 특전)
 
-    // **아주 오래 꾹 누르면 공룡으로 변신한다**(데스크탑 `claudi.py` 의 `MORPH_*` 를 옮긴 것).
-    // 끝까지 눌린 뒤로도 `MORPH_HOLD` 만큼 더 누르고 있으면 부르르 떨다 펑 — 공룡 점프 판을 연다.
-    private var morphHold = 0        // 끝까지 눌린 채 더 누른 프레임
-    private var morphOpen = 0        // 판을 띄우기까지 남은 프레임
-    /** 공룡으로 변신해 있다 (판이 떠 있는 동안). */
+    // **공룡알 — 폰에서 공룡 점프로 들어가는 문**(2026-09-26 쓰는 사람 지시). 홈 화면에서는 런처가
+    // 길게 누르기를 채 가서 PC 처럼 '아주 오래 꾹' 을 못 한다. 대신 **마구 두드려 기절시키면 깨어날
+    // 때 알이 굴러 나오고**, 알을 톡톡 두드려 깨면 공룡이 나와 판이 된다. 그림은 `DinoSpec.EGG`.
+    private var egg = 0              // 알이 남아 있는 프레임 (0 이면 없다)
+    private var eggAge = 0           // 알이 나온 뒤 흐른 프레임 (굴러 나오기·흔들기)
+    private var eggHits = 0          // 두드린 횟수 — 금(`EGG_CRACKS`)을 다 채우고 한 번 더면 깨진다
+    private var eggSide = 1          // 알이 놓인 쪽 (-1 왼쪽 / 1 오른쪽)
+    private var eggShake = 0         // 두드려서 흔들리는 남은 프레임
+    private var hatch = 0            // 깨지는 중 남은 프레임 (끝나면 판을 연다)
+    /** 판 속으로 들어가 있다 (공룡 점프 중) — 그리는 쪽은 클로디 대신 판을 그린다. */
     var dino = false
         private set
-    /** 변신했을 때 부를 것 — 앱 첫 화면이 공룡 점프 판 여는 것을 걸어 둔다. 없으면 변신하지 않는다. */
-    var onMorph: (() -> Unit)? = null
+    /** 알이 깨졌을 때 부를 것 — 배경화면·앱 첫 화면이 판 여는 것을 걸어 둔다. 없으면 알이 안 나온다. */
+    var onHatch: (() -> Unit)? = null
+    /** 알이 있다 (굴러 나오는 중·깨지는 중 포함). */
+    val hasEgg: Boolean get() = egg > 0 || hatch > 0
 
     private var clicks = 0f          // 콕 누적 — 식으면서 준다
     private var faint = 0
@@ -159,10 +166,7 @@ class Mascot {
         t++
         stepPhysics()
         if (faint == 0 && !dino) idleStep()
-        if (morphOpen > 0) {                   // 변신했다 — 조금 뒤에 판을 띄운다
-            morphOpen--
-            if (morphOpen == 0 && dino) onMorph?.invoke()
-        }
+        stepEgg()
     }
 
     /** 용수철 한 걸음. 눌림으로 생긴 속도를 제자리(0)로 부드럽게 당긴다. */
@@ -175,6 +179,7 @@ class Mascot {
             if (faint == 0) {                  // 깨어남 — 펑 하고 털어낸다
                 yoff = 0f; vy = 0f
                 burst(SPARK_WAKE, 1.2f)
+                if (onHatch != null) layEgg()  // 그리고 알이 굴러 나온다 (판을 열 곳이 있을 때만)
             }
             return
         }
@@ -188,12 +193,6 @@ class Mascot {
             press = min(1f, press + 1f / PRESS_FRAMES)
             vy *= 0.6f
             yoff *= 0.8f
-            // 끝까지 눌렸는데도 계속 — 부르르 떨다 변신. ★ 판을 열 곳(`onMorph`)이 있을 때만 —
-            //   배경화면·꾸미기 미리보기는 판을 안 띄우므로 거기서는 지금처럼 눌렸다 튕기기만 한다.
-            if (press >= 1f && onMorph != null) {
-                morphHold++
-                if (morphHold >= MORPH_HOLD) morph()
-            }
         }
 
         vy += -SPRING_K * yoff
@@ -380,8 +379,7 @@ class Mascot {
         endAct()          // 하던 딴짓은 곧바로 지우지 않고 접는다 (한 프레임에 안 갈리게)
         touching = true
         holdF = 0
-        morphHold = 0
-        if (dino) {       // 공룡인 채로 눌렀다 — 돌아온다 (보통은 판에서 돌아올 때 먼저 부른다)
+        if (dino) {       // 판 속에 있는 채로 눌렸다 — 돌아온다 (보통은 판을 닫을 때 먼저 부른다)
             unmorph()
             return
         }
@@ -459,7 +457,6 @@ class Mascot {
     fun release() {
         touching = false
         holdF = 0
-        morphHold = 0
         if (!pressed) return
         pressed = false
         val amount = press
@@ -479,27 +476,77 @@ class Mascot {
         holdF = 0
         pressed = false
         press = 0f
-        morphHold = 0
     }
 
-    /** 펑 — 공룡이 된다. `MORPH_OPEN` 뒤에 `onMorph` 가 판을 띄운다. */
-    private fun morph() {
-        pressed = false
-        touching = false
-        press = 0f
-        morphHold = 0
-        dino = true
-        morphOpen = MORPH_OPEN
-        vy = 0f
-        yoff = 0f
-        poof()
+    // -------------------------------------------------- 공룡알
+    /** 기절에서 깨어났다 — 넓은 쪽으로 알이 굴러 나온다. */
+    private fun layEgg() {
+        eggSide = if (edgeR >= -edgeL) 1 else -1
+        if (EGG_GAP + 5f > (if (eggSide > 0) edgeR else -edgeL)) eggSide = -eggSide
+        egg = EGG_LIFE
+        eggAge = 0
+        eggHits = 0
+        eggShake = 0
+        hatch = 0
+    }
+
+    /** 알 한 걸음 — 굴러 나오고, 흔들리고, 때가 지나면 사라지고, 깨지면 판을 연다. */
+    private fun stepEgg() {
+        if (hatch > 0) {
+            hatch--
+            if (hatch == 0) {                  // 다 깼다 — 클로디는 판 속으로, 판을 연다
+                egg = 0
+                eggHits = 0
+                dino = true
+                onHatch?.invoke()
+            }
+            return
+        }
+        if (egg <= 0) return
+        egg--
+        eggAge++
+        if (eggShake > 0) eggShake--
+        if (egg == 0) eggHits = 0              // 아무도 안 깼다 — 사라진다
+    }
+
+    /** 알 한가운데 (몸 한가운데 기준 칸) — 굴러 나오는 동안은 포물선, 그 뒤엔 클로디 옆 땅 위. */
+    private fun eggAt(): FloatArray {
+        val restY = MascotSprite.ROWS / 2f - com.kyijgnes.cooldown.dino.DinoSpec.EGG.size / 2f
+        if (eggAge >= EGG_POP) return floatArrayOf(eggSide * EGG_GAP, restY)
+        val k = eggAge / EGG_POP.toFloat()
+        return floatArrayOf(eggSide * EGG_GAP * k, restY * k - 7f * 4f * k * (1f - k))
+    }
+
+    /** 누른 자리가 알 위인가 (넉넉히). */
+    fun hitsEgg(cx: Float, cy: Float, u: Float, x: Float, y: Float): Boolean {
+        if (egg <= 0 || hatch > 0) return false
+        val at = eggAt()
+        return abs(x - (cx + at[0] * u)) <= 6.5f * u && abs(y - (cy + at[1] * u)) <= 7.5f * u
+    }
+
+    /** 알을 톡 — 금이 가고 흔들린다. 금을 다 채우고 한 번 더 두드리면 깨진다. */
+    fun crackEgg() {
+        if (egg <= 0 || hatch > 0) return
+        quiet = 0
+        eggHits++
+        eggShake = EGG_SHAKE
+        egg = max(egg, EGG_FADE + 90)          // 깨는 중에는 사라지지 않게
+        val at = eggAt()
+        val cracks = com.kyijgnes.cooldown.dino.DinoSpec.EGG_CRACKS.size
+        val broke = eggHits > cracks
+        repeat(if (broke) 16 else 3) {         // 껍데기 부스러기 (깨질 땐 한 움큼)
+            val a = rnd(0f, TAU)
+            val sp = rnd(0.15f, if (broke) 0.5f else 0.25f)
+            sparks.add(spark(at[0] + cos(a) * 2f, at[1] + sin(a) * 2f, cos(a) * sp, sin(a) * sp - 0.12f,
+                SPARK_LIFE * rnd(0.5f, 0.9f), if (rnd() < 0.6f) INK_SHELL else INK_BODY))
+        }
+        if (broke) hatch = HATCH_FRAMES
     }
 
     /** 판에서 돌아왔다 — 펑 하고 클로디로 돌아온다(눈이 동그래진 채). */
     fun unmorph() {
         if (!dino) return
         dino = false
-        morphOpen = 0          // 판이 뜨기 전에 불렀으면 띄우지 않는다
         quiet = 0
         surprise = SURPRISE_FRAMES * 3
         poof()
@@ -521,6 +568,9 @@ class Mascot {
      */
     fun rest() {
         unmorph()              // 판에서 돌아왔다 (배경화면이 다시 보일 때)
+        egg = 0                // 두고 간 알도 치운다
+        hatch = 0
+        eggHits = 0
         clicks = 0f
         combo = 0
         beats = 0
@@ -708,7 +758,8 @@ class Mascot {
         // 뒤 셋(초록·빨강·흰빛)은 **축하 폭죽 전용**이다(평소 반짝이는 몸 색뿐).
         val inks = arrayOf(body, Paint().apply { this.color = star },
             Paint().apply { this.color = prop }, Paint().apply { this.color = green },
-            Paint().apply { this.color = red }, Paint().apply { this.color = glow })
+            Paint().apply { this.color = red }, Paint().apply { this.color = glow },
+            Paint().apply { this.color = SHELL })
 
         if (faint > 0) {
             drawSprite(c, cx, cy + u, u * FAINT_SCALE, u * FAINT_SCALE,
@@ -717,8 +768,8 @@ class Mascot {
             drawSparks(c, cx, cy, u, inks)
             return
         }
-        if (dino) {                            // 공룡으로 변신해 있다 — 판의 그 공룡이 작게 서 있다
-            drawDino(c, cx, cy, u, body, hole)
+        if (dino) {                            // 판 속에 들어가 있다 — 판의 그 공룡이 작게 서 있다
+            drawDino(c, cx, cy + MascotSprite.ROWS / 2f * u, u, body, hole)
             drawSparks(c, cx, cy, u, inks)
             return
         }
@@ -786,9 +837,6 @@ class Mascot {
             sxk *= 1f + PRESS_FLAT * 0.75f * press
             syk *= 1f - PRESS_FLAT * press
             py += 1.6f * press * u
-            if (morphHold > 0) {               // 변신 직전 — 점점 세게 부르르 떤다
-                px += MORPH_SHAKE * u * (morphHold / MORPH_HOLD.toFloat()) * (if (t % 2 == 0) -1f else 1f)
-            }
         } else if (running > 0 || rushing) {   // 달려오는 중 (불려서 올라오는 동안부터)
             // ★ 발 박자는 `t` 로 센다 — **올라오는 중과 달리는 중이 같은 걸음으로 이어진다**
             //   (`running` 으로 세면 땅에 닿는 순간 걸음이 처음으로 되감긴다).
@@ -898,23 +946,78 @@ class Mascot {
             val r = BALL_R * u
             c.drawRect(ball[0] - r, ball[1] - r, ball[0] + r, ball[1] + r, inks[INK_STAR])
         }
+        if (egg > 0 || hatch > 0) drawEgg(c, cx, cy, u, inks, hole)
         drawSparks(c, cx, cy, u, inks)
         drawShells(c, cx, cy, u, inks)   // 날아가는 폭죽은 반짝이보다 앞에
         drawZzz(c, cx, cy, u, inks[INK_PROP])
     }
 
     /**
-     * 변신한 공룡 — 판(`DinoSpec`)과 **같은 표**를 `MORPH_U` 칸으로 작게 세워 둔다.
-     * 발을 클로디 발자리에 맞추고, 숨쉬듯 한 칸의 반쯤 오르내리며 이따금 눈을 깜빡인다.
+     * 공룡알 — 테두리(소품 색)·껍데기(`SHELL`)·코랄 점, 두드린 만큼 금(테두리 색)이 번진다.
+     * 이따금 좌우로 들썩이며(두드려 달라는 듯) 사라질 때가 되면 깜빡인다.
+     * 깨질 땐 금 위(뚜껑)가 튀어 오르고, 밑동에서 작은 공룡이 올라온다.
+     * ★ 칸 경계는 정수 픽셀로 반올림한다(틈이 안 생기게).
+     */
+    private fun drawEgg(c: Canvas, cx: Float, cy: Float, u: Float, inks: Array<Paint>, hole: Paint) {
+        val art = com.kyijgnes.cooldown.dino.DinoSpec.EGG
+        val at = eggAt()
+        if (hatch == 0 && egg < EGG_FADE && (egg / 4) % 2 == 1) return   // 사라지기 전 깜빡임
+        val cols = art[0].length
+        var ox = cx + at[0] * u - cols / 2f * u
+        val oy = cy + at[1] * u - art.size / 2f * u
+        if (eggShake > 0) ox += (if (eggShake % 2 == 0) -0.6f else 0.6f) * u
+        else if (hatch == 0 && eggAge > EGG_POP && eggAge % 75 < 8) ox += (if ((eggAge / 2) % 2 == 0) -0.4f else 0.4f) * u
+        val k = if (hatch > 0) 1f - hatch / HATCH_FRAMES.toFloat() else 0f
+        val split = com.kyijgnes.cooldown.dino.DinoSpec.EGG_SPLIT
+        fun cell(x: Float, y: Float, col: Int, row: Int, p: Paint) {
+            c.drawRect(Math.round(x + col * u).toFloat(), Math.round(y + row * u).toFloat(),
+                Math.round(x + (col + 1) * u).toFloat(), Math.round(y + (row + 1) * u).toFloat(), p)
+        }
+        if (hatch > 0) {                       // 밑동 속에서 공룡이 올라온다 — 밑동 아래로는 안 보이게 자른다
+            val bottom = oy + (art.size - 1) * u
+            c.save()
+            c.clipRect(ox - 6f * u, oy - 14f * u, ox + (cols + 6) * u, bottom)
+            drawDino(c, ox + cols / 2f * u, bottom + (1f - k) * 9f * u, u, inks[INK_BODY], hole)
+            c.restore()
+        }
+        for ((r, line) in art.withIndex()) {
+            val lid = hatch > 0 && r < split
+            if (lid && k > 0.7f) continue      // 뚜껑은 튀어 올라 사라졌다
+            val dx = if (lid) eggSide * k * 3f * u else 0f
+            val dy = if (lid) -k * 8f * u else 0f
+            for ((col, ch) in line.withIndex()) {
+                val p = when (ch) {
+                    'o' -> inks[INK_PROP]
+                    '#' -> inks[INK_SHELL]
+                    '*' -> inks[INK_BODY]
+                    else -> null
+                } ?: continue
+                cell(ox + dx, oy + dy, col, r, p)
+            }
+        }
+        if (hatch > 0) return
+        // 금 — 두드린 만큼
+        val cracks = com.kyijgnes.cooldown.dino.DinoSpec.EGG_CRACKS
+        for (i in 0 until min(eggHits, cracks.size)) {
+            val cr = cracks[i]
+            var j = 0
+            while (j < cr.size) { cell(ox, oy, cr[j], cr[j + 1], inks[INK_PROP]); j += 2 }
+        }
+    }
+
+    /**
+     * 작은 공룡 — 판(`DinoSpec`)과 **같은 표**를 `DINO_U` 칸으로 작게 세운다. `cx` 는 가운데,
+     * `feet` 는 발이 닿는 선. 알에서 올라올 때와 판 속에 들어가 있을 때 쓴다.
+     * 숨쉬듯 한 칸의 반쯤 오르내리며 이따금 눈을 깜빡인다.
      * ★ 칸 경계는 정수 픽셀로 반올림한다(틈이 안 생기게, `drawSprite` 와 같은 까닭).
      */
-    private fun drawDino(c: Canvas, cx: Float, cy: Float, u: Float, body: Paint, hole: Paint) {
-        val du = u * MORPH_U
+    private fun drawDino(c: Canvas, cx: Float, feet: Float, u: Float, body: Paint, hole: Paint) {
+        val du = u * DINO_U
         val rows = com.kyijgnes.cooldown.dino.DinoSpec.POSES.getValue("stand")
         val cols = rows.maxOf { it.length }
         val x0 = cx - cols * du / 2f
         val bob = if ((t / 19) % 2 == 1) du else 0f
-        val y0 = cy + MascotSprite.ROWS / 2f * u - rows.size * du + bob
+        val y0 = feet - rows.size * du + bob
         fun cell(col: Int, row: Int, span: Int, p: Paint) {
             c.drawRect(Math.round(x0 + col * du).toFloat(), Math.round(y0 + row * du).toFloat(),
                 Math.round(x0 + (col + span) * du).toFloat(), Math.round(y0 + (row + 1) * du).toFloat(), p)
@@ -1129,13 +1232,17 @@ class Mascot {
             "away" -> { awayTotal = AWAY_MIN; away = AWAY_MIN - AWAY_LEAD - SINK_FRAMES / 2 }
             // 완주 축하 — 크래커를 들고 쏘는 장면 (몇 프레임 굴려야 폭죽이 뜬다)
             "party" -> { finale = FINALE_FRAMES; party = true; popDrop = 0; aim(); hopIn = 1 }
-            // 공룡으로 변신한 채 (판은 안 띄운다)
+            // 판 속에 들어가 있는 채 (판은 안 그린다)
             "dino" -> dino = true
+            // 기절에서 깨어나 굴러 나온 알 — 한 번 두드려 금이 간 채
+            "egg" -> { layEgg(); eggAge = EGG_POP + 10; eggHits = 1 }
+            // 깨지는 중 — 뚜껑이 튀어 오르고 공룡이 올라오는 한가운데
+            "hatch" -> { layEgg(); eggAge = EGG_POP + 10; hatch = HATCH_FRAMES / 2 }
         }
     }
 
-    /** 테스트 — 끝까지 눌린 뒤 더 누르면 변신하는가, 일찍 떼면 안 하는가. */
-    fun morphHoldFrames() = HOLD_FRAMES + PRESS_FRAMES.toInt() + MORPH_HOLD + 2
+    /** 테스트 — 기절이 끝날 때까지 걸리는 프레임. */
+    fun faintFrames() = FAINT_FRAMES
 
     private companion object {
         const val PI = Math.PI.toFloat()
@@ -1157,13 +1264,15 @@ class Mascot {
         const val LAUNCH_LIFT = 55f      // 날아오르는 동안엔 이 높이까지 (칸)
         const val LAUNCH_FRAMES = 62
 
-        // **아주 오래 꾹 누르면 공룡으로 변신** (데스크탑 `MORPH_*` 를 30fps·칸으로 옮긴 것)
-        // ★ 떠는 것은 **변신 직전에만** — 평소 부르르를 뺀 것과는 다른 일이다. 아무 표시 없이
-        //   누르고만 있으면 '더 누르면 뭔가 된다' 를 알 길이 없다.
-        const val MORPH_HOLD = 24        // 끝까지 눌린 뒤 이만큼(0.8초) 더 누르면 변신
-        const val MORPH_SHAKE = 0.7f     // 변신 직전 좌우로 떠는 폭 (칸, 점점 세진다)
-        const val MORPH_OPEN = 11        // 펑 하고 이만큼(0.36초) 뒤에 판을 띄운다
-        const val MORPH_U = 0.5f         // 서 있는 공룡의 도트 한 칸 (클로디 칸 대비) — 덩치가 비슷해진다
+        // ── 공룡알 (기절 → 알 → 톡톡 깨면 공룡 점프) ──
+        const val EGG_LIFE = 360         // 알이 기다려 주는 프레임 (12초) — 안 깨면 사라진다
+        const val EGG_FADE = 45          // 사라지기 전 이만큼(1.5초) 깜빡인다
+        const val EGG_POP = 16           // 클로디 곁으로 굴러 나오는 데 걸리는 프레임
+        const val EGG_GAP = 11f          // 클로디 한가운데에서 알 한가운데까지 (칸) — 9 는 팔에 붙었다
+        const val EGG_SHAKE = 6          // 두드리면 이만큼 흔들린다
+        const val HATCH_FRAMES = 20      // 깨지는 장면 (뚜껑이 튀고 공룡이 올라온다) — 끝나면 판
+        const val DINO_U = 0.5f          // 작은 공룡의 도트 한 칸 (클로디 칸 대비) — 덩치가 비슷해진다
+        const val SHELL = 0xFFF6EEDE.toInt()   // 껍데기 — 밝게·어둡게 어디서나 테두리와 대비가 난다
 
         // 뛸 때 몸이 늘었다 눌린다(스쿼시·스트레치) — 없으면 그냥 미끄러질 뿐이라 손맛이 없다
         const val SQUASH = 0.12f
@@ -1239,7 +1348,9 @@ class Mascot {
         const val SURPRISE_FRAMES = 10
         // ★ 어쩌다 기절하면 놀라니까 높게 잡는다 — 작정하고 두드려야 뻗는다.
         //   한 번에 +2.4(박자를 맞히면 +1.0), 매 프레임 CLICK_DECAY 만큼 식는다.
-        const val FAINT_AT = 46f
+        // ★ **폰은 36 으로 낮췄다**(데스크탑은 46 그대로, 2026-09-26). 기절이 곧 공룡알로 가는
+        //   문이 되어 들어가기 편하게 해 달라는 지시. 박자대로 놀면 여전히 안 쌓인다(초당 +2.1 < 식음 3.1).
+        const val FAINT_AT = 36f
         const val CLICK_DECAY = 0.104f
         const val FAINT_FRAMES = 80      // 약 2.7초
         // 기절 땐 X_X 눈이 보일 만큼만 키운다. ★ 1.3 은 딴 친구가 나타난 것처럼 커 보였다.
@@ -1260,6 +1371,7 @@ class Mascot {
         const val INK_GREEN = 3
         const val INK_RED = 4
         const val INK_GLOW = 5           // 크래커 몸통 (바탕과 최대 대비)
+        const val INK_SHELL = 6          // 공룡알 껍데기
         // ★ **폭죽 색에 `INK_GLOW`(제목색)를 넣지 말 것** — 밝은 테마에서 거의 검정이라
         //   **까만 폭죽**이 날아간다(미리보기에서 확인). 그건 물건 색이지 불꽃 색이 아니다.
         val FIREWORK_INKS = intArrayOf(INK_BODY, INK_STAR, INK_GREEN, INK_RED)

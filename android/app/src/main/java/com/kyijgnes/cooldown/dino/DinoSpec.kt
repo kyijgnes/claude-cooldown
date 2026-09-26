@@ -42,6 +42,7 @@ object DinoSpec {
     const val CLOUD_SPEED = 0.2f
     const val IDLE_EXIT = 1200
     const val CLOSE_HIT = 30
+    const val EGG_SPLIT = 6
 
     val BIRD_LIFTS = intArrayOf(0, 22, 42)
     val BIRD_LIFTS_TOUCH = intArrayOf(0, 42)
@@ -258,6 +259,27 @@ object DinoSpec {
         ".#.#.",
         "#...#",
     )
+
+    /**
+     * 공룡알 — 폰에서 게임으로 들어가는 문. 클로디를 기절시키면 깨어날 때 굴러 나오고, 톡톡 두드려
+     * 깨면 판이 된다. `o` 테두리 · `#` 껍데기 · `*` 코랄 점. 칸 크기는 클로디와 같다.
+     */
+    val EGG = arrayOf(
+        "...ooo...",
+        "..o###o..",
+        "..o#*#o..",
+        ".o#####o.",
+        ".o*###*o.",
+        "o#######o",
+        "o###*###o",
+        "o#*####*o",
+        "o#######o",
+        ".o##*##o.",
+        "..ooooo..",
+    )
+
+    /** 두드릴 때마다 더해지는 금 (col, row 가 번갈아) — 다 쓰고 한 번 더 두드리면 깨진다. */
+    val EGG_CRACKS = arrayOf(intArrayOf(1, 5, 2, 6, 3, 5), intArrayOf(4, 6, 5, 5, 6, 6, 7, 5))
 
     /** 장애물 종류 — 그림(여러 장이면 번갈아) · 틈 바탕 · 여럿 붙는 속도 · 나오기 시작하는 속도 */
     class Kind(val art: Array<Array<String>>, val minGap: Int, val multi: Float, val minSpeed: Float)

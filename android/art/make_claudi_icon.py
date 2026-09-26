@@ -290,6 +290,7 @@ DINO_CONSTS = (
     "GAP_COEF", "GAP_MAX", "MAX_GROUP", "MAX_DUP", "BIRD_WOBBLE",
     "OVER_WAIT", "RUN_BEAT", "FLAP_BEAT", "FLASH_EVERY", "FLASH_FRAMES",
     "NIGHT_EVERY", "NIGHT_FRAMES", "CLOUD_MAX", "CLOUD_SPEED", "IDLE_EXIT", "CLOSE_HIT",
+    "EGG_SPLIT",
 )
 DINO_PAIRS = ("BIRD_LIFTS", "BIRD_LIFTS_TOUCH", "BLINK_EVERY", "CLOUD_GAP", "CLOUD_SKY", "CLOSE_AT")
 
@@ -328,6 +329,8 @@ def write_dino() -> None:
         cactus_l=_kt_art(dino.CACTUS_L, "    "), birds=birds,
         bird_eye=_kt_pairs(dino.BIRD_EYE), cloud=_kt_art(dino.CLOUD, "    "),
         restart=_kt_art(dino.RESTART, "    "), close=_kt_art(dino.CLOSE, "    "),
+        egg=_kt_art(dino.EGG, "    "),
+        cracks=", ".join(_kt_pairs(c) for c in dino.EGG_CRACKS),
         kinds=NL.join(kinds),
     )
     os.makedirs(os.path.dirname(OUT_DINO), exist_ok=True)
@@ -379,6 +382,15 @@ object DinoSpec {{
 
     /** 닫기 — 판 왼쪽 위 구석의 도트 ✕ (`CLOSE_AT` 에 그리고 `CLOSE_HIT` 안을 누르면 닫는다) */
     val CLOSE = {close}
+
+    /**
+     * 공룡알 — 폰에서 게임으로 들어가는 문. 클로디를 기절시키면 깨어날 때 굴러 나오고, 톡톡 두드려
+     * 깨면 판이 된다. `o` 테두리 · `#` 껍데기 · `*` 코랄 점. 칸 크기는 클로디와 같다.
+     */
+    val EGG = {egg}
+
+    /** 두드릴 때마다 더해지는 금 (col, row 가 번갈아) — 다 쓰고 한 번 더 두드리면 깨진다. */
+    val EGG_CRACKS = arrayOf({cracks})
 
     /** 장애물 종류 — 그림(여러 장이면 번갈아) · 틈 바탕 · 여럿 붙는 속도 · 나오기 시작하는 속도 */
     class Kind(val art: Array<Array<String>>, val minGap: Int, val multi: Float, val minSpeed: Float)
