@@ -14,6 +14,8 @@
 
 - 통통 튀고, 콕 찌르면 놀라고, **박자를 맞히면 콤보**(5단 완주 시 폭죽), 마구 두드리면
   기절하고, 오래 심심하면 딴짓(노트북·낮잠·공놀이·자리 비움)에 열중한다.
+- **아주 오래 꾹 누르면 공룡으로 변신**한다(`MORPH_*`). 앱이 `on_morph` 에 공룡 점프 판
+  (크롬 공룡 게임, `cooldown_dino`)을 걸어 두고, 판이 닫히면 `unmorph()` 로 돌아온다.
 - 그림은 도트 표(HEAD/LEGS/ARM/EYES)에 `#` 로 찍어 두고 `_sprite` 한 곳에서만 픽셀로 옮긴다.
   ★ **폰 앱(`android/art/make_claudi_icon.py`)이 이 표를 그대로 읽어 간다** —
   모양을 고쳤으면 그 스크립트를 다시 돌려 폰과 어긋나지 않게 한다.
@@ -28,6 +30,8 @@ from __future__ import annotations
 import math
 import random
 import tkinter as tk
+
+import cooldown_dino as dino
 
 from .base import P
 
@@ -131,6 +135,16 @@ PRESS_POP = 18.0      # 떼면 튕겨 오르는 힘 (눌린 만큼 곱해진다)
 PRESS_BURST = 0.35    # 이만큼 넘게 눌렸다 떼면 **팡** 터진다
 LAUNCH_LIFT = 70.0    # 날아오르는 동안엔 창 안으로 가두지 않는다 (칸이 아니라 px)
 LAUNCH_FRAMES = 46    # 이 프레임 동안은 가둠을 푼다
+# **아주 오래 꾹 누르면 공룡으로 변신한다**(2026-09-26, 쓰는 사람이 청함). 끝까지 납작해진
+# 뒤로도 `MORPH_HOLD` 만큼 더 누르고 있으면 부르르 떨다가 **펑** 하고 공룡이 되고, 앱이 공룡
+# 점프 판(크롬 공룡 게임, `cooldown_dino`)을 띄운다(`on_morph`). 판을 닫으면 펑 하고 돌아온다.
+# 그 전에 떼면 지금까지처럼 튕겨 오를 뿐이다.
+# ★ 떠는 것(`MORPH_SHAKE`)은 **변신 직전에만** 한다. 평소의 부르르(wiggle)를 뺀 것과는 다른
+#   일이다 — 아무 표시 없이 누르고만 있으면 '더 누르면 뭔가 된다' 를 알 길이 없다.
+MORPH_HOLD = 18       # 끝까지 눌린 뒤 이만큼(≈0.8초) 더 누르고 있으면 변신
+MORPH_SHAKE = 1.4     # 변신 직전 좌우로 떠는 폭 (px, 점점 세진다)
+MORPH_OPEN = 8        # 펑 하고 이만큼(≈0.36초) 뒤에 판을 띄운다 — 위젯에서 변한 모습을 먼저 보게
+MORPH_U = 1           # 위젯에 서 있는 공룡의 도트 한 칸 (px). 판(2px)의 절반이라 클로디와 덩치가 비슷하다
 # ★ **창 밖으로 나가는 건 꾹 누르기의 특전이다.** 콤보로는 안 나간다 — 연타로 자꾸 나가면
 #   화면에 없는 시간이 길어져 굼떠 보인다. 콤보의 상은 높이가 아니라 **공중제비와 반짝이**다.
 MAX_VY = 8.2          # 그냥 누르기·콤보로 낼 수 있는 최대 속도 (꾹 누르기는 예외)
@@ -300,6 +314,9 @@ class Claudi:
         self.px0, self.py0, self.px1, self.py1 = party or box
         self.leave = leave
         self._anim_gen = 0
+        # 공룡으로 변신했을 때 부를 것 — 앱이 build 뒤에 공룡 점프 판 여는 것을 걸어 둔다.
+        # 없으면(스킨 그림 뽑기 도구 등) 변신만 하고 누를 때까지 공룡으로 서 있다.
+        self.on_morph = None
 
     def set_box(self, box: tuple[float, float, float, float]) -> None:
         """놀 자리를 정한다(고쳐 잡을 수도 있다). 집은 상자 한가운데."""
@@ -382,6 +399,9 @@ class Claudi:
         self._trick_len = 1            # 재주 전체 프레임
         self._flip_n = self._spin_n = 0  # 세로·가로 회전 바퀴 수
         self._launch = 0              # 이 동안은 창 밖까지 날아가도 안 가둔다
+        self._morph_hold = 0          # 끝까지 눌린 채 더 누르고 있는 프레임 (변신까지)
+        self._dino = False            # 공룡으로 변신해 있다 (공룡 점프 판이 떠 있는 동안)
+        self._morph_open = 0          # 판을 띄우기까지 남은 프레임
         self._next_gesture = random.randint(20, 60)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
         self._draw_mascot()  # 첫 프레임은 바로 그린다
@@ -410,6 +430,9 @@ class Claudi:
         self._end_act()  # 하던 딴짓은 곧바로 지우지 않고 접는다 (한 프레임에 안 갈리게)
         # 마스코트를 누른 것이면 '논 것' 이지 새로고침 요청이 아니다 (absorbed 참고)
         self._played = x is not None and self._near(x, y)
+        if self._dino:  # 공룡인 채로 눌렀다 — 돌아온다 (보통은 앱이 판을 닫으며 먼저 부른다)
+            self.unmorph()
+            return
         if self._away > 0:
             # 자리를 비웠는데 불렀다 — **호다닥 올라와서 허둥지둥**한다.
             # ★ **달려오는 연출은 완전히 숨었을 때만 시작한다.** 보이는 채로 왼쪽에 옮겨
@@ -482,10 +505,11 @@ class Claudi:
         ★ 여기에 '기 모아 뛰기'·'기 모아 쏘기'·'쓰다듬기(하트)' 를 차례로 붙여 봤다가
         전부 뺐다. 소품이나 기호를 얹으면 게임 같거나 유치했다 — **누르니까 눌린다.**
         """
-        if (self._faint > 0 or self._party or self._away > 0
+        if (self._faint > 0 or self._party or self._away > 0 or self._dino
                 or not self._hit(x, y)):
             return
         self._pressed = True
+        self._morph_hold = 0
 
     def let_go(self) -> None:
         """손을 뗐다 — 눌린 만큼 튕겨 오르고, 꾹 눌렀던 거면 **팡** 터진다.
@@ -493,6 +517,7 @@ class Claudi:
         if not self._pressed:
             return
         self._pressed = False
+        self._morph_hold = 0
         press, self._press = self._press, 0.0
         self._boost(JUMP_IMPULSE + PRESS_POP * press, launch=True)
         if press >= PRESS_BURST:
@@ -500,6 +525,39 @@ class Claudi:
             # 일부러 만든 순간이라 쿨다운과 무관하게 터뜨린다
             self._spark_cool = 0
             self._burst(SPARK_POKE + int(8 * press), 1.2 + press * 0.8)
+
+    def _morph(self) -> None:
+        """펑 — 공룡이 된다. `MORPH_OPEN` 뒤에 앱이 공룡 점프 판을 띄운다(`on_morph`)."""
+        self._pressed = False
+        self._press = 0.0
+        self._morph_hold = 0
+        self._dino = True
+        self._morph_open = MORPH_OPEN
+        self._vy = self._yoff = 0.0
+        self._poof()
+
+    def unmorph(self) -> None:
+        """판이 닫혔다 — 펑 하고 클로디로 돌아온다(눈이 동그래진 채)."""
+        if not self._dino:
+            return
+        self._dino = False
+        self._morph_open = 0   # 판이 뜨기 전에 불렀으면 띄우지 않는다
+        self._quiet = 0
+        self._surprise = SURPRISE_FRAMES * 3
+        self._poof()
+
+    def _poof(self) -> None:
+        """변신할 때의 펑 — 몸 둘레 사방으로 흩어진다. 일부러 만든 순간이라 쿨다운과 무관하다.
+        ★ 제목색(`P.title`)은 넣지 않는다 — 폰 밝은 테마에서 까만 가루가 됐던 것과 같은 까닭."""
+        for _ in range(14):
+            a = random.uniform(0, math.tau)
+            sp = random.uniform(0.6, 1.4)
+            self._sparks.append([
+                self.cx + math.cos(a) * 5, self.cy + math.sin(a) * 4,
+                math.cos(a) * sp, math.sin(a) * sp * 0.8 - 0.2,
+                SPARK_LIFE * random.uniform(0.6, 1.0),
+                random.choice((MASCOT_COLOR, MASCOT_COLOR, P.amber)),
+            ])
 
     @staticmethod
     def _tier(hits: int) -> int:
@@ -636,8 +694,12 @@ class Claudi:
             return
         self._t += 1
         self._step_physics()
-        if self._faint == 0:
+        if self._faint == 0 and not self._dino:
             self._idle_step()
+        if self._morph_open > 0:  # 변신했다 — 조금 뒤에 판을 띄운다
+            self._morph_open -= 1
+            if self._morph_open == 0 and self._dino and self.on_morph is not None:
+                self.on_morph()
         try:
             self._draw_mascot()
         except tk.TclError:  # 캔버스가 사라졌다 (스킨/테마 전환)
@@ -676,6 +738,10 @@ class Claudi:
             self._press = min(1.0, self._press + 1.0 / PRESS_FRAMES)
             self._vy *= 0.6
             self._yoff *= 0.8
+            if self._press >= 1.0:  # 끝까지 눌렸는데도 계속 누른다 — 부르르 떨다 변신
+                self._morph_hold += 1
+                if self._morph_hold >= MORPH_HOLD:
+                    self._morph()
         self._vy += -SPRING_K * self._yoff
         self._vy *= 1 - SPRING_DAMP
         # 창 밖으로 안 튀게 — 도트 그림 높이를 빼고 남는 만큼만 올라간다.
@@ -845,6 +911,10 @@ class Claudi:
             self._draw_faint(c, self.cx, c.cget("bg"))
             self._draw_sparks(c)  # 기절해서도 아까 뿜은 것은 마저 흐른다
             return
+        if self._dino:  # 공룡으로 변신해 있다 — 판에서 달리는 그 공룡이 작게 서 있다
+            self._draw_dino(c)
+            self._draw_sparks(c)
+            return
         # 자리 비움 — 작업표시줄 아래로 쏙 내려가 있다 (캔버스 밖이라 저절로 잘린다)
         sink = self._sink_amount()
         if sink >= 1.0:
@@ -900,6 +970,8 @@ class Claudi:
             sxk *= 1 + PRESS_FLAT * 0.75 * self._press
             syk *= 1 - PRESS_FLAT * self._press
             cy += 3.2 * self._press
+            if self._morph_hold > 0:  # 변신 직전 — 점점 세게 부르르 떤다
+                cx += MORPH_SHAKE * (self._morph_hold / MORPH_HOLD) * (1 if self._t % 2 else -1)
         elif self._running > 0 or self._rushing:  # 달려오는 중 (불려서 올라오는 동안부터)
             # ★ 발 박자는 `_t` 로 센다 — **올라오는 중과 달리는 중이 같은 걸음으로 이어진다**
             #   (`_running` 으로 세면 땅에 닿는 순간 걸음이 처음으로 되감긴다).
@@ -1056,6 +1128,31 @@ class Claudi:
         paint(legs, len(HEAD))
         for col, row in EYES[expr]:
             cell(col + eye_dx, row, bg)
+
+    def _draw_dino(self, c: tk.Canvas) -> None:
+        """변신한 공룡 — 판(`cooldown_dino`)과 **같은 표**를 `MORPH_U` 칸으로 작게 세워 둔다.
+        발을 클로디 발자리에 맞추고, 숨쉬듯 1px 오르내리며 이따금 눈을 깜빡인다."""
+        u = MORPH_U
+        rows = dino.POSES["stand"]
+        w, h = len(rows[0]) * u, len(rows) * u
+        x0 = round(self.cx - w / 2)
+        y0 = round(self.cy + SPRITE_H / 2 - h + (1 if (self._t // 14) % 2 else 0))
+        for r, line in enumerate(rows):
+            col = 0
+            while col < len(line):
+                if line[col] != "#":
+                    col += 1
+                    continue
+                run = 1
+                while col + run < len(line) and line[col + run] == "#":
+                    run += 1
+                c.create_rectangle(x0 + col * u, y0 + r * u, x0 + (col + run) * u, y0 + (r + 1) * u,
+                                   fill=MASCOT_COLOR, width=0, tags="mascot")
+                col += run
+        bg = c.cget("bg")
+        for col, row in dino.DINO_EYE["blink" if self._t % 70 < 3 else "open"]:
+            c.create_rectangle(x0 + col * u, y0 + row * u, x0 + (col + 1) * u, y0 + (row + 1) * u,
+                               fill=bg, width=0, tags="mascot")
 
     def _cross(self, c: tk.Canvas, x: float, y: float, u: float, color: str) -> None:
         """도트다운 작은 십자(칸 다섯) 하나 — 반짝이와 쏘아 올린 알이 같이 쓴다."""

@@ -73,6 +73,8 @@ HIDDEN = [
     "cooldown_leftover",  # [남은 식구] 강제 업데이트 뒤 안 켜지는 클로드 풀기
     "cooldown_reboot",  # 윈도우 업데이트 재시작 대기 감시
     "cooldown_job",  # 세션에서 띄워지면 클로드 데스크톱 job 밖으로 다시 뜨기
+    "cooldown_dino",  # 공룡 점프 규칙·그림표 (클로디를 아주 오래 꾹)
+    "cooldown_dino_view",  # 공룡 점프 판 그리기
     "qrcode",  # 폰 연결 QR. 함수 안에서 늦게 import 해 PyInstaller 가 못 찾는다
     "pystray._win32",
     "win32com.client",

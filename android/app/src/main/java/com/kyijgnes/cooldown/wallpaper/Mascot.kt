@@ -24,6 +24,8 @@ import kotlin.math.sin
  *  - **꾹 누르기** — 손가락에 눌려 납작해지고, 떼면 눌린 만큼 튕겨 오른다.
  *    ★ 홈 화면에서는 런처가 길게 누르기를 자기 메뉴로 채 가므로 꾸미기 미리보기에서 제대로 된다.
  *      홈에서 노는 길은 **콕 찌르기와 박자 콤보**다(둘 다 누르는 순간 반응하므로 채여도 된다).
+ *  - **아주 오래 꾹 누르면**(끝까지 납작해진 뒤로도 더) 부르르 떨다 **공룡으로 변신**하고
+ *    공룡 점프 판(`dino/DinoActivity`, 크롬 공룡 게임)을 연다. 판에서 돌아오면 펑 하고 돌아온다.
  *  - **마구 두드리면 기절**한다(X_X + 별). 박자를 맞히면 덜 지친다.
  *  - **오래 안 건드리면 딴짓**을 한다 — 노트북 두드리기·낮잠·공 놀이·자리 비움.
  *
@@ -81,6 +83,16 @@ class Mascot {
     private var pressed = false
     private var press = 0f           // 눌린 정도 0~1
     private var launch = 0           // 이 동안은 높이 가둠을 푼다 (꾹 누르기의 특전)
+
+    // **아주 오래 꾹 누르면 공룡으로 변신한다**(데스크탑 `claudi.py` 의 `MORPH_*` 를 옮긴 것).
+    // 끝까지 눌린 뒤로도 `MORPH_HOLD` 만큼 더 누르고 있으면 부르르 떨다 펑 — 공룡 점프 판을 연다.
+    private var morphHold = 0        // 끝까지 눌린 채 더 누른 프레임
+    private var morphOpen = 0        // 판을 띄우기까지 남은 프레임
+    /** 공룡으로 변신해 있다 (판이 떠 있는 동안). */
+    var dino = false
+        private set
+    /** 변신했을 때 부를 것 — 꾸미기 화면·배경화면이 공룡 점프 판 여는 것을 걸어 둔다. */
+    var onMorph: (() -> Unit)? = null
 
     private var clicks = 0f          // 콕 누적 — 식으면서 준다
     private var faint = 0
@@ -145,7 +157,11 @@ class Mascot {
         }
         t++
         stepPhysics()
-        if (faint == 0) idleStep()
+        if (faint == 0 && !dino) idleStep()
+        if (morphOpen > 0) {                   // 변신했다 — 조금 뒤에 판을 띄운다
+            morphOpen--
+            if (morphOpen == 0 && dino) onMorph?.invoke()
+        }
     }
 
     /** 용수철 한 걸음. 눌림으로 생긴 속도를 제자리(0)로 부드럽게 당긴다. */
@@ -171,6 +187,10 @@ class Mascot {
             press = min(1f, press + 1f / PRESS_FRAMES)
             vy *= 0.6f
             yoff *= 0.8f
+            if (press >= 1f) {                 // 끝까지 눌렸는데도 계속 — 부르르 떨다 변신
+                morphHold++
+                if (morphHold >= MORPH_HOLD) morph()
+            }
         }
 
         vy += -SPRING_K * yoff
@@ -357,6 +377,11 @@ class Mascot {
         endAct()          // 하던 딴짓은 곧바로 지우지 않고 접는다 (한 프레임에 안 갈리게)
         touching = true
         holdF = 0
+        morphHold = 0
+        if (dino) {       // 공룡인 채로 눌렀다 — 돌아온다 (보통은 판에서 돌아올 때 먼저 부른다)
+            unmorph()
+            return
+        }
         if (away > 0) {
             // 자리를 비웠는데 불렀다 — **호다닥 올라와서 허둥지둥**한다.
             // ★★ **달려오는 연출은 완전히 숨었을 때만 시작한다.** 보이는 채로 왼쪽에 옮겨
@@ -431,6 +456,7 @@ class Mascot {
     fun release() {
         touching = false
         holdF = 0
+        morphHold = 0
         if (!pressed) return
         pressed = false
         val amount = press
@@ -450,6 +476,40 @@ class Mascot {
         holdF = 0
         pressed = false
         press = 0f
+        morphHold = 0
+    }
+
+    /** 펑 — 공룡이 된다. `MORPH_OPEN` 뒤에 `onMorph` 가 판을 띄운다. */
+    private fun morph() {
+        pressed = false
+        touching = false
+        press = 0f
+        morphHold = 0
+        dino = true
+        morphOpen = MORPH_OPEN
+        vy = 0f
+        yoff = 0f
+        poof()
+    }
+
+    /** 판에서 돌아왔다 — 펑 하고 클로디로 돌아온다(눈이 동그래진 채). */
+    fun unmorph() {
+        if (!dino) return
+        dino = false
+        morphOpen = 0          // 판이 뜨기 전에 불렀으면 띄우지 않는다
+        quiet = 0
+        surprise = SURPRISE_FRAMES * 3
+        poof()
+    }
+
+    /** 변신할 때의 펑 — 몸 둘레 사방으로 흩어진다(쿨다운과 무관). 제목색은 안 쓴다(밝은 테마에서 까맣다). */
+    private fun poof() {
+        repeat(14) {
+            val a = rnd(0f, TAU)
+            val sp = rnd(0.2f, 0.45f)
+            sparks.add(spark(cos(a) * 2.5f, yoff + sin(a) * 2f, cos(a) * sp, sin(a) * sp * 0.8f - 0.06f,
+                SPARK_LIFE * rnd(0.6f, 1f), if (rnd() < 0.67f) INK_BODY else INK_STAR))
+        }
     }
 
     /**
@@ -457,6 +517,7 @@ class Mascot {
      * 그리는 동안에만 시간이 흐르므로, 안 그러면 어제 찌른 게 남아 오늘 한 번에 기절한다.
      */
     fun rest() {
+        unmorph()              // 판에서 돌아왔다 (배경화면이 다시 보일 때)
         clicks = 0f
         combo = 0
         beats = 0
@@ -653,6 +714,11 @@ class Mascot {
             drawSparks(c, cx, cy, u, inks)
             return
         }
+        if (dino) {                            // 공룡으로 변신해 있다 — 판의 그 공룡이 작게 서 있다
+            drawDino(c, cx, cy, u, body, hole)
+            drawSparks(c, cx, cy, u, inks)
+            return
+        }
 
         // 자리 비움 — 화면 아래로 쏙 내려가 있다 (화면 밖이라 저절로 잘린다)
         val sink = sinkAmount()
@@ -717,6 +783,9 @@ class Mascot {
             sxk *= 1f + PRESS_FLAT * 0.75f * press
             syk *= 1f - PRESS_FLAT * press
             py += 1.6f * press * u
+            if (morphHold > 0) {               // 변신 직전 — 점점 세게 부르르 떤다
+                px += MORPH_SHAKE * u * (morphHold / MORPH_HOLD.toFloat()) * (if (t % 2 == 0) -1f else 1f)
+            }
         } else if (running > 0 || rushing) {   // 달려오는 중 (불려서 올라오는 동안부터)
             // ★ 발 박자는 `t` 로 센다 — **올라오는 중과 달리는 중이 같은 걸음으로 이어진다**
             //   (`running` 으로 세면 땅에 닿는 순간 걸음이 처음으로 되감긴다).
@@ -829,6 +898,37 @@ class Mascot {
         drawSparks(c, cx, cy, u, inks)
         drawShells(c, cx, cy, u, inks)   // 날아가는 폭죽은 반짝이보다 앞에
         drawZzz(c, cx, cy, u, inks[INK_PROP])
+    }
+
+    /**
+     * 변신한 공룡 — 판(`DinoSpec`)과 **같은 표**를 `MORPH_U` 칸으로 작게 세워 둔다.
+     * 발을 클로디 발자리에 맞추고, 숨쉬듯 한 칸의 반쯤 오르내리며 이따금 눈을 깜빡인다.
+     * ★ 칸 경계는 정수 픽셀로 반올림한다(틈이 안 생기게, `drawSprite` 와 같은 까닭).
+     */
+    private fun drawDino(c: Canvas, cx: Float, cy: Float, u: Float, body: Paint, hole: Paint) {
+        val du = u * MORPH_U
+        val rows = com.kyijgnes.cooldown.dino.DinoSpec.POSES.getValue("stand")
+        val cols = rows.maxOf { it.length }
+        val x0 = cx - cols * du / 2f
+        val bob = if ((t / 19) % 2 == 1) du else 0f
+        val y0 = cy + MascotSprite.ROWS / 2f * u - rows.size * du + bob
+        fun cell(col: Int, row: Int, span: Int, p: Paint) {
+            c.drawRect(Math.round(x0 + col * du).toFloat(), Math.round(y0 + row * du).toFloat(),
+                Math.round(x0 + (col + span) * du).toFloat(), Math.round(y0 + (row + 1) * du).toFloat(), p)
+        }
+        for ((r, line) in rows.withIndex()) {
+            var col = 0
+            while (col < line.length) {
+                if (line[col] != '#') { col++; continue }
+                var run = 1
+                while (col + run < line.length && line[col + run] == '#') run++
+                cell(col, r, run, body)
+                col += run
+            }
+        }
+        val eyes = com.kyijgnes.cooldown.dino.DinoSpec.DINO_EYE.getValue(if (t % 95 < 4) "blink" else "open")
+        var i = 0
+        while (i < eyes.size) { cell(eyes[i], eyes[i + 1], 1, hole); i += 2 }
     }
 
     /** 도트 한 장. `lean` 은 **계단식 기울임** — 윗줄일수록 옆으로 더 민다(도트 결 유지). */
@@ -1026,8 +1126,13 @@ class Mascot {
             "away" -> { awayTotal = AWAY_MIN; away = AWAY_MIN - AWAY_LEAD - SINK_FRAMES / 2 }
             // 완주 축하 — 크래커를 들고 쏘는 장면 (몇 프레임 굴려야 폭죽이 뜬다)
             "party" -> { finale = FINALE_FRAMES; party = true; popDrop = 0; aim(); hopIn = 1 }
+            // 공룡으로 변신한 채 (판은 안 띄운다)
+            "dino" -> dino = true
         }
     }
+
+    /** 테스트 — 끝까지 눌린 뒤 더 누르면 변신하는가, 일찍 떼면 안 하는가. */
+    fun morphHoldFrames() = HOLD_FRAMES + PRESS_FRAMES.toInt() + MORPH_HOLD + 2
 
     private companion object {
         const val PI = Math.PI.toFloat()
@@ -1048,6 +1153,14 @@ class Mascot {
         const val PRESS_BURST = 0.35f    // 이만큼 넘게 눌렸다 떼면 **팡** 터진다
         const val LAUNCH_LIFT = 55f      // 날아오르는 동안엔 이 높이까지 (칸)
         const val LAUNCH_FRAMES = 62
+
+        // **아주 오래 꾹 누르면 공룡으로 변신** (데스크탑 `MORPH_*` 를 30fps·칸으로 옮긴 것)
+        // ★ 떠는 것은 **변신 직전에만** — 평소 부르르를 뺀 것과는 다른 일이다. 아무 표시 없이
+        //   누르고만 있으면 '더 누르면 뭔가 된다' 를 알 길이 없다.
+        const val MORPH_HOLD = 24        // 끝까지 눌린 뒤 이만큼(0.8초) 더 누르면 변신
+        const val MORPH_SHAKE = 0.7f     // 변신 직전 좌우로 떠는 폭 (칸, 점점 세진다)
+        const val MORPH_OPEN = 11        // 펑 하고 이만큼(0.36초) 뒤에 판을 띄운다
+        const val MORPH_U = 0.5f         // 서 있는 공룡의 도트 한 칸 (클로디 칸 대비) — 덩치가 비슷해진다
 
         // 뛸 때 몸이 늘었다 눌린다(스쿼시·스트레치) — 없으면 그냥 미끄러질 뿐이라 손맛이 없다
         const val SQUASH = 0.12f

@@ -70,6 +70,12 @@
             android:label="배경화면 꾸미기"
             android:parentActivityName=".SettingsActivity" />
 
+        <!-- 공룡 점프 — 클로디를 아주 오래 꾹 누르면 공룡으로 변신해 뜬다(크롬 공룡 게임) -->
+        <activity
+            android:name=".dino.DinoActivity"
+            android:exported="false"
+            android:label="공룡 점프" />
+
         <!-- 홈 위젯 -->
         <receiver
             android:name=".widget.SmallWidget"

@@ -38,6 +38,20 @@ class CooldownWallpaperService : WallpaperService() {
             // ★ 이걸 켜야 런처가 홈 화면 터치를 흘려 준다 — 클로디를 누를 수 있게 된다.
             //   아이콘·위젯 위를 누르면 그쪽이 먹으므로 우리에게는 안 온다.
             setTouchEventsEnabled(true)
+            // 아주 오래 꾹 눌러 공룡이 되면 공룡 점프 판을 연다. ★ 대개의 런처는 그 전에 길게
+            //   누르기를 자기 메뉴로 채 가므로 여기까지 오는 일은 드물다(꾸미기 미리보기에서 된다).
+            //   못 열면(백그라운드 실행 제한 등) 공룡으로 서 있다가 누르거나 다시 보일 때 돌아온다.
+            mascot.onMorph = {
+                try {
+                    startActivity(
+                        android.content.Intent(this@CooldownWallpaperService,
+                            com.kyijgnes.cooldown.dino.DinoActivity::class.java)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w("cooldown-wallpaper", "공룡 점프를 못 열었다", e)
+                }
+            }
         }
 
         /** 클로디를 짚고 있는 중인가 — 누른 채로 있으면 납작해지고 떼면 튕겨 오른다. */

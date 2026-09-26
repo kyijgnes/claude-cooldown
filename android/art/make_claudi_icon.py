@@ -43,7 +43,11 @@ from skins.claudi import (  # noqa: E402
     TYPE_SHIFT,
 )
 
+import cooldown_dino as dino  # noqa: E402  공룡 점프 — 그림표·수치 한 곳 (pc/cooldown_dino.py)
+
 OUT = os.path.join(ROOT, "android", "app", "src", "main", "res", "drawable", "ic_claudi.xml")
+OUT_DINO = os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "kyijgnes",
+                        "cooldown", "dino", "DinoSpec.kt")
 OUT_KT = os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "kyijgnes",
                       "cooldown", "wallpaper", "MascotSprite.kt")
 
@@ -105,8 +109,10 @@ def main() -> None:
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(xml)
     write_kotlin()
+    write_dino()
     print(f"만듦: {OUT}")
     print(f"만듦: {OUT_KT}")
+    print(f"만듦: {OUT_DINO}")
     print(f"  칸 {CELL} · 가로 {11 * CELL:.1f} · 세로 {ROWS * CELL:.1f} (108 판, 안전 원 66)")
 
 
@@ -256,6 +262,126 @@ object MascotSprite {{
 
     const val COLS = 9
     val ROWS = HEAD.size + LEGS.size
+}}
+'''
+
+
+# ---------------------------------------------------------------- 공룡 점프
+def _kt_num(v) -> str:
+    return f"{v}f" if isinstance(v, float) else str(v)
+
+
+NL = "\n"
+
+
+def _kt_art(rows, indent="        ") -> str:
+    return "arrayOf(" + NL + "".join(f'{indent}    "{r}",{NL}' for r in rows) + f"{indent})"
+
+
+def _kt_pairs(cells) -> str:
+    return "intArrayOf(" + ", ".join(f"{c}, {r}" for c, r in cells) + ")"
+
+
+# 폰으로 옮길 수치 — 이름 그대로 `DinoSpec.<이름>` 이 된다
+DINO_CONSTS = (
+    "FPS", "W", "H", "GROUND", "U", "DINO_X",
+    "SPEED0", "SPEED_MAX", "ACCEL", "CLEAR_FRAMES", "SCORE_COEF",
+    "GRAVITY", "JUMP_V", "DROP_V", "MIN_JUMP", "MAX_JUMP", "FAST_DROP",
+    "GAP_COEF", "GAP_MAX", "MAX_GROUP", "MAX_DUP", "BIRD_WOBBLE",
+    "OVER_WAIT", "RUN_BEAT", "FLAP_BEAT", "FLASH_EVERY", "FLASH_FRAMES",
+    "NIGHT_EVERY", "NIGHT_FRAMES", "CLOUD_MAX", "CLOUD_SPEED",
+)
+DINO_PAIRS = ("BIRD_LIFTS", "BIRD_LIFTS_TOUCH", "BLINK_EVERY", "CLOUD_GAP", "CLOUD_SKY")
+
+
+def write_dino() -> None:
+    """공룡 점프의 그림표·수치를 `dino/DinoSpec.kt` 로 — 규칙(`DinoGame.kt`)은 손으로 옮긴 것이다."""
+    consts = []
+    for name in DINO_CONSTS:
+        v = getattr(dino, name)
+        # 판 크기·자리처럼 곱셈에 섞이는 값은 Float 로 둔다 (정수 나눗셈 함정을 피하려고)
+        if name in ("W", "H", "GROUND", "U", "DINO_X", "MIN_JUMP", "MAX_JUMP"):
+            v = float(v)
+        consts.append(f"    const val {name} = {_kt_num(v)}")
+    pairs = []
+    for name in DINO_PAIRS:
+        vals = getattr(dino, name)
+        if any(isinstance(v, float) for v in vals):
+            pairs.append(f"    val {name} = floatArrayOf({', '.join(f'{float(v)}f' for v in vals)})")
+        else:
+            pairs.append(f"    val {name} = intArrayOf({', '.join(str(v) for v in vals)})")
+    poses = "".join(f'        "{k}" to {_kt_art(v, "        ")},{NL}' for k, v in dino.POSES.items())
+    eyes = "".join(f'        "{k}" to {_kt_pairs(v)},{NL}' for k, v in dino.DINO_EYE.items())
+    duck_eyes = "".join(f'        "{k}" to {_kt_pairs(v)},{NL}' for k, v in dino.DUCK_EYE.items())
+    birds = ", ".join(_kt_art(b, "        ") for b in dino.BIRD)
+    art_name = {id(dino.CACTUS_S): "CACTUS_S", id(dino.CACTUS_L): "CACTUS_L", id(dino.BIRD): "BIRD"}
+    kinds = []
+    for key, spec in dino.KINDS.items():
+        art = spec["art"]
+        ref = art_name.get(id(art)) or art_name.get(id(art[0]))
+        ref = f"arrayOf({ref})" if ref != "BIRD" else "BIRD"
+        kinds.append(f'        "{key}" to Kind({ref}, {spec["min_gap"]}, {float(spec["multi"])}f, '
+                     f'{float(spec["min_speed"])}f),')
+    kt = DINO_TEMPLATE.format(
+        consts=NL.join(consts), pairs=NL.join(pairs), poses=poses, eyes=eyes,
+        duck_eyes=duck_eyes, cactus_s=_kt_art(dino.CACTUS_S, "    "),
+        cactus_l=_kt_art(dino.CACTUS_L, "    "), birds=birds,
+        bird_eye=_kt_pairs(dino.BIRD_EYE), cloud=_kt_art(dino.CLOUD, "    "),
+        restart=_kt_art(dino.RESTART, "    "), kinds=NL.join(kinds),
+    )
+    os.makedirs(os.path.dirname(OUT_DINO), exist_ok=True)
+    with open(OUT_DINO, "w", encoding="utf-8") as f:
+        f.write(kt)
+
+
+DINO_TEMPLATE = '''package com.kyijgnes.cooldown.dino
+
+/**
+ * 공룡 점프 그림표·수치 — **`android/art/make_claudi_icon.py` 가 만든다. 손으로 고치지 말 것.**
+ * 원본은 `pc/cooldown_dino.py` 한 곳이다(PC 위젯과 같은 판). 모양·수치를 바꾸려면 그쪽을
+ * 고치고 스크립트를 다시 돌린다. 규칙은 `DinoGame.kt` 가 손으로 옮긴 것이라 같이 고친다.
+ *
+ * 그림은 `#` 한 칸이 `U` px(판 좌표). 판은 600×150, 한 걸음은 1/60초다.
+ */
+object DinoSpec {{
+
+{consts}
+
+{pairs}
+
+    /** 공룡 자세마다의 그림 — 충돌도 이걸로 본다. 눈은 없고 `DINO_EYE` 칸을 파낸다. */
+    val POSES = mapOf(
+{poses}    )
+
+    /** 눈 (col, row 가 번갈아) — 서 있을 때 */
+    val DINO_EYE = mapOf(
+{eyes}    )
+
+    /** 눈 — 숙였을 때 */
+    val DUCK_EYE = mapOf(
+{duck_eyes}    )
+
+    val CACTUS_S = {cactus_s}
+
+    val CACTUS_L = {cactus_l}
+
+    /** 새 — 날개 올림 / 내림. 두 장의 높이가 같다. */
+    val BIRD = arrayOf({birds})
+
+    /** 새 눈 — 장마다 (col, row) */
+    val BIRD_EYE = {bird_eye}
+
+    val CLOUD = {cloud}
+
+    /** 다시 하기 — 둥근 화살표 */
+    val RESTART = {restart}
+
+    /** 장애물 종류 — 그림(여러 장이면 번갈아) · 틈 바탕 · 여럿 붙는 속도 · 나오기 시작하는 속도 */
+    class Kind(val art: Array<Array<String>>, val minGap: Int, val multi: Float, val minSpeed: Float)
+
+    val KINDS = linkedMapOf(
+{kinds}
+    )
 }}
 '''
 

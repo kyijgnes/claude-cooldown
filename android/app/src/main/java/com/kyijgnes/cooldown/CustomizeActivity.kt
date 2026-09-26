@@ -23,6 +23,7 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import com.kyijgnes.cooldown.dino.DinoActivity
 import com.kyijgnes.cooldown.wallpaper.CooldownWallpaperService
 import com.kyijgnes.cooldown.wallpaper.SharkPack
 import com.kyijgnes.cooldown.wallpaper.WallpaperArt
@@ -71,6 +72,8 @@ class CustomizeActivity : Activity() {
 
         sizePreview()
         preview.setOnTouchListener { _, ev -> drag(ev) }
+        // 클로디를 아주 오래 꾹 누르면 공룡으로 변신한다 — 공룡 점프 판으로 간다
+        mascot.onMorph = { startActivity(Intent(this, DinoActivity::class.java)) }
 
         save.setOnClickListener { apply() }
         findViewById<Button>(R.id.reset).setOnClickListener {
@@ -85,6 +88,7 @@ class CustomizeActivity : Activity() {
         super.onResume()
         // 권한 화면에서 돌아왔을 수 있다 — 아직 못 떠 왔고 이제 읽을 수 있으면 그때 떠 온다
         if (WallpaperGrab.saved(this).isEmpty() && canReadWallpaper()) takeWallpaper()
+        mascot.unmorph()   // 공룡 점프에서 돌아왔으면 펑 하고 클로디로
         paint()
     }
 

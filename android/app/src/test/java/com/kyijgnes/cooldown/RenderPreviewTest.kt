@@ -106,6 +106,7 @@ class RenderPreviewTest {
         claudi(ctx, "클로디_자리비움", "away", 1)     // 화면 아래로 내려가는 중
         // 완주 축하 — 크래커를 들고 쏘는 중(날아가는 알 + 터진 것이 같이 보이는 즈음)
         claudi(ctx, "클로디_축하", "party", 26)
+        claudi(ctx, "클로디_공룡", "dino", 3)          // 아주 오래 꾹 눌러 변신한 채 (공룡 점프 판이 떠 있는 동안)
 
         // 꾸미기 — 고를 수 있는 것들을 한 장씩 (CustomizeActivity 의 선택지와 같은 순서)
         wallpaper(ctx, "꾸미기_링", look = Look.DEFAULT.copy(meter = Look.RINGS))
@@ -253,6 +254,95 @@ class RenderPreviewTest {
             fainted = fainted || mash.debug().fainted
         }
         assertTrue("마구 두드리면 기절한다", fainted)
+    }
+
+    /**
+     * 공룡 점프 판 — 기다림 / 달리는 중 / 부딪힘, 밝게·어둡게. 폰 세로 화면(1080×2340)에 맞춰 그린다.
+     * PC(`cooldown_dino_view.py shot`)와 같은 그림인지 눈으로 대조한다.
+     */
+    @Test
+    fun `공룡 점프 판 그림을 남긴다`() {
+        for (theme in listOf("밝게", "어둡게")) {
+            RuntimeEnvironment.setQualifiers(if (theme == "어둡게") "+night" else "+notnight")
+            val ctx = RuntimeEnvironment.getApplication()
+            for (scene in listOf("기다림", "달리기", "부딪힘")) {
+                val view = com.kyijgnes.cooldown.dino.DinoView(ctx, best = 312, seed = 3L)
+                view.layout(0, 0, 1080, 2340)
+                val g = view.game
+                if (scene != "기다림") {
+                    g.pressJump(); g.releaseJump()
+                    repeat(if (scene == "달리기") 1500 else 700) { if (g.state == "run") { dinoBot(g); g.step() } }
+                    if (scene == "부딪힘") g.crashForPreview()
+                }
+                val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+                view.paint(Canvas(bmp))
+                save(bmp, "공룡점프_${scene}_$theme.png")
+            }
+        }
+        RuntimeEnvironment.setQualifiers("+notnight")
+    }
+
+    /** 알아서 뛰는 공룡 — 가까운 장애물을 보면 뛴다 (PC `_bot` 과 같은 결). */
+    private fun dinoBot(g: com.kyijgnes.cooldown.dino.DinoGame) {
+        val S = com.kyijgnes.cooldown.dino.DinoSpec
+        val ob = g.obstacles.firstOrNull { it.x + it.w > S.DINO_X } ?: return
+        if (ob.kind == "bird" && ob.lift >= 42) return
+        val dist = ob.x - (S.DINO_X + 38f)
+        if (dist > 0 && dist < g.speed * 9 && !g.jumping) g.pressJump()
+        else if (g.jumping && g.h > S.MAX_JUMP - 8f) g.releaseJump()
+    }
+
+    /** 공룡 점프 규칙 — 가만히 있으면 첫 장애물에 부딪히고, 알아서 뛰면 한참 달린다. */
+    @Test
+    fun `공룡 점프는 안 뛰면 부딪히고 뛰면 넘는다`() {
+        val idle = com.kyijgnes.cooldown.dino.DinoGame(seed = 1L)
+        idle.pressJump(); idle.releaseJump()
+        repeat(60 * 20) { if (idle.state == "run") idle.step() }
+        assertEquals("가만히 있으면 부딪힌다", "over", idle.state)
+
+        val bot = com.kyijgnes.cooldown.dino.DinoGame(seed = 1L)
+        bot.pressJump(); bot.releaseJump()
+        repeat(60 * 40) { if (bot.state == "run") { dinoBot(bot); bot.step() } }
+        assertTrue("알아서 뛰면 40초는 달린다 (${bot.runT / 60}초에 멈춤)", bot.state == "run")
+        assertTrue("점수가 오른다", bot.score > 300)
+
+        // 부딪힌 뒤 곧바로 누르면 안 받고, 잠깐 뒤에 누르면 다시 시작한다
+        idle.pressJump()
+        assertEquals("over", idle.state)
+        repeat(com.kyijgnes.cooldown.dino.DinoSpec.OVER_WAIT) { idle.step() }
+        idle.pressJump()
+        assertEquals("run", idle.state)
+        assertEquals(0, idle.score)
+    }
+
+    /** 끝까지 눌린 뒤로도 더 누르고 있으면 공룡으로 변신해 판을 부른다. 일찍 떼면 그냥 튕긴다. */
+    @Test
+    fun `아주 오래 꾹 누르면 공룡으로 변신한다`() {
+        val u = WallpaperArt.mascotCell(W)
+        val cx = Look.DEFAULT.mascotX * W
+        val cy = Look.DEFAULT.mascotY * H
+
+        val m = Mascot()
+        var opened = 0
+        m.onMorph = { opened++ }
+        m.press()
+        repeat(m.morphHoldFrames()) { m.step(cx, cy, u, W, H) }
+        assertTrue("오래 누르면 공룡이 된다", m.dino)
+        repeat(20) { m.step(cx, cy, u, W, H) }
+        assertEquals("판은 한 번만 부른다", 1, opened)
+        m.release()
+        assertTrue("변신한 뒤 손을 떼도 공룡 그대로", m.dino)
+        m.unmorph()
+        assertFalse("판에서 돌아오면 클로디로", m.dino)
+
+        val early = Mascot()
+        early.onMorph = { opened++ }
+        early.press()
+        repeat(early.morphHoldFrames() - 20) { early.step(cx, cy, u, W, H) }
+        early.release()
+        repeat(40) { early.step(cx, cy, u, W, H) }
+        assertFalse("그 전에 떼면 변신하지 않는다", early.dino)
+        assertEquals(1, opened)
     }
 
     @Test

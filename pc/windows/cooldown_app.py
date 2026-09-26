@@ -66,7 +66,9 @@ import cooldown_remote  # noqa: E402
 import cooldown_stats  # noqa: E402
 import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐지면 지운다
 import cooldown_leftover  # noqa: E402  [남은 식구] 클로드가 고쳐지면 지운다
+import cooldown_dino  # noqa: E402  클로디를 아주 오래 꾹 누르면 뜨는 공룡 점프
 import skins  # noqa: E402
+from cooldown_dino_view import DinoBoard  # noqa: E402
 from skins.base import (  # noqa: E402
     KR,
     MARK_W,
@@ -795,6 +797,10 @@ class App:
         self.body = tk.Frame(self.root, bg=P.bg)
         self.body.pack(fill="both", expand=True)
         self.skin.build(self.body)
+        # 클로디를 아주 오래 꾹 누르면 공룡으로 변신한다 — 그때 공룡 점프 판을 띄운다
+        claudi = getattr(self.skin, "claudi", None)
+        if claudi is not None:
+            claudi.on_morph = self.open_dino
         # ★★ 드래그·우클릭은 **창(toplevel)에만** 건다. tk 이벤트는 자식에서 창으로
         #   올라오므로 이것만으로 어느 자식을 눌러도 잡힌다 — 자식마다 또 걸면
         #   **한 번 누른 게 두 번 처리된다**(마스코트가 두 배로 튀고, 기절 누적도 두 배로
@@ -2837,6 +2843,34 @@ class App:
         except Exception:  # noqa: BLE001
             pass
 
+    # -------------------------------------------------- 공룡 점프 (클로디를 아주 오래 꾹)
+    def open_dino(self) -> None:
+        """클로디가 공룡으로 변신했다 — 크롬 공룡 게임 판을 띄운다(`cooldown_dino`).
+
+        위젯을 가리지 않게 **바로 위**(자리가 없으면 아래)에 띄운다. 위젯의 클로디는 판이
+        떠 있는 동안 공룡으로 서 있다가, 판을 닫으면(✕·Esc·위젯 누르기) 펑 하고 돌아온다.
+        편집 팝업처럼 `click_away=False` — 딴 데를 눌러도 안 닫히고 **멈춘다**(판이 알아서)."""
+        top, body = self._open_panel("공룡 점프", click_away=False)
+        board = DinoBoard(top, body, best=int(self.state.get("dino_best", 0) or 0),
+                          on_best=self._dino_best)
+        board.c.pack(padx=PANEL_PAD, pady=(0, 16))
+        top.bind("<Destroy>", lambda e: self._dino_closed() if e.widget is top else None, add="+")
+        self._finalize_panel(top, cooldown_dino.W + PANEL_PAD * 2, beside=True)
+        try:
+            top.focus_force()   # 스페이스가 곧바로 먹게
+        except tk.TclError:
+            pass
+
+    def _dino_closed(self) -> None:
+        claudi = getattr(self.skin, "claudi", None)
+        if claudi is not None:
+            claudi.unmorph()
+
+    def _dino_best(self, score: int) -> None:
+        """최고 기록 — 위젯 설정 파일에 같이 둔다(판을 닫았다 열어도, 다시 켜도 남게)."""
+        self.state["dino_best"] = int(score)
+        save_state(self.state)
+
     # -------------------------------------------------- 이번 주 사용 속도
     def open_pace(self):
         """주간 한도를 '지금쯤 얼마나 썼어야 하나' 와 견줘 보여 준다.
@@ -3401,13 +3435,22 @@ class App:
             w.bind("<Button-1>", press)
             w.bind("<B1-Motion>", drag)
 
-    def _finalize_panel(self, top: tk.Toplevel, width: int, grab: bool = False) -> None:
-        """내용을 다 채운 뒤 크기를 재고 위젯 옆에 띄운다."""
+    def _finalize_panel(self, top: tk.Toplevel, width: int, grab: bool = False,
+                        beside: bool = False) -> None:
+        """내용을 다 채운 뒤 크기를 재고 위젯 옆에 띄운다.
+        `beside` 면 위젯을 가리지 않게 바로 위(자리가 없으면 아래)에 붙인다."""
         top.update_idletasks()
         height = top.winfo_reqheight()
-        x, y = clamp_to_screen(
-            self.root.winfo_x() + 28, self.root.winfo_y() + 28, width, height
-        )
+        if beside:
+            rx, ry = self.root.winfo_x(), self.root.winfo_y()
+            above = ry - height - 8
+            x, y = clamp_to_screen(rx, above, width, height)
+            if y != above:  # 위에 자리가 없다 (화면 위쪽에 둔 위젯) — 아래로
+                x, y = clamp_to_screen(rx, ry + self.root.winfo_height() + 8, width, height)
+        else:
+            x, y = clamp_to_screen(
+                self.root.winfo_x() + 28, self.root.winfo_y() + 28, width, height
+            )
         top.geometry(f"{width}x{height}+{x}+{y}")
         top.deiconify()
         round_corners(top)  # 본체와 같은 둥근 모서리
