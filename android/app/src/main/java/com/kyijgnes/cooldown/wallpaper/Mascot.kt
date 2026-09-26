@@ -139,6 +139,10 @@ class Mascot {
     // 마지막으로 그린 자리(px) — 크래커 입처럼 **px 로 셈한 것을 다시 칸으로** 옮길 때 쓴다
     private var lastCx = 0f
     private var lastCy = 0f
+    private var lastU = 1f
+
+    /** 알에서 깬 공룡이 서 있는 자리(몸 한가운데 기준 칸) — 판이 열리기 전까지 거기 서 있다. */
+    private var dinoAt: FloatArray? = null
 
     /** 반짝이 한 알. 색은 **번호로만** 들고 있다 — 팔레트는 그리는 쪽에만 있다. */
     private class Spark(
@@ -176,10 +180,11 @@ class Mascot {
         if (faint > 0) {                       // 기절 — 늘어졌다가 깨어난다
             faint--
             vy *= 0.8f; yoff *= 0.85f
+            // 뻗고 1초 뒤 알이 굴러 나온다 (판을 열 곳이 있을 때만). 깨어날 때까지 안 기다린다.
+            if (faint == FAINT_FRAMES - EGG_AFTER_FAINT && onHatch != null) layEgg()
             if (faint == 0) {                  // 깨어남 — 펑 하고 털어낸다
                 yoff = 0f; vy = 0f
                 burst(SPARK_WAKE, 1.2f)
-                if (onHatch != null) layEgg()  // 그리고 알이 굴러 나온다 (판을 열 곳이 있을 때만)
             }
             return
         }
@@ -494,10 +499,14 @@ class Mascot {
     private fun stepEgg() {
         if (hatch > 0) {
             hatch--
-            if (hatch == 0) {                  // 다 깼다 — 클로디는 판 속으로, 판을 연다
+            if (hatch == 0) {                  // 다 깼다 — 클로디는 펑 사라지고, 공룡은 알 자리에 서서 판을 연다
+                val at = eggAt()
                 egg = 0
                 eggHits = 0
+                faint = 0                      // 뻗은 채 깼으면 깨운다 (공룡 그림이 가려지지 않게)
+                poof()
                 dino = true
+                dinoAt = floatArrayOf(at[0], at[1] + com.kyijgnes.cooldown.dino.DinoSpec.EGG.size / 2f - 1f)
                 onHatch?.invoke()
             }
             return
@@ -547,6 +556,7 @@ class Mascot {
     fun unmorph() {
         if (!dino) return
         dino = false
+        dinoAt = null
         quiet = 0
         surprise = SURPRISE_FRAMES * 3
         poof()
@@ -752,6 +762,7 @@ class Mascot {
     ) {
         lastCx = cx
         lastCy = cy
+        lastU = u
         val body = Paint().apply { this.color = color }
         val hole = Paint().apply { this.color = bg }
         // 붓은 색 수만큼만 만든다 — 알마다 만들면 30fps 에서 GC 가 쉴 틈이 없다.
@@ -770,7 +781,9 @@ class Mascot {
             return
         }
         if (dino) {                            // 판 속에 들어가 있다 — 판의 그 공룡이 작게 서 있다
-            drawDino(c, cx, cy + MascotSprite.ROWS / 2f * u, u, body, hole)
+            val at = dinoAt                    // 알에서 막 깼으면 알 자리에, 아니면 클로디 자리에
+            if (at != null) drawDino(c, cx + at[0] * u, cy + at[1] * u, u, body, hole)
+            else drawDino(c, cx, cy + MascotSprite.ROWS / 2f * u, u, body, hole)
             drawSparks(c, cx, cy, u, inks)
             return
         }
@@ -1245,6 +1258,18 @@ class Mascot {
     /** 테스트 — 기절이 끝날 때까지 걸리는 프레임. */
     fun faintFrames() = FAINT_FRAMES
 
+    /** 테스트 — 뻗고 알이 나오기까지 걸리는 프레임. */
+    fun eggAfterFaint() = EGG_AFTER_FAINT
+
+    /**
+     * 알에서 깬 공룡이 지금 서 있는 곳 — `[가운데 x, 발 y, 도트 한 칸]`(마지막으로 그린 자리, px).
+     * 공룡 점프 판이 이 자리에서 공룡을 받아 **폴짝 판으로 옮기며** 열린다(`DinoBoard.startIntro`).
+     */
+    fun hatchPoint(): FloatArray {
+        val at = dinoAt ?: floatArrayOf(0f, MascotSprite.ROWS / 2f)
+        return floatArrayOf(lastCx + at[0] * lastU, lastCy + at[1] * lastU, lastU * DINO_U)
+    }
+
     /**
      * 홈 위젯의 클로디 한 장 — 위젯은 그림 한 장이라 움직이지 않는다. 장면을 세워 그린다.
      * `poke` 막 찔려 신난 얼굴 · `egg` 뻗은 채로 곁에(오른쪽) 알, 금 `cracks` 개 · 그 밖은 평소.
@@ -1285,6 +1310,7 @@ class Mascot {
 
         // ── 공룡알 (기절 → 알 → 톡톡 깨면 공룡 점프) ──
         const val EGG_LIFE = 360         // 알이 기다려 주는 프레임 (12초) — 안 깨면 사라진다
+        const val EGG_AFTER_FAINT = 30   // 뻗고 이만큼(1초) 뒤에 알이 굴러 나온다 (깨어날 때가 아니라)
         const val EGG_FADE = 45          // 사라지기 전 이만큼(1.5초) 깜빡인다
         const val EGG_POP = 16           // 클로디 곁으로 굴러 나오는 데 걸리는 프레임
         const val EGG_GAP = 11f          // 클로디 한가운데에서 알 한가운데까지 (칸) — 9 는 팔에 붙었다

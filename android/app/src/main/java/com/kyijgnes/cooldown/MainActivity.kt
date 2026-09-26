@@ -110,6 +110,11 @@ class MainActivity : Activity() {
         val v = DinoView(this, prefs.getInt(DINO_BEST, 0))
         v.board.onBest = { best -> prefs.edit().putInt(DINO_BEST, best).apply() }
         v.board.onExit = { stage.post { endGame() } }   // 그리는 중에 판을 치우지 않게 한 박자 뒤로
+        // 알에서 깬 공룡이 제목 옆에서 게이지 자리의 판으로 폴짝 — 그 자리를 화면 좌표로 넘긴다
+        val from = claudi.mascot.hatchPoint()
+        val at = IntArray(2)
+        claudi.getLocationOnScreen(at)
+        v.introFromScreen = floatArrayOf(from[0] + at[0], from[1] + at[1], from[2])
         board = v
         claudi.pause()
         claudi.visibility = View.INVISIBLE

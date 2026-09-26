@@ -338,6 +338,37 @@ class RenderPreviewTest {
         else if (g.jumping && g.h > S.MAX_JUMP - 8f) g.releaseJump()
     }
 
+    /**
+     * 알에서 깬 공룡이 **폴짝 판으로 뛰어들며 판이 열리는** 장면 — 홈 화면(배경화면 미터기 자리) 위 네 장.
+     * 첫 장은 알 자리의 작은 공룡과 같아야 배경화면에서 투명 판으로 넘어가는 이음매가 안 보인다.
+     */
+    @Test
+    fun `알에서 깬 공룡이 판으로 뛰어드는 장면을 남긴다`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val u = WallpaperArt.mascotCell(W)
+        val cx = Look.DEFAULT.mascotX * W
+        val cy = Look.DEFAULT.mascotY * H
+        val m = Mascot()
+        m.onHatch = {}
+        m.poseForPreview("hatch")
+        val scratch = Canvas(Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888))
+        repeat(40) { m.step(cx, cy, u, W, H); m.draw(scratch, cx, cy, u, 0, 0) }
+        assertTrue(m.dino)
+        val from = m.hatchPoint()
+        for ((i, frames) in listOf(0, 10, 22, 36).withIndex()) {
+            val home = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+            WallpaperArt.render(ctx, Canvas(home), snap(37f, 62f), now, Look.DEFAULT, null, meter = true)
+            val b = com.kyijgnes.cooldown.dino.DinoBoard(ctx, 312, seed = 3L)
+            val t0 = System.nanoTime()
+            b.resume()
+            b.startIntro(from[0], from[1], from[2])
+            for (f in 1..frames) b.advance(t0 + f * 16_700_000L)   // 한 번에 다섯 걸음까지라 한 장씩
+            b.paint(Canvas(home), WallpaperArt.boardTop(W, H, Look.DEFAULT, b.heightFor(W)), W)
+            save(home, "공룡들어오기_${i + 1}.png")
+            if (frames >= 36) assertFalse("0.6초면 다 들어온다", b.inIntro)
+        }
+    }
+
     /** 공룡 점프 규칙 — 가만히 있으면 첫 장애물에 부딪히고, 알아서 뛰면 한참 달린다. */
     @Test
     fun `공룡 점프는 안 뛰면 부딪히고 뛰면 넘는다`() {
@@ -387,9 +418,11 @@ class RenderPreviewTest {
         var opened = 0
         m.onHatch = { opened++ }
         assertTrue("마구 두드리면 기절한다", mash(m, cx, cy, u))
-        assertFalse("기절한 동안엔 알이 없다", m.hasEgg)
-        repeat(m.faintFrames() + 20) { m.step(cx, cy, u, W, H) }
-        assertTrue("깨어나면 알이 굴러 나온다", m.hasEgg)
+        assertFalse("뻗자마자는 아직 알이 없다", m.hasEgg)
+        repeat(m.eggAfterFaint() + 2) { m.step(cx, cy, u, W, H) }
+        assertTrue("뻗고 1초 뒤, 깨어나기 전에 알이 굴러 나온다", m.hasEgg && m.debug().fainted)
+        repeat(m.faintFrames()) { m.step(cx, cy, u, W, H) }
+        assertTrue("깨어나도 알은 그대로", m.hasEgg)
         // 알은 클로디 곁 땅 위 — 한가운데는 옆으로 11칸, 위아래로는 발끝에 밑동이 닿는다
         val restY = com.kyijgnes.cooldown.wallpaper.MascotSprite.ROWS / 2f -
             com.kyijgnes.cooldown.dino.DinoSpec.EGG.size / 2f
@@ -401,6 +434,9 @@ class RenderPreviewTest {
         repeat(30) { m.step(cx, cy, u, W, H) }
         assertEquals("판은 한 번만 부른다", 1, opened)
         assertTrue("클로디는 판 속으로", m.dino)
+        m.draw(Canvas(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)), cx, cy, u, 0, 0)
+        val hp = m.hatchPoint()
+        assertTrue("깬 공룡은 알 자리(클로디 곁 11칸)에 서 있다", kotlin.math.abs(kotlin.math.abs(hp[0] - cx) - 11f * u) < u)
         m.unmorph()
         assertFalse("판을 접으면 클로디로", m.dino)
         assertFalse(m.hasEgg)

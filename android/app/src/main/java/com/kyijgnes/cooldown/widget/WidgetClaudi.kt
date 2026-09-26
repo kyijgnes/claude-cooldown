@@ -94,7 +94,8 @@ object WidgetClaudi {
             PendingIntent.getActivity(
                 ctx, 1000 + id,
                 Intent(ctx, DinoOverlayActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                    .putExtra(com.kyijgnes.cooldown.dino.DinoHost.EXTRA_SOURCE, "widget"),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
         } else {

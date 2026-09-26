@@ -12,6 +12,9 @@ import android.view.SurfaceHolder
 import com.kyijgnes.cooldown.Look
 import com.kyijgnes.cooldown.Store
 import com.kyijgnes.cooldown.dino.DinoBoard
+import com.kyijgnes.cooldown.dino.DinoHost
+import com.kyijgnes.cooldown.dino.DinoOverlayActivity
+import com.kyijgnes.cooldown.dino.DinoSpec
 
 /**
  * 클로드 전용 라이브 배경화면 — 홈 화면과 잠금 화면에 그대로 걸린다.
@@ -20,10 +23,12 @@ import com.kyijgnes.cooldown.dino.DinoBoard
  * 배터리 규칙: **보일 때만 그린다.** 화면이 꺼지거나 다른 앱이 앞에 오면 시스템이
  * `onVisibilityChanged(false)` 를 주고, 그 순간 루프를 세운다.
  *
- * **공룡 점프도 여기서 한다**(2026-09-26) — 앱을 안 열고 홈 화면에서 바로. 클로디를 기절시키면
- * 알이 굴러 나오고, 톡톡 깨면 미터기 자리가 판이 된다(`DinoBoard`, `WallpaperArt.boardTop`). 홈 화면 빈 곳
- * 어디를 눌러도 뛴다. 닫기는 판 왼쪽 위 ✕ · 20초 그대로 · 잠금화면 · 한참 딴 데 갔다 옴.
- * 판이 떠 있는 동안만 60fps(`GAME_FRAME_MS`)로 그린다.
+ * **공룡 점프도 여기서 들어간다**(2026-09-26) — 앱을 안 열고 홈 화면에서 바로. 클로디를 기절시키면
+ * 1초 뒤 알이 굴러 나오고, 톡톡 깨면 미터기 자리가 판이 된다(`WallpaperArt.boardTop`).
+ * ★ **판은 배경화면이 아니라 투명한 화면(`DinoOverlayActivity`)이 그린다.** 배경화면은 런처가 길게 누르기를
+ *   채 가서 점프를 조금만 길게 눌러도 홈 편집 메뉴가 떴다. 그동안 배경화면은 클로디를 숨기고, 판이 다
+ *   열리면(`DinoHost.boardSettled`) 미터기도 숨긴다. 투명한 화면이 못 뜨면(폰이 막으면) `OVERLAY_WAIT_MS`
+ *   뒤에 **배경화면이 직접 판을 그린다**(그때는 홈 화면 빈 곳을 눌러 뛴다, 60fps `GAME_FRAME_MS`).
  */
 class CooldownWallpaperService : WallpaperService() {
 
@@ -48,9 +53,38 @@ class CooldownWallpaperService : WallpaperService() {
             // ★ 이걸 켜야 런처가 홈 화면 터치를 흘려 준다 — 클로디를 누를 수 있게 된다.
             //   아이콘·위젯 위를 누르면 그쪽이 먹으므로 우리에게는 안 온다.
             setTouchEventsEnabled(true)
-            mascot.onHatch = { startGame() }   // 기절 → 알 → 깨면 여기
+            mascot.onHatch = { askOverlay() }  // 기절 → 알 → 깨면 여기
         }
 
+        /** 투명 판을 부른 때 (0 이면 안 부름) · 그때 넘긴 알 자리 — 못 뜨면 이걸로 배경화면에서 논다. */
+        private var overlayAsked = 0L
+        private var hatchFrom: FloatArray? = null
+
+        /** 알이 깨졌다 — 투명한 판을 부른다. 미터기 자리(판 위끝)와 공룡이 선 자리를 화면 좌표로 넘긴다. */
+        private fun askOverlay() {
+            val ctx = this@CooldownWallpaperService
+            val from = mascot.hatchPoint()
+            hatchFrom = from
+            val top = WallpaperArt.boardTop(lastW, lastH, Look.read(ctx), DinoSpec.H * lastW / DinoSpec.W)
+            DinoHost.onClosed = { handler.post { mascot.unmorph(); if (showing) drawFrame() } }
+            overlayAsked = android.os.SystemClock.elapsedRealtime()
+            try {
+                startActivity(
+                    android.content.Intent(ctx, DinoOverlayActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                            android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                        .putExtra(DinoHost.EXTRA_SOURCE, "wallpaper")
+                        .putExtra(DinoHost.EXTRA_FROM, from)
+                        .putExtra(DinoHost.EXTRA_TOP, top),
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("cooldown-wallpaper", "투명 판을 못 띄웠다 — 배경화면에서 논다", e)
+                overlayAsked = 0L
+                startGame()
+            }
+        }
+
+        /** 배경화면이 직접 판을 그린다 — 투명 판이 못 떴을 때만. */
         private fun startGame() {
             if (board != null) return
             val ctx = this@CooldownWallpaperService
@@ -58,6 +92,7 @@ class CooldownWallpaperService : WallpaperService() {
             val b = DinoBoard(ctx, prefs.getInt(DINO_BEST, 0))
             b.onBest = { best -> prefs.edit().putInt(DINO_BEST, best).apply() }
             b.onExit = { handler.post { endGame() } }   // 그리는 중에 판을 치우지 않게 한 박자 뒤로
+            hatchFrom?.let { b.startIntro(it[0], it[1], it[2]) }
             board = b
             b.resume()
         }
@@ -119,7 +154,9 @@ class CooldownWallpaperService : WallpaperService() {
             showing = visible
             if (visible) {
                 val b = board
-                if (b == null) {
+                if (DinoHost.overlayUp) {
+                    // 투명 판이 떠 있다 — 클로디는 판 속이니 그대로 둔다 (판을 닫을 때 돌아온다)
+                } else if (b == null) {
                     mascot.rest()      // 오래 안 보다 왔다 — 지친 것도 하던 딴짓도 잊는다
                 } else if (System.currentTimeMillis() - hiddenAt > GAME_AWAY_MS) {
                     endGame()          // 한참 딴 데 있다 왔다 — 판은 접는다
@@ -181,6 +218,16 @@ class CooldownWallpaperService : WallpaperService() {
         private fun drawFrame() {
             val locked = locked()
             if (locked) endGame()              // 잠금화면에서는 못 논다 (누르는 것이 잠금화면으로 간다)
+            // 투명 판을 불렀는데 안 떴다(폰이 막았다) — 배경화면이 직접 판을 그린다
+            if (overlayAsked > 0L) {
+                if (DinoHost.overlayUp) {
+                    overlayAsked = 0L
+                } else if (android.os.SystemClock.elapsedRealtime() - overlayAsked > OVERLAY_WAIT_MS) {
+                    overlayAsked = 0L
+                    DinoHost.onClosed = null
+                    startGame()
+                }
+            }
             var canvas: Canvas? = null
             try {
                 canvas = surfaceHolder.lockCanvas()
@@ -191,10 +238,13 @@ class CooldownWallpaperService : WallpaperService() {
                     lastH = canvas.height.toFloat()
                     val look = Look.read(ctx)
                     val b = board
-                    // 판이 떠 있으면 클로디는 판 속에 있다 — 안 그리고 안 굴린다. 미터기 자리는 판이 쓴다
+                    val overlay = DinoHost.overlayUp
+                    // 판이 떠 있으면 클로디는 판 속에 있다 — 안 그리고 안 굴린다. 미터기는 판이 다 열리면
+                    // (들어오는 장면이 끝나면) 숨긴다 — 그 자리가 판이다
+                    val settled = if (b != null) !b.inIntro else overlay && DinoHost.boardSettled
                     WallpaperArt.render(
                         ctx, canvas, Store.snapshot(ctx).settled(now), now, look,
-                        if (b == null) mascot else null, locked, meter = b == null,
+                        if (b == null && !overlay) mascot else null, locked, meter = !settled,
                     )
                     if (b != null) {
                         b.advance()
@@ -227,6 +277,9 @@ class CooldownWallpaperService : WallpaperService() {
 
         /** 공룡 점프 중에만 60fps — 판은 1/60초 걸음이라 30fps 로 그리면 두 걸음씩 뛰어 끊겨 보인다. */
         const val GAME_FRAME_MS = 16L
+
+        /** 투명 판을 부르고 이만큼 안에 안 뜨면 배경화면이 직접 판을 그린다. */
+        const val OVERLAY_WAIT_MS = 1_500L
 
         /** 이보다 오래 딴 데 있다 오면(앱을 열었다 오는 등) 멈춘 판을 접고 클로디로 돌아온다. */
         const val GAME_AWAY_MS = 30_000L

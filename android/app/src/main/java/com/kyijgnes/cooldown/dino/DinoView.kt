@@ -17,6 +17,10 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
     val board = DinoBoard(ctx, best, seed)
     val game get() = board.game
 
+    /** 알에서 깬 공룡이 선 자리 `[x, 발 y, 칸]`(화면 좌표) — 첫 장에서 이 뷰 좌표로 옮겨 들어오는 장면을 건다. */
+    var introFromScreen: FloatArray? = null
+    private val loc = IntArray(2)
+
     private val bg = Palette(ctx).bg
     private var downY = 0f
     private var ducked = false
@@ -48,6 +52,11 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
     fun top(): Float = (height - board.heightFor(width.toFloat())) / 2f
 
     override fun onDraw(c: Canvas) {
+        introFromScreen?.let {
+            getLocationOnScreen(loc)
+            board.startIntro(it[0] - loc[0], it[1] - loc[1], it[2])
+            introFromScreen = null
+        }
         board.advance()
         paint(c)
         if (board.active) postInvalidateOnAnimation()

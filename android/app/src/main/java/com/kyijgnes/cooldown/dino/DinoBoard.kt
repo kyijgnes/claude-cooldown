@@ -19,6 +19,8 @@ import com.kyijgnes.cooldown.dino.DinoSpec as S
  *   새가 두 높이뿐이라(`touch = true`) 숙이지 않아도 다 넘는다 — 크롬 휴대폰판과 같다.
  * - 닫는 길: ✕ · 기다림/부딪힘/멈춤으로 20초(`IDLE_EXIT`) · 부르는 쪽이 직접(뒤로 가기·화면 잠김).
  * - 한 걸음은 1/60초로 고정하고 흐른 시간만큼 밟는다(`advance`).
+ * - **들어오는 장면**(`startIntro`): 알에서 깬 작은 공룡이 그 자리에서 **폴짝 판으로 뛰어들고**, 판은
+ *   땅 줄에서 위아래로 벌어지며 공룡 자리에서 오른쪽으로 번진다(크롬 첫 장면처럼). 0.6초. 그동안은 누르기를 안 받는다.
  * - 색은 폰 테마(`Palette`), 밤(700점마다 12초)에는 판만 반대 테마로 뒤집는다.
  */
 class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
@@ -54,6 +56,23 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
     private var drawnTop = 0f
     private var drawnScale = 1f
 
+    // 들어오는 장면 — 알에서 깬 공룡이 서 있던 자리(그리는 좌표 px): 가운데 x, 발 y, 도트 한 칸
+    private var intro = 0
+    private val introFrom = FloatArray(3)
+
+    /** 들어오는 장면이 끝났을 때 한 번 (배경화면이 그때 미터기를 치운다). */
+    var onIntroDone: (() -> Unit)? = null
+
+    /** 알에서 깬 공룡이 `(x, feet)` 에 `cell` 크기로 서 있다 — 거기서 폴짝 판으로 뛰어들며 판이 열린다. */
+    fun startIntro(x: Float, feet: Float, cell: Float) {
+        introFrom[0] = x
+        introFrom[1] = feet
+        introFrom[2] = cell
+        intro = INTRO_FRAMES
+    }
+
+    val inIntro: Boolean get() = intro > 0
+
     // -------------------------------------------------- 돌리기
     fun resume() {
         running = true
@@ -85,7 +104,13 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
         acc += dt
         var n = 0
         while (acc >= STEP && n < MAX_CATCH_UP) {
-            game.step()
+            if (intro > 0) {                   // 들어오는 장면 — 판은 아직 안 돈다
+                intro--
+                idle = 0.0
+                if (intro == 0) onIntroDone?.invoke()
+            } else {
+                game.step()
+            }
             acc -= STEP
             n++
         }
@@ -107,6 +132,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
     /** 누름. ✕ 를 짚었으면 닫고, 멈춘 판이면 이어 하고(뛰지는 않는다), 아니면 뛴다. */
     fun down(x: Float, y: Float) {
         idle = 0.0
+        if (intro > 0) return                  // 뛰어드는 중 — 다 들어오면 누른다
         val bx = x / drawnScale
         val by = (y - drawnTop) / drawnScale
         if (bx in 0f..S.CLOSE_HIT.toFloat() && by in 0f..S.CLOSE_HIT.toFloat()) { exit(); return }
@@ -135,6 +161,62 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
 
     /** `top` 에서부터 `width` 폭으로 판을 그린다. 판 바탕만 칠하고 그 밖은 건드리지 않는다. */
     fun paint(c: Canvas, top: Float, width: Float) {
+        if (intro > 0) {
+            paintIntro(c, top, width)
+            return
+        }
+        paintBoard(c, top, width, true)
+    }
+
+    /**
+     * 들어오는 장면 한 장. `k` 0→1 (빨리 시작해 천천히 멎는다).
+     * 판: 땅 줄 높이를 한가운데로 위아래로 벌어지고, 왼쪽(공룡 자리)에서 오른쪽 끝까지 번진다.
+     * 공룡: 알 자리 → 판의 공룡 자리로 포물선을 그리며 뛰고, 크기도 판 크기로 바뀐다. 착지하면 판이 다 열린다.
+     */
+    private fun paintIntro(c: Canvas, top: Float, width: Float) {
+        val s = width / game.w
+        val raw = 1f - intro / INTRO_FRAMES.toFloat()
+        val k = 1f - (1f - raw) * (1f - raw)   // 점점 느리게
+        val bh = S.H * s
+        val ground = top + S.GROUND * s
+        val openH = bh * k
+        val openR = (S.DINO_X + 60f) * s + (width - (S.DINO_X + 60f) * s) * k
+        c.save()
+        c.clipRect(0f, ground - openH * S.GROUND / S.H, openR, ground + openH * (S.H - S.GROUND) / S.H)
+        paintBoard(c, top, width, false)
+        c.restore()
+        // 폴짝 — 알 자리에서 판의 공룡 자리로
+        val rows = S.POSES.getValue("stand")
+        val cols = rows.maxOf { it.length }
+        val cell = introFrom[2] + (S.U * s - introFrom[2]) * raw
+        val fromLeft = introFrom[0] - cols * introFrom[2] / 2f
+        val left = fromLeft + (S.DINO_X * s - fromLeft) * raw
+        val hop = kotlin.math.max(90f * s, kotlin.math.abs(ground - introFrom[1]) * 0.35f)
+        val feet = introFrom[1] + (ground - introFrom[1]) * raw - hop * kotlin.math.sin(Math.PI * raw).toFloat()
+        val y0 = feet - rows.size * cell
+        fill.color = coral
+        for ((r, line) in rows.withIndex()) {
+            var col = 0
+            while (col < line.length) {
+                if (line[col] != '#') { col++; continue }
+                var n = 1
+                while (col + n < line.length && line[col + n] == '#') n++
+                c.drawRect(Math.round(left + col * cell).toFloat(), Math.round(y0 + r * cell).toFloat(),
+                    Math.round(left + (col + n) * cell).toFloat(), Math.round(y0 + (r + 1) * cell).toFloat(), fill)
+                col += n
+            }
+        }
+        fill.color = (if (game.night > 0) night else day).bg
+        val eyes = S.DINO_EYE.getValue("open")
+        var i = 0
+        while (i < eyes.size) {
+            c.drawRect(Math.round(left + eyes[i] * cell).toFloat(), Math.round(y0 + eyes[i + 1] * cell).toFloat(),
+                Math.round(left + (eyes[i] + 1) * cell).toFloat(), Math.round(y0 + (eyes[i + 1] + 1) * cell).toFloat(), fill)
+            i += 2
+        }
+    }
+
+    private fun paintBoard(c: Canvas, top: Float, width: Float, withDino: Boolean) {
         val g = game
         val p = if (g.night > 0) night else day
         val s = width / g.w
@@ -167,9 +249,9 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
             }
         }
         val pose = g.pose
-        art(c, S.POSES.getValue(pose), S.DINO_X, g.dinoY, coral)
+        if (withDino) art(c, S.POSES.getValue(pose), S.DINO_X, g.dinoY, coral)
         val eyes = (if (pose.startsWith("duck")) S.DUCK_EYE else S.DINO_EYE).getValue(g.eye)
-        cells(c, eyes, S.DINO_X, g.dinoY, p.bg)
+        if (withDino) cells(c, eyes, S.DINO_X, g.dinoY, p.bg)
         art(c, S.CLOSE, S.CLOSE_AT[0].toFloat(), S.CLOSE_AT[1].toFloat(), p.faint)   // 닫기 ✕
 
         // 점수 — 오른쪽 위 (HI 최고 · 지금)
@@ -237,6 +319,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
     private companion object {
         const val STEP = 1.0 / S.FPS
         const val MAX_CATCH_UP = 5
+        const val INTRO_FRAMES = 36     // 들어오는 장면 (60fps 로 0.6초)
         const val HINT = "눌러서 점프"
         const val PAUSED = "일시 정지 · 눌러서 이어 하기"
 
