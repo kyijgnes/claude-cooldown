@@ -1,8 +1,9 @@
 """
 공룡 점프 — 클로디가 공룡으로 변신해 달리는 미니게임의 **규칙** (Tk 없음)
 ======================================================================
-크롬이 인터넷이 끊기면 띄우는 그 공룡 게임을 그대로 옮겼다. 위젯의 클로디를 **아주 오래
-꾹 누르면**(끝까지 납작해진 뒤로도 더) 공룡으로 변신하고 이 판이 열린다.
+크롬이 인터넷이 끊기면 띄우는 그 공룡 게임을 그대로 옮겼다. 클로디를 **아주 오래 꾹 누르면**
+(끝까지 납작해진 뒤로도 더) 공룡으로 변신하고, **창을 새로 띄우지 않고 그 자리가 판이 된다**
+(PC 는 위젯 자체가, 폰은 앱 첫 화면의 게이지 자리가). 모자라면 판 크기만큼 늘어난다.
 
 - **그림표(도트)·수치·규칙이 전부 여기 한 곳이다.** 그리는 쪽(PC `windows/cooldown_dino_view.py`,
   폰 `dino/DinoView.kt`)은 여기서 정한 것을 옮겨 그리기만 한다.
@@ -11,6 +12,7 @@
   규칙(아래 `Game`)은 `DinoGame.kt` 가 손으로 옮긴 것이라 **고치면 거기도 같이 고친다.**
 - 수치는 크롬 원본(Runner·Trex·Obstacle config)에서 왔다. 판이 600×150 이고 한 프레임이
   1/60초인 것도 같다. 달라진 것만 적는다:
+  · 판 너비는 바뀔 수 있다(`Game(width=)`, PC 위젯 판은 위젯 너비 · 최소 `MIN_W`).
   · 공룡이 조금 작다(38px, 크롬 47px). 머리가 **클로디 머리**(9칸, 모서리 깎음)라서.
   · 충돌은 상자가 아니라 **도트 칸끼리**(`hits`) 본다. 그림이 도트 표라 그대로 쓰면 된다.
   · 새는 높이가 셋(`BIRD_LIFTS`) — 낮은 것은 뛰어넘고, 가운데는 숙이거나 뛰고, 높은 것은 지나간다.
@@ -27,7 +29,9 @@ import random
 
 # ---------------------------------------------------------------- 판
 FPS = 60                # step 한 번 = 1/60초
-W, H = 600, 150         # 판 크기 (px) — 크롬과 같다
+W, H = 600, 150         # 판 크기 (px) — 크롬과 같다. 폰은 이 판을 화면 너비에 맞춰 늘린다
+MIN_W = 460             # PC 위젯이 판이 될 때 이보다 좁으면 넓힌다 — 장애물이 보이고 닿기까지 틈이 모자라다
+                        # (넓은 슬림 바 460 이 그대로 들어간다. 좁은 바·카드는 넓어진다)
 GROUND = 138            # 발이 닿는 선 (y)
 U = 2                   # 도트 한 칸 (px) — 위젯의 클로디와 같은 칸
 DINO_X = 40             # 공룡 그림 왼쪽 끝 (꼬리 끝)
@@ -59,6 +63,7 @@ BIRD_LIFTS_TOUCH = (0, 42)
 BIRD_WOBBLE = 0.8       # 새는 제 속도가 조금씩 다르다 (±)
 
 # ---------------------------------------------------------------- 그 밖
+IDLE_EXIT = 20 * FPS    # 기다림·부딪힘·멈춤으로 이만큼(20초) 아무도 안 누르면 판을 접고 돌아간다
 OVER_WAIT = 45          # 부딪힌 뒤 이만큼(0.75초)은 누르기를 안 받는다 (눌러 대다 바로 다시 시작되지 않게)
 RUN_BEAT = 5            # 이 프레임마다 발을 바꾼다 (12fps)
 FLAP_BEAT = 10          # 새가 날갯짓을 바꾸는 프레임
@@ -210,6 +215,17 @@ CLOUD = (
     "################",
 )
 
+# 닫기 — 판 왼쪽 위 구석. 글자 대신 도트 ✕ (누르는 자리는 `CLOSE_HIT` 로 넉넉히)
+CLOSE = (
+    "#...#",
+    ".#.#.",
+    "..#..",
+    ".#.#.",
+    "#...#",
+)
+CLOSE_AT = (10, 10)     # 그림 왼쪽 위 (px)
+CLOSE_HIT = 30          # 판 왼쪽 위에서 이만큼(px) 안을 누르면 닫는다
+
 # 다시 하기 — 둥근 화살표
 RESTART = (
     "...#####...",
@@ -323,8 +339,10 @@ class Game:
     `step()` 한 번이 1/60초. 그리는 쪽은 `pose`·`dino_y`·`obstacles`·`clouds`·`score`… 를 읽는다.
     """
 
-    def __init__(self, seed: int | None = None, best: int = 0, touch: bool = False):
+    def __init__(self, seed: int | None = None, best: int = 0, touch: bool = False,
+                 width: int = W):
         self.rng = random.Random(seed)
+        self.w = width                 # 판 너비 — 장애물·구름이 여기서 나온다(높이는 늘 H)
         self.best = int(best)
         self.lifts = BIRD_LIFTS_TOUCH if touch else BIRD_LIFTS
         self.t = 0
@@ -354,10 +372,10 @@ class Game:
         self.blink = 0
         self.next_blink = self.rng.randint(*BLINK_EVERY)
         self.new_best = False
-        self.clouds: list[list[float]] = [[self.rng.uniform(W * 0.3, W), self.rng.uniform(*CLOUD_SKY)]]
+        self.clouds: list[list[float]] = [[self.rng.uniform(self.w * 0.3, self.w), self.rng.uniform(*CLOUD_SKY)]]
         self.cloud_gap = self.rng.uniform(*CLOUD_GAP)
         # 땅의 자갈 — (x, 땅 아래 깊이, 폭). 흘러가다 왼쪽으로 빠지면 오른쪽에서 다시 나온다.
-        self.pebbles = [[self.rng.uniform(0, W), self.rng.choice((2, 4, 6)), self.rng.choice((2, 2, 4))]
+        self.pebbles = [[self.rng.uniform(0, self.w), self.rng.choice((2, 4, 6)), self.rng.choice((2, 2, 4))]
                         for _ in range(18)]
 
     # -------------------------------------------------- 누르기
@@ -469,7 +487,7 @@ class Game:
         last = self.obstacles[-1] if self.obstacles else None
         if last is None:
             self._add_obstacle()
-        elif not last.follow and last.x + last.w + last.gap < W:
+        elif not last.follow and last.x + last.w + last.gap < self.w:
             last.follow = True
             self._add_obstacle()
 
@@ -490,7 +508,7 @@ class Game:
         one_w, _ = size(spec["art"][0])
         min_gap = round(one_w * count * self.speed + spec["min_gap"] * GAP_COEF)
         gap = self.rng.randint(min_gap, round(min_gap * GAP_MAX))
-        self.obstacles.append(Obstacle(kind, float(W), count, lift, wobble, gap))
+        self.obstacles.append(Obstacle(kind, float(self.w), count, lift, wobble, gap))
         self.history = (self.history + [kind])[-MAX_DUP:]
 
     def _step_scenery(self) -> None:
@@ -500,13 +518,13 @@ class Game:
         cw, _ = size(CLOUD)
         self.clouds = [c for c in self.clouds if c[0] + cw > 0]
         last = self.clouds[-1] if self.clouds else None
-        if len(self.clouds) < CLOUD_MAX and (last is None or last[0] < W - self.cloud_gap):
-            self.clouds.append([float(W), self.rng.uniform(*CLOUD_SKY)])
+        if len(self.clouds) < CLOUD_MAX and (last is None or last[0] < self.w - self.cloud_gap):
+            self.clouds.append([float(self.w), self.rng.uniform(*CLOUD_SKY)])
             self.cloud_gap = self.rng.uniform(*CLOUD_GAP)
         for p in self.pebbles:
             p[0] -= self.speed
             if p[0] + p[2] < 0:
-                p[0] += W + self.rng.uniform(0, 40)
+                p[0] += self.w + self.rng.uniform(0, 40)
                 p[1] = self.rng.choice((2, 4, 6))
                 p[2] = self.rng.choice((2, 2, 4))
 

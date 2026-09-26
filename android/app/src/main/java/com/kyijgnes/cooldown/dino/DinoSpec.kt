@@ -40,12 +40,15 @@ object DinoSpec {
     const val NIGHT_FRAMES = 720
     const val CLOUD_MAX = 6
     const val CLOUD_SPEED = 0.2f
+    const val IDLE_EXIT = 1200
+    const val CLOSE_HIT = 30
 
     val BIRD_LIFTS = intArrayOf(0, 22, 42)
     val BIRD_LIFTS_TOUCH = intArrayOf(0, 42)
     val BLINK_EVERY = intArrayOf(120, 300)
     val CLOUD_GAP = intArrayOf(100, 400)
     val CLOUD_SKY = intArrayOf(32, 72)
+    val CLOSE_AT = intArrayOf(10, 10)
 
     /** 공룡 자세마다의 그림 — 충돌도 이걸로 본다. 눈은 없고 `DINO_EYE` 칸을 파낸다. */
     val POSES = mapOf(
@@ -245,6 +248,15 @@ object DinoSpec {
         ".#......#.#",
         "..#.....#..",
         "...#####...",
+    )
+
+    /** 닫기 — 판 왼쪽 위 구석의 도트 ✕ (`CLOSE_AT` 에 그리고 `CLOSE_HIT` 안을 누르면 닫는다) */
+    val CLOSE = arrayOf(
+        "#...#",
+        ".#.#.",
+        "..#..",
+        ".#.#.",
+        "#...#",
     )
 
     /** 장애물 종류 — 그림(여러 장이면 번갈아) · 틈 바탕 · 여럿 붙는 속도 · 나오기 시작하는 속도 */

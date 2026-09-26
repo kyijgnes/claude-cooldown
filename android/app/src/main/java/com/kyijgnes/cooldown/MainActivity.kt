@@ -6,9 +6,11 @@ import android.os.Bundle
 import android.text.format.DateFormat
 import android.view.View
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import com.kyijgnes.cooldown.dino.DinoView
 import com.kyijgnes.cooldown.wallpaper.WallpaperArt
 import com.kyijgnes.cooldown.work.RefreshWorker
 import com.kyijgnes.cooldown.work.ResetAlarm
@@ -19,6 +21,9 @@ import com.kyijgnes.cooldown.work.ResetAlarm
  * ★ **PC 가 연결 안 돼 있으면 그것부터 하게 만든다** — 숫자가 있을 자리에
  *   [PC 연결하기] 가 대신 서고, 앱을 켤 때 한 번은 옵션 화면으로 곧장 보낸다.
  *   연결 전에는 새로고침할 것도 없다.
+ *
+ * 제목 옆에 클로디가 산다(`ClaudiView`). **아주 오래 꾹 누르면 공룡으로 변신해 게이지 자리가
+ * 공룡 점프 판이 된다**(새 화면을 띄우지 않는다). ✕ · 뒤로 가기 · 20초 그대로 두면 게이지로 돌아온다.
  */
 class MainActivity : Activity() {
 
@@ -26,6 +31,11 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var connect: Button
     private lateinit var refresh: Button
+    private lateinit var claudi: ClaudiView
+    private lateinit var stage: FrameLayout
+
+    /** 공룡 점프 판 — 떠 있는 동안만 있다 (게이지 자리에 얹힌다). */
+    private var board: DinoView? = null
 
     /** 이번에 앱을 켠 뒤 연결 화면으로 한 번 보냈나 (계속 튕겨 나가지 않게). */
     private var sentToPair = false
@@ -38,6 +48,9 @@ class MainActivity : Activity() {
         status = findViewById(R.id.status)
         connect = findViewById(R.id.connect)
         refresh = findViewById(R.id.refresh)
+        claudi = findViewById(R.id.claudi)
+        stage = findViewById(R.id.stage)
+        claudi.mascot.onMorph = { startGame() }
 
         connect.setOnClickListener { openOptions() }
         refresh.setOnClickListener { reload() }
@@ -55,8 +68,15 @@ class MainActivity : Activity() {
         showValues()
     }
 
+    override fun onPause() {
+        super.onPause()
+        claudi.pause()
+        board?.pause()
+    }
+
     override fun onResume() {
         super.onResume()
+        if (board == null) claudi.resume() else board?.resume()
         // ★ **켤 때마다** 쓰던 배경화면을 다시 뜬다. onCreate 에서만 하면 앱이 뒤에 살아
         //   있을 때 배경을 바꿔도 안 따라온다(실제로 옛 그림이 남았다).
         seedWallpaper()
@@ -71,6 +91,45 @@ class MainActivity : Activity() {
         reload()
     }
 
+    // ---------------------------------------------------------------- 공룡 점프
+
+    /**
+     * 클로디가 공룡으로 변신했다 — **게이지 자리가 판이 된다.** 게이지는 자리만 지키고(INVISIBLE)
+     * 판이 그 크기를 그대로 쓴다(판은 세로 가운데). 연결 전이라 게이지가 없으면 판 비율대로 선다.
+     * 클로디는 판 속으로 들어갔으니 제목 옆에서는 숨는다.
+     */
+    private fun startGame() {
+        if (board != null) return
+        val prefs = getSharedPreferences(DINO_PREFS, MODE_PRIVATE)
+        val v = DinoView(this, prefs.getInt(DINO_BEST, 0))
+        v.onBest = { best -> prefs.edit().putInt(DINO_BEST, best).apply() }
+        v.onExit = { endGame() }
+        board = v
+        claudi.pause()
+        claudi.visibility = View.INVISIBLE
+        stage.addView(v, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        showValues()
+        v.resume()
+    }
+
+    /** 판을 접고 게이지로 — 클로디가 펑 하고 돌아온다. */
+    private fun endGame() {
+        val v = board ?: return
+        board = null
+        v.pause()
+        stage.removeView(v)
+        claudi.visibility = View.VISIBLE
+        claudi.resume()
+        claudi.mascot.unmorph()
+        showValues()
+    }
+
+    @Deprecated("뒤로 가기를 판 닫기로 쓴다 (판이 없으면 원래대로)")
+    override fun onBackPressed() {
+        if (board != null) endGame() else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
     private fun openOptions() {
         startActivity(Intent(this, SettingsActivity::class.java))
     }
@@ -81,7 +140,11 @@ class MainActivity : Activity() {
         val paired = Store.paired(this)
         connect.visibility = if (paired) View.GONE else View.VISIBLE
         refresh.visibility = if (paired) View.VISIBLE else View.GONE
-        gauge.visibility = if (paired) View.VISIBLE else View.GONE
+        gauge.visibility = when {
+            board != null -> if (paired) View.INVISIBLE else View.GONE   // 판이 그 자리를 쓰는 중
+            paired -> View.VISIBLE
+            else -> View.GONE
+        }
 
         if (paired) drawGauge()
         status.text = statusLine()
@@ -144,5 +207,10 @@ class MainActivity : Activity() {
             sentToPair = true   // QR 로 방금 붙였다 — 옵션으로 보낼 필요 없다
             reload()
         }
+    }
+
+    private companion object {
+        const val DINO_PREFS = "dino"
+        const val DINO_BEST = "best"
     }
 }

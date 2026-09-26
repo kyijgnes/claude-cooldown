@@ -12,7 +12,7 @@ import com.kyijgnes.cooldown.dino.DinoSpec as S
  * `step()` 한 번이 1/60초. 그리는 쪽(`DinoView`)은 흐른 시간만큼 `step` 을 부른다.
  * 폰은 `touch = true` — 새가 두 높이뿐이다(크롬도 휴대폰에선 그렇다. 숙일 단추가 없어서).
  */
-class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true) {
+class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: Float = S.W) {
 
     private val rng = if (seed != null) Random(seed) else Random.Default
     var best = best
@@ -90,11 +90,11 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true) {
         nextBlink = rndInt(S.BLINK_EVERY[0], S.BLINK_EVERY[1])
         newBest = false
         clouds.clear()
-        clouds.add(floatArrayOf(rnd(S.W * 0.3f, S.W), rnd(S.CLOUD_SKY[0].toFloat(), S.CLOUD_SKY[1].toFloat())))
+        clouds.add(floatArrayOf(rnd(w * 0.3f, w), rnd(S.CLOUD_SKY[0].toFloat(), S.CLOUD_SKY[1].toFloat())))
         cloudGap = rnd(S.CLOUD_GAP[0].toFloat(), S.CLOUD_GAP[1].toFloat())
         pebbles.clear()
         repeat(18) {
-            pebbles.add(floatArrayOf(rnd(0f, S.W), pick(DEPTHS), pick(WIDTHS)))
+            pebbles.add(floatArrayOf(rnd(0f, w), pick(DEPTHS), pick(WIDTHS)))
         }
     }
 
@@ -196,7 +196,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true) {
         val last = obstacles.lastOrNull()
         if (last == null) {
             addObstacle()
-        } else if (!last.follow && last.x + last.w + last.gap < S.W) {
+        } else if (!last.follow && last.x + last.w + last.gap < w) {
             last.follow = true
             addObstacle()
         }
@@ -222,7 +222,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true) {
         val oneW = Art.width(spec.art[0])
         val minGap = Math.round(oneW * count * speed + spec.minGap * S.GAP_COEF)
         val gap = rndInt(minGap, Math.round(minGap * S.GAP_MAX))
-        obstacles.add(Obstacle(kind, S.W, count, lift, wobble, gap))
+        obstacles.add(Obstacle(kind, w, count, lift, wobble, gap))
         history.add(kind)
         while (history.size > S.MAX_DUP) history.removeAt(0)
     }
@@ -233,14 +233,14 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true) {
         val cw = Art.width(S.CLOUD)
         clouds.removeAll { it[0] + cw <= 0f }
         val last = clouds.lastOrNull()
-        if (clouds.size < S.CLOUD_MAX && (last == null || last[0] < S.W - cloudGap)) {
-            clouds.add(floatArrayOf(S.W, rnd(S.CLOUD_SKY[0].toFloat(), S.CLOUD_SKY[1].toFloat())))
+        if (clouds.size < S.CLOUD_MAX && (last == null || last[0] < w - cloudGap)) {
+            clouds.add(floatArrayOf(w, rnd(S.CLOUD_SKY[0].toFloat(), S.CLOUD_SKY[1].toFloat())))
             cloudGap = rnd(S.CLOUD_GAP[0].toFloat(), S.CLOUD_GAP[1].toFloat())
         }
         for (p in pebbles) {
             p[0] -= speed
             if (p[0] + p[2] < 0f) {
-                p[0] += S.W + rnd(0f, 40f)
+                p[0] += w + rnd(0f, 40f)
                 p[1] = pick(DEPTHS)
                 p[2] = pick(WIDTHS)
             }

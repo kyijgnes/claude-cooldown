@@ -14,9 +14,11 @@ import com.kyijgnes.cooldown.dino.DinoSpec as S
 /**
  * 공룡 점프 판 — `DinoGame` 을 그리고 손가락을 받는다. PC `cooldown_dino_view.py` 와 같은 그림이다.
  *
- * - 판(600×150)을 **화면 너비에 맞춰** 늘린다. 세로는 화면 40% 자리에 놓고 나머지는 바탕색.
- * - **어디를 눌러도 뛴다**(누르고 있으면 높이, 일찍 떼면 낮게). 아래로 밀면 숙인다(덤).
+ * - **새 화면을 띄우지 않는다.** 앱 첫 화면(`MainActivity`)이 게이지 자리에 이 판을 끼운다.
+ *   판(600×150)을 **뷰 너비에 맞춰** 늘리고 세로는 가운데. 높이를 안 정해 주면 판 비율대로 잡는다.
+ * - **판 어디를 눌러도 뛴다**(누르고 있으면 높이, 일찍 떼면 낮게). 아래로 밀면 숙인다(덤).
  *   새가 두 높이뿐이라(`touch = true`) 숙이지 않아도 다 넘을 수 있다 — 크롬 휴대폰판과 같다.
+ * - 닫는 길: 왼쪽 위 ✕ · 뒤로 가기(화면이 받는다) · 기다림/부딪힘/멈춤으로 20초(`IDLE_EXIT`).
  * - 한 걸음은 1/60초로 고정하고 흐른 시간만큼 밟은 뒤 한 번 그린다(`postInvalidateOnAnimation`).
  * - 색은 폰 테마(`Palette`), 밤(700점마다 12초)에는 판만 반대 테마로 뒤집는다.
  * - 화면을 떠나면(`pause`) 멈추고, 돌아와 누르면 이어 한다(그 누르기로 뛰지는 않는다).
@@ -27,6 +29,9 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
 
     /** 최고 기록을 넘긴 판이 끝날 때 한 번 (화면이 저장한다). */
     var onBest: ((Int) -> Unit)? = null
+
+    /** 닫을 때 한 번 (✕ · 오래 그대로 둠). 판을 실제로 치우는 것은 화면이 한다. */
+    var onExit: (() -> Unit)? = null
 
     private val day = Palette(ctx)
     private val night = Palette(flipped(ctx))
@@ -39,7 +44,9 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
 
     private var last = 0L
     private var acc = 0.0
+    private var idle = 0.0                // 기다림·부딪힘·멈춤으로 흐른 초
     private var running = false
+    private var exited = false
     var paused = false
         private set
     private var savedOver = false
@@ -72,9 +79,15 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
 
     /** 흐른 시간만큼 걸음을 밟는다. 한 번에 `MAX_CATCH_UP` 넘게는 안 밟는다(순간이동 방지). */
     fun advance(nowNs: Long = System.nanoTime()) {
-        if (!running || paused) { last = nowNs; acc = 0.0; return }
-        acc += (nowNs - last) / 1e9
+        if (!running) { last = nowNs; acc = 0.0; return }
+        val dt = (nowNs - last) / 1e9
         last = nowNs
+        if (paused || game.state != "run") {  // 아무도 안 놀고 있다 — 오래 그대로면 접는다
+            idle += dt
+            if (idle * S.FPS >= S.IDLE_EXIT) { exit(); return }
+        }
+        if (paused) { acc = 0.0; return }
+        acc += dt
         var n = 0
         while (acc >= STEP && n < MAX_CATCH_UP) {
             game.step()
@@ -88,12 +101,26 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
         }
     }
 
+    private fun exit() {
+        if (exited) return
+        exited = true
+        running = false
+        post { onExit?.invoke() }       // 그리는 중에 판을 치우지 않게 한 박자 뒤로
+    }
+
     // -------------------------------------------------- 손가락
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)   // 위아래로 밀어도 스크롤이 채 가지 않게
                 downY = ev.y
                 ducked = false
+                idle = 0.0
+                val s = scale()
+                if (ev.x / s < S.CLOSE_HIT && (ev.y - top()) / s < S.CLOSE_HIT) {   // 왼쪽 위 ✕
+                    exit()
+                    return true
+                }
                 if (paused) {                 // 멈춘 판을 누르면 이어서 — 그 누르기로 뛰지는 않는다
                     paused = false
                     last = System.nanoTime()
@@ -118,6 +145,7 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
                 game.releaseJump()
                 game.releaseDuck()
                 ducked = false
+                parent?.requestDisallowInterceptTouchEvent(false)
                 performClick()
             }
         }
@@ -126,15 +154,23 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
 
     override fun performClick(): Boolean = super.performClick()
 
-    // -------------------------------------------------- 그리기
-    /** 판이 놓이는 자리 — 배율과 위끝. */
-    fun scale(): Float = width / S.W
-    fun top(): Float = height * 0.40f - S.H * scale() / 2f
+    // -------------------------------------------------- 크기·그리기
+    /** 높이를 정해 주지 않으면 판 비율(600:150)대로. */
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        val w = MeasureSpec.getSize(widthSpec)
+        val h = if (MeasureSpec.getMode(heightSpec) == MeasureSpec.EXACTLY) MeasureSpec.getSize(heightSpec)
+        else (w * S.H / S.W).toInt()
+        setMeasuredDimension(w, h)
+    }
+
+    /** 판이 놓이는 자리 — 배율과 위끝(세로 가운데). */
+    fun scale(): Float = width / game.w
+    fun top(): Float = (height - S.H * scale()) / 2f
 
     override fun onDraw(c: Canvas) {
         advance()
         paint(c)
-        if (running && !paused) postInvalidateOnAnimation()
+        if (running && !exited) postInvalidateOnAnimation()
     }
 
     /** 그리기만 — 테스트가 폰 없이 그림을 뽑을 때도 이걸 부른다. */
@@ -149,7 +185,7 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
 
         for (cl in g.clouds) art(c, S.CLOUD, cl[0], cl[1], p.track)
         fill.color = p.label
-        c.drawRect(0f, S.GROUND - 1f, S.W, S.GROUND, fill)
+        c.drawRect(0f, S.GROUND - 1f, g.w, S.GROUND, fill)
         fill.color = p.faint
         for (pb in g.pebbles) {
             val x = Math.round(pb[0]).toFloat()
@@ -171,38 +207,39 @@ class DinoView(ctx: Context, best: Int, seed: Long? = null) : View(ctx) {
         art(c, S.POSES.getValue(pose), S.DINO_X, g.dinoY, coral)
         val eyes = (if (pose.startsWith("duck")) S.DUCK_EYE else S.DINO_EYE).getValue(g.eye)
         cells(c, eyes, S.DINO_X, g.dinoY, p.bg)
+        art(c, S.CLOSE, S.CLOSE_AT[0].toFloat(), S.CLOSE_AT[1].toFloat(), p.faint)   // 닫기 ✕
 
         // 점수 — 오른쪽 위 (HI 최고 · 지금)
         text.textSize = 13f
         if (g.scoreVisible) {
             text.color = p.sub
             text.typeface = numBold
-            c.drawText("%05d".format(g.shownScore), S.W - 12f, 26f, text)
+            c.drawText("%05d".format(g.shownScore), g.w - 12f, 26f, text)
         }
         if (g.best > 0 || g.state == "over") {
             text.color = p.label
             text.typeface = num
-            c.drawText("HI %05d".format(g.best), S.W - 72f, 26f, text)
+            c.drawText("HI %05d".format(g.best), g.w - 72f, 26f, text)
         }
         mid.textSize = 12f
         when {
             paused -> {
                 mid.color = p.title
                 mid.typeface = Typeface.DEFAULT_BOLD
-                c.drawText(PAUSED, S.W / 2f, 60f, mid)
+                c.drawText(PAUSED, g.w / 2f, 60f, mid)
             }
             g.state == "ready" -> {
                 mid.color = p.label
                 mid.typeface = Typeface.DEFAULT
-                c.drawText(HINT, S.W / 2f, 60f, mid)
+                c.drawText(HINT, g.w / 2f, 60f, mid)
             }
             g.state == "over" -> {
                 mid.color = p.title
                 mid.typeface = numBold
                 mid.textSize = 14f
-                c.drawText("G A M E   O V E R", S.W / 2f, 56f, mid)
+                c.drawText("G A M E   O V E R", g.w / 2f, 56f, mid)
                 val rw = Art.width(S.RESTART)
-                art(c, S.RESTART, S.W / 2f - rw / 2f, 68f, p.title)
+                art(c, S.RESTART, g.w / 2f - rw / 2f, 68f, p.title)
             }
         }
         c.restore()

@@ -136,14 +136,15 @@ PRESS_BURST = 0.35    # 이만큼 넘게 눌렸다 떼면 **팡** 터진다
 LAUNCH_LIFT = 70.0    # 날아오르는 동안엔 창 안으로 가두지 않는다 (칸이 아니라 px)
 LAUNCH_FRAMES = 46    # 이 프레임 동안은 가둠을 푼다
 # **아주 오래 꾹 누르면 공룡으로 변신한다**(2026-09-26, 쓰는 사람이 청함). 끝까지 납작해진
-# 뒤로도 `MORPH_HOLD` 만큼 더 누르고 있으면 부르르 떨다가 **펑** 하고 공룡이 되고, 앱이 공룡
-# 점프 판(크롬 공룡 게임, `cooldown_dino`)을 띄운다(`on_morph`). 판을 닫으면 펑 하고 돌아온다.
+# 뒤로도 `MORPH_HOLD` 만큼 더 누르고 있으면 부르르 떨다가 **펑** 하고 공룡이 되고, 앱이 위젯을
+# 공룡 점프 판(크롬 공룡 게임, `cooldown_dino`)으로 바꾼다(`on_morph`, 창을 새로 띄우지 않는다).
+# 판을 닫으면 펑 하고 돌아온다.
 # 그 전에 떼면 지금까지처럼 튕겨 오를 뿐이다.
 # ★ 떠는 것(`MORPH_SHAKE`)은 **변신 직전에만** 한다. 평소의 부르르(wiggle)를 뺀 것과는 다른
 #   일이다 — 아무 표시 없이 누르고만 있으면 '더 누르면 뭔가 된다' 를 알 길이 없다.
 MORPH_HOLD = 18       # 끝까지 눌린 뒤 이만큼(≈0.8초) 더 누르고 있으면 변신
 MORPH_SHAKE = 1.4     # 변신 직전 좌우로 떠는 폭 (px, 점점 세진다)
-MORPH_OPEN = 8        # 펑 하고 이만큼(≈0.36초) 뒤에 판을 띄운다 — 위젯에서 변한 모습을 먼저 보게
+MORPH_OPEN = 8        # 펑 하고 이만큼(≈0.36초) 뒤에 판이 된다 — 위젯에서 변한 모습을 먼저 보게
 MORPH_U = 1           # 위젯에 서 있는 공룡의 도트 한 칸 (px). 판(2px)의 절반이라 클로디와 덩치가 비슷하다
 # ★ **창 밖으로 나가는 건 꾹 누르기의 특전이다.** 콤보로는 안 나간다 — 연타로 자꾸 나가면
 #   화면에 없는 시간이 길어져 굼떠 보인다. 콤보의 상은 높이가 아니라 **공중제비와 반짝이**다.
@@ -314,7 +315,7 @@ class Claudi:
         self.px0, self.py0, self.px1, self.py1 = party or box
         self.leave = leave
         self._anim_gen = 0
-        # 공룡으로 변신했을 때 부를 것 — 앱이 build 뒤에 공룡 점프 판 여는 것을 걸어 둔다.
+        # 공룡으로 변신했을 때 부를 것 — 앱이 build 뒤에 위젯을 공룡 점프 판으로 바꾸는 것을 걸어 둔다.
         # 없으면(스킨 그림 뽑기 도구 등) 변신만 하고 누를 때까지 공룡으로 서 있다.
         self.on_morph = None
 
@@ -400,7 +401,7 @@ class Claudi:
         self._flip_n = self._spin_n = 0  # 세로·가로 회전 바퀴 수
         self._launch = 0              # 이 동안은 창 밖까지 날아가도 안 가둔다
         self._morph_hold = 0          # 끝까지 눌린 채 더 누르고 있는 프레임 (변신까지)
-        self._dino = False            # 공룡으로 변신해 있다 (공룡 점프 판이 떠 있는 동안)
+        self._dino = False            # 공룡으로 변신해 있다 (위젯이 공룡 점프 판인 동안)
         self._morph_open = 0          # 판을 띄우기까지 남은 프레임
         self._next_gesture = random.randint(20, 60)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
@@ -527,7 +528,7 @@ class Claudi:
             self._burst(SPARK_POKE + int(8 * press), 1.2 + press * 0.8)
 
     def _morph(self) -> None:
-        """펑 — 공룡이 된다. `MORPH_OPEN` 뒤에 앱이 공룡 점프 판을 띄운다(`on_morph`)."""
+        """펑 — 공룡이 된다. `MORPH_OPEN` 뒤에 앱이 위젯을 공룡 점프 판으로 바꾼다(`on_morph`)."""
         self._pressed = False
         self._press = 0.0
         self._morph_hold = 0
@@ -696,7 +697,7 @@ class Claudi:
         self._step_physics()
         if self._faint == 0 and not self._dino:
             self._idle_step()
-        if self._morph_open > 0:  # 변신했다 — 조금 뒤에 판을 띄운다
+        if self._morph_open > 0:  # 변신했다 — 조금 뒤에 판이 된다
             self._morph_open -= 1
             if self._morph_open == 0 and self._dino and self.on_morph is not None:
                 self.on_morph()

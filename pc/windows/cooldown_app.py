@@ -763,6 +763,9 @@ class App:
         cooldown_stats.trim()  # 오래된 기록 덜어내기 — 켤 때 한 번이면 된다
 
         self.body: tk.Frame | None = None
+        # 공룡 점프 — 판이 떠 있는 동안 위젯 본체 대신 이것이 창을 채운다 (`open_dino`)
+        self._dino_board: DinoBoard | None = None
+        self._dino_frame: tk.Frame | None = None
         self.skin = skins.make(self.state["skin"])
         self._build_body()
         self._build_menu()
@@ -792,6 +795,7 @@ class App:
 
     # -------------------------------------------------- 본체(스킨) 그리기
     def _build_body(self) -> None:
+        self.close_dino(restore=False)   # 놀던 판은 접는다 (새 본체로 다시 짓는다)
         if self.body is not None:
             self.body.destroy()
         self.body = tk.Frame(self.root, bg=P.bg)
@@ -1095,6 +1099,8 @@ class App:
                 pass
 
     def _drag(self, e):
+        if self._dino_board is not None:   # 변신하고도 손을 안 뗐다 — 판을 끌고 다니지 않는다
+            return
         # 끌기 시작한 순간 꾹 누름은 접는다 (옮기려던 것이지 놀려던 게 아니다)
         start = getattr(self, "_from", (e.x_root, e.y_root))
         if max(abs(e.x_root - start[0]), abs(e.y_root - start[1])) > DRAG_SLOP:
@@ -1176,6 +1182,8 @@ class App:
     # 겹쳐도 따로 놀지 않는다 (tk 위젯은 투명이 안 돼 포개면 아래가 가려진다).
     def _sync_status(self):
         """스킨이 바뀌거나 값·오류·테마가 바뀔 때 상태 캔버스를 제자리에 다시 놓는다."""
+        if self._dino_board is not None:   # 공룡 점프 중 — 판을 닫을 때 다시 놓는다
+            return
         try:
             spot = self.skin.status_spot()
         except Exception:  # noqa: BLE001
@@ -1233,6 +1241,8 @@ class App:
     def _spin_once(self):
         """새로고침을 눌렀다는 표시 — 상태 점 둘레로 링이 한 바퀴 돈다.
         점을 안 쓰는 스킨에서는 오른쪽 위 구석에 링만 잠깐 뜬다."""
+        if self._dino_board is not None:   # 공룡 점프 중 — 판 위에 링을 얹지 않는다
+            return
         try:
             box = getattr(self, "_status", None)
             if box is None:
@@ -1297,8 +1307,8 @@ class App:
     def _remember_spot(self):
         """자유 위치를 저장한다. 붙어 있는 동안에는 저장하지 않는다 —
         작업표시줄 좌표가 원래 자리를 덮으면, 나중에 풀었을 때 12px 만 남는다."""
-        if self.state["dock"] and self.skin.dockable:
-            return
+        if (self.state["dock"] and self.skin.dockable) or self._dino_board is not None:
+            return   # 판만큼 늘려 둔 자리는 위젯 자리가 아니다
         self.state.update(x=self.root.winfo_x(), y=self.root.winfo_y())
 
     def bring_to_front(self):
@@ -1315,6 +1325,9 @@ class App:
 
     def show_window(self):
         """창을 저장된 자리에 편다. 시작할 때와 다시 켤 때 모두 여기를 쓴다."""
+        if self._dino_board is not None:   # 공룡 점프 중 — 판 크기·자리를 그대로 둔다
+            self.root.deiconify()
+            return
         self.root.deiconify()
         self.root.overrideredirect(True)
         self.root.attributes("-alpha", ALPHA)
@@ -1568,7 +1581,9 @@ class App:
     def _reassert_dock(self):
         """작업표시줄 아이콘이 늘거나 줄면 빈 자리가 옮겨간다 — 갱신할 때마다 다시 맞춘다."""
         # 끌고 있는 중이면 건드리지 않는다 (손 안에서 창이 작업표시줄로 튄다)
-        if self._dragging or not (self.state["dock"] and self.skin.dockable):
+        # ★ 공룡 점프 중에도 — 판만큼 늘려 둔 창을 갱신 때마다 바 크기로 줄여 버린다
+        if (self._dragging or self._dino_board is not None
+                or not (self.state["dock"] and self.skin.dockable)):
             return
         spot = taskbar_slot(self.skin.width, self.height)
         if spot:
@@ -2845,24 +2860,50 @@ class App:
 
     # -------------------------------------------------- 공룡 점프 (클로디를 아주 오래 꾹)
     def open_dino(self) -> None:
-        """클로디가 공룡으로 변신했다 — 크롬 공룡 게임 판을 띄운다(`cooldown_dino`).
+        """클로디가 공룡으로 변신했다 — **위젯 자체가** 크롬 공룡 게임 판이 된다(`cooldown_dino`).
 
-        위젯을 가리지 않게 **바로 위**(자리가 없으면 아래)에 띄운다. 위젯의 클로디는 판이
-        떠 있는 동안 공룡으로 서 있다가, 판을 닫으면(✕·Esc·위젯 누르기) 펑 하고 돌아온다.
-        편집 팝업처럼 `click_away=False` — 딴 데를 눌러도 안 닫히고 **멈춘다**(판이 알아서)."""
-        top, body = self._open_panel("공룡 점프", click_away=False)
-        board = DinoBoard(top, body, best=int(self.state.get("dino_best", 0) or 0),
-                          on_best=self._dino_best)
-        board.c.pack(padx=PANEL_PAD, pady=(0, 16))
-        top.bind("<Destroy>", lambda e: self._dino_closed() if e.widget is top else None, add="+")
-        self._finalize_panel(top, cooldown_dino.W + PANEL_PAD * 2, beside=True)
+        창을 새로 띄우지 않는다(2026-09-26 쓰는 사람 지시). 본체(스킨)를 잠깐 치우고 그 자리에
+        판을 얹는다. 판은 `max(위젯 너비, MIN_W)` × `H` 라 모자라면 위젯이 그만큼 늘어난다 —
+        붙여 둔 바는 **아래끝을 지킨 채 위로**, 떠 있는 위젯은 왼쪽 위를 지킨 채 자란다.
+        닫으면(✕ · Esc · 20초 그대로) 원래 모양·자리로 돌아가고 클로디가 펑 하고 돌아온다."""
+        if self._dino_board is not None:
+            return
+        self._close_panels()
+        r = self.root
+        x, y, h0 = r.winfo_x(), r.winfo_y(), r.winfo_height()
+        w, h = max(self.skin.width, cooldown_dino.MIN_W), cooldown_dino.H
+        docked = bool(self.state["dock"]) and self.skin.dockable
+        x, y = clamp_to_screen(x, y + h0 - h if docked else y, w, h)
+        self.body.pack_forget()
+        if getattr(self, "_status", None) is not None:
+            self._status.place_forget()   # 상태 점·새로고침 링이 판 위에 얹히지 않게
+        self._dino_frame = tk.Frame(r, bg=P.bg)
+        self._dino_frame.pack(fill="both", expand=True)
+        self._dino_board = DinoBoard(self._dino_frame, width=w,
+                                     best=int(self.state.get("dino_best", 0) or 0),
+                                     on_best=self._dino_best, on_exit=self.close_dino)
+        self._dino_board.c.pack()
+        r.geometry(f"{w}x{h}+{x}+{y}")
+        r.attributes("-alpha", 1.0)   # 위젯은 살짝 비치게 두지만(ALPHA) 판은 또렷하게 — 닫으면 show_window 가 되돌린다
+        self._dino_board.focus()   # 스페이스가 곧바로 먹게
+
+    def close_dino(self, restore: bool = True) -> None:
+        """판을 접고 위젯으로 돌아간다. `restore=False` 는 본체를 곧 새로 지을 때
+        (디자인·밝기 바꾸기) — 크기·자리는 그쪽이 `show_window` 로 잡는다."""
+        if self._dino_board is None:
+            return
+        self._dino_board = None
         try:
-            top.focus_force()   # 스페이스가 곧바로 먹게
+            self._dino_frame.destroy()
         except tk.TclError:
             pass
-
-    def _dino_closed(self) -> None:
+        self._dino_frame = None
         claudi = getattr(self.skin, "claudi", None)
+        if not restore:
+            return
+        self.body.pack(fill="both", expand=True)
+        self.show_window()
+        self._sync_status()
         if claudi is not None:
             claudi.unmorph()
 
@@ -3435,22 +3476,13 @@ class App:
             w.bind("<Button-1>", press)
             w.bind("<B1-Motion>", drag)
 
-    def _finalize_panel(self, top: tk.Toplevel, width: int, grab: bool = False,
-                        beside: bool = False) -> None:
-        """내용을 다 채운 뒤 크기를 재고 위젯 옆에 띄운다.
-        `beside` 면 위젯을 가리지 않게 바로 위(자리가 없으면 아래)에 붙인다."""
+    def _finalize_panel(self, top: tk.Toplevel, width: int, grab: bool = False) -> None:
+        """내용을 다 채운 뒤 크기를 재고 위젯 옆에 띄운다."""
         top.update_idletasks()
         height = top.winfo_reqheight()
-        if beside:
-            rx, ry = self.root.winfo_x(), self.root.winfo_y()
-            above = ry - height - 8
-            x, y = clamp_to_screen(rx, above, width, height)
-            if y != above:  # 위에 자리가 없다 (화면 위쪽에 둔 위젯) — 아래로
-                x, y = clamp_to_screen(rx, ry + self.root.winfo_height() + 8, width, height)
-        else:
-            x, y = clamp_to_screen(
-                self.root.winfo_x() + 28, self.root.winfo_y() + 28, width, height
-            )
+        x, y = clamp_to_screen(
+            self.root.winfo_x() + 28, self.root.winfo_y() + 28, width, height
+        )
         top.geometry(f"{width}x{height}+{x}+{y}")
         top.deiconify()
         round_corners(top)  # 본체와 같은 둥근 모서리

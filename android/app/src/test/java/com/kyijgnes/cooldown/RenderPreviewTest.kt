@@ -257,8 +257,8 @@ class RenderPreviewTest {
     }
 
     /**
-     * 공룡 점프 판 — 기다림 / 달리는 중 / 부딪힘, 밝게·어둡게. 폰 세로 화면(1080×2340)에 맞춰 그린다.
-     * PC(`cooldown_dino_view.py shot`)와 같은 그림인지 눈으로 대조한다.
+     * 공룡 점프 판 — 기다림 / 달리는 중 / 부딪힘, 밝게·어둡게. **앱 첫 화면의 게이지 자리 크기**
+     * (FHD 너비 1080 − 좌우 여백, 높이 = 게이지)로 그린다. PC(`cooldown_dino_view.py shot`)와 눈으로 대조.
      */
     @Test
     fun `공룡 점프 판 그림을 남긴다`() {
@@ -267,19 +267,54 @@ class RenderPreviewTest {
             val ctx = RuntimeEnvironment.getApplication()
             for (scene in listOf("기다림", "달리기", "부딪힘")) {
                 val view = com.kyijgnes.cooldown.dino.DinoView(ctx, best = 312, seed = 3L)
-                view.layout(0, 0, 1080, 2340)
+                view.layout(0, 0, 960, 307)
                 val g = view.game
                 if (scene != "기다림") {
                     g.pressJump(); g.releaseJump()
                     repeat(if (scene == "달리기") 1500 else 700) { if (g.state == "run") { dinoBot(g); g.step() } }
                     if (scene == "부딪힘") g.crashForPreview()
                 }
-                val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+                val bmp = Bitmap.createBitmap(960, 307, Bitmap.Config.ARGB_8888)
                 view.paint(Canvas(bmp))
                 save(bmp, "공룡점프_${scene}_$theme.png")
             }
         }
         RuntimeEnvironment.setQualifiers("+notnight")
+    }
+
+    /**
+     * 앱 첫 화면 — 제목 옆 클로디, 그리고 **공룡 점프 중**(게이지 자리가 판이 되고 클로디는 숨는다).
+     * 화면(액티비티)은 작업 예약까지 돌리므로 레이아웃만 불러 그대로 그린다.
+     */
+    @Test
+    @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+    fun `앱 첫 화면 그림을 남긴다`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        for (playing in listOf(false, true)) {
+            val root = android.view.LayoutInflater.from(ctx).inflate(R.layout.activity_main, null)
+            val gauge = root.findViewById<android.widget.ImageView>(R.id.gauge)
+            gauge.setImageBitmap(GaugeRenderer.wide(ctx, 960, 307, snap(37f, 62f), now, card = false))
+            root.findViewById<View>(R.id.connect).visibility = View.GONE
+            val claudi = root.findViewById<ClaudiView>(R.id.claudi)
+            if (playing) {
+                gauge.visibility = View.INVISIBLE
+                claudi.visibility = View.INVISIBLE
+                val board = com.kyijgnes.cooldown.dino.DinoView(ctx, best = 312, seed = 3L)
+                board.game.pressJump(); board.game.releaseJump()
+                repeat(900) { if (board.game.state == "run") { dinoBot(board.game); board.game.step() } }
+                root.findViewById<android.widget.FrameLayout>(R.id.stage).addView(board,
+                    android.widget.FrameLayout.LayoutParams(-1, -1))
+            }
+            root.measure(
+                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(2340, View.MeasureSpec.EXACTLY),
+            )
+            root.layout(0, 0, 1080, 2340)
+            if (!playing) claudi.stepForPreview(3)
+            val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+            root.draw(Canvas(bmp))
+            save(bmp, if (playing) "앱첫화면_공룡점프.png" else "앱첫화면.png")
+        }
     }
 
     /** 알아서 뛰는 공룡 — 가까운 장애물을 보면 뛴다 (PC `_bot` 과 같은 결). */
@@ -315,7 +350,10 @@ class RenderPreviewTest {
         assertEquals(0, idle.score)
     }
 
-    /** 끝까지 눌린 뒤로도 더 누르고 있으면 공룡으로 변신해 판을 부른다. 일찍 떼면 그냥 튕긴다. */
+    /**
+     * 끝까지 눌린 뒤로도 더 누르고 있으면 공룡으로 변신해 판을 부른다. 일찍 떼면 그냥 튕긴다.
+     * 판을 열 곳(`onMorph`)이 없는 클로디는 변신하지 않는다(홈 화면에서는 런처가 길게 누르기를 채 간다).
+     */
     @Test
     fun `아주 오래 꾹 누르면 공룡으로 변신한다`() {
         val u = WallpaperArt.mascotCell(W)
@@ -334,6 +372,13 @@ class RenderPreviewTest {
         assertTrue("변신한 뒤 손을 떼도 공룡 그대로", m.dino)
         m.unmorph()
         assertFalse("판에서 돌아오면 클로디로", m.dino)
+
+        // 판을 열 곳이 없는 클로디(배경화면·꾸미기 미리보기)는 오래 눌러도 변신하지 않는다
+        val wall = Mascot()
+        wall.press()
+        repeat(wall.morphHoldFrames() + 20) { wall.step(cx, cy, u, W, H) }
+        assertFalse("판을 열 곳이 없으면 변신하지 않는다", wall.dino)
+        wall.release()
 
         val early = Mascot()
         early.onMorph = { opened++ }
