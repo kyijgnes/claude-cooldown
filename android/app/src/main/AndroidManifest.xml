@@ -70,6 +70,16 @@
             android:label="배경화면 꾸미기"
             android:parentActivityName=".SettingsActivity" />
 
+        <!-- 홈 위젯에서 공룡알을 깨면 뜨는 공룡 점프 — 투명해서 판만 위젯 줄에 보인다.
+             최근 앱 목록에 안 남고 앱 본체와 다른 작업으로 뜬다(누르면 앱이 딸려 오지 않게). -->
+        <activity
+            android:name=".dino.DinoOverlayActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/DinoOverlay" />
+
         <!-- 홈 위젯 -->
         <receiver
             android:name=".widget.SmallWidget"

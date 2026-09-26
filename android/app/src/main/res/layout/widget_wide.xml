@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 넓은 위젯 — 게이지 그림 한 장 + 오른쪽 끝 클로디 칸.
+     클로디 칸은 누르는 곳이 따로라(`WidgetClaudi.tapIntent`) 게이지와 다른 ImageView 다.
+     게이지를 누르면 전처럼 앱이 열리고, 클로디를 톡톡 하면 공룡알 → 공룡 점프로 간다.
+     ★★ `RemoteViews` 가 아는 뷰만 쓸 것(LinearLayout·FrameLayout·ImageView·TextView). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <ImageView
+        android:id="@+id/canvas"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:adjustViewBounds="true"
+        android:contentDescription="@string/app_name"
+        android:scaleType="fitCenter" />
+
+    <ImageView
+        android:id="@+id/claudi"
+        android:layout_width="64dp"
+        android:layout_height="match_parent"
+        android:contentDescription="@string/app_name"
+        android:scaleType="fitCenter" />
+</LinearLayout>

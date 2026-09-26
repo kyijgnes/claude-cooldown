@@ -12,9 +12,17 @@
        `위젯을 로드할 수 없습니다` 로 떴다(실기 확인). LinearLayout·FrameLayout·TextView·
        ImageView 정도만 쓸 것. -->
 
+<!-- 오른쪽 끝 클로디 칸은 실제 위젯(`widget_wide.xml`)과 같은 64dp. 그림은 앱 아이콘용 벡터(ic_claudi). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+<LinearLayout
+    android:layout_width="0dp"
+    android:layout_height="match_parent"
+    android:layout_weight="1"
     android:background="@drawable/widget_plate"
     android:orientation="vertical"
     android:paddingHorizontal="14dp"
@@ -123,4 +131,12 @@
             android:textColor="@color/faint"
             android:textSize="9sp" />
     </LinearLayout>
+</LinearLayout>
+
+    <ImageView
+        android:layout_width="64dp"
+        android:layout_height="match_parent"
+        android:contentDescription="@string/app_name"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_claudi" />
 </LinearLayout>

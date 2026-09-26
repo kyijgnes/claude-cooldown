@@ -765,6 +765,7 @@ class Mascot {
             drawSprite(c, cx, cy + u, u * FAINT_SCALE, u * FAINT_SCALE,
                 sin(t * 0.15f) * 0.20f, "faint", 1, 1, MascotSprite.LEGS_WIDE, body, hole)
             drawDizzy(c, cx, cy - MascotSprite.ROWS / 2f * u * FAINT_SCALE - u, u, inks[INK_STAR])
+            if (egg > 0) drawEgg(c, cx, cy, u, inks, hole)   // 홈 위젯 한 장: 뻗은 채로 곁에 알
             drawSparks(c, cx, cy, u, inks)
             return
         }
@@ -1243,6 +1244,24 @@ class Mascot {
 
     /** 테스트 — 기절이 끝날 때까지 걸리는 프레임. */
     fun faintFrames() = FAINT_FRAMES
+
+    /**
+     * 홈 위젯의 클로디 한 장 — 위젯은 그림 한 장이라 움직이지 않는다. 장면을 세워 그린다.
+     * `poke` 막 찔려 신난 얼굴 · `egg` 뻗은 채로 곁에(오른쪽) 알, 금 `cracks` 개 · 그 밖은 평소.
+     */
+    fun poseForWidget(stage: String, cracks: Int) {
+        rest()
+        when (stage) {
+            "poke" -> vy = -1.5f               // 신나서 눈웃음 (출렁이는 중으로 본다)
+            "egg" -> {
+                faint = FAINT_FRAMES / 2
+                layEgg()
+                eggSide = 1
+                eggAge = EGG_POP + 10
+                eggHits = cracks
+            }
+        }
+    }
 
     private companion object {
         const val PI = Math.PI.toFloat()

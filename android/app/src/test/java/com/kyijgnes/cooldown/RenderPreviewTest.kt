@@ -420,6 +420,91 @@ class RenderPreviewTest {
         assertEquals(1, opened)
     }
 
+    /**
+     * 넓은 홈 위젯 — **오른쪽 끝 클로디 칸**이 붙은 실제 틀(`widget_wide.xml`)을 그대로 불러 그린다.
+     * 평소 / 찔림 / 뻗고 곁에 알(금 0·1·2) / 판 속(빈 칸). 배경화면 대신 위젯을 두는 사람의 길이다.
+     */
+    @Test
+    @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+    fun `넓은 위젯 클로디 그림을 남긴다`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val d = ctx.resources.displayMetrics.density
+        val w = (320 * d).toInt()
+        val h = (80 * d).toInt()
+        val slot = (64 * d).toInt()
+        val states = listOf(
+            "평소" to com.kyijgnes.cooldown.widget.WidgetClaudi.State("idle", 0),
+            "찔림" to com.kyijgnes.cooldown.widget.WidgetClaudi.State("poke", 0),
+            "알" to com.kyijgnes.cooldown.widget.WidgetClaudi.State("egg", 0),
+            "알_금1" to com.kyijgnes.cooldown.widget.WidgetClaudi.State("egg", 1),
+            "알_금2" to com.kyijgnes.cooldown.widget.WidgetClaudi.State("egg", 2),
+            "판속" to com.kyijgnes.cooldown.widget.WidgetClaudi.State("away", 0),
+        )
+        for ((name, st) in states) {
+            val root = android.view.LayoutInflater.from(ctx).inflate(R.layout.widget_wide, null)
+            val gw = w - slot
+            val gh = minOf(h, (gw * 0.30f).toInt())
+            root.findViewById<android.widget.ImageView>(R.id.canvas)
+                .setImageBitmap(GaugeRenderer.wide(ctx, gw, gh, snap(37f, 62f), now, card = false))
+            root.findViewById<android.widget.ImageView>(R.id.claudi)
+                .setImageBitmap(com.kyijgnes.cooldown.widget.WidgetClaudi.bitmap(ctx, slot, gh, st))
+            root.measure(
+                View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
+            )
+            root.layout(0, 0, w, h)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).drawColor(0xFF3A5F85.toInt())   // 어두운 배경화면 위라고 치고
+            root.draw(Canvas(bmp))
+            save(bmp, "넓은위젯_클로디_$name.png")
+        }
+    }
+
+    /**
+     * 홈 위젯의 톡톡 — 다섯 번이면 뻗고 곁에 알, 알을 두 번 두드리면 금이 둘, 그다음 누르기는
+     * **방송이 아니라 판을 바로 여는 화면 열기**다(백그라운드 실행 제한을 피하려고). 알은 한참 두면 사라진다.
+     */
+    @Test
+    fun `위젯 클로디는 톡톡 다섯 번이면 알을 낳고 깨면 판을 연다`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val wc = com.kyijgnes.cooldown.widget.WidgetClaudi
+        val id = 7
+        var t = 1_000_000L
+        repeat(4) { wc.tap(ctx, id, t); t += 300 }
+        assertEquals("poke", wc.read(ctx, id, t).stage)
+        wc.tap(ctx, id, t)
+        assertEquals("다섯 번이면 뻗고 알", "egg", wc.read(ctx, id, t).stage)
+        assertFalse("알을 깨기 전엔 방송", org.robolectric.Shadows.shadowOf(wc.tapIntent(ctx, id, wc.read(ctx, id, t))).isActivityIntent)
+        wc.tap(ctx, id, t + 500)
+        wc.tap(ctx, id, t + 900)
+        val cracked = wc.read(ctx, id, t + 1000)
+        assertEquals(2, cracked.cracks)
+        assertTrue("금이 다 찼으면 다음 누르기는 판을 바로 연다",
+            org.robolectric.Shadows.shadowOf(wc.tapIntent(ctx, id, cracked)).isActivityIntent)
+        assertEquals("아무도 안 깨면 알은 사라진다", "idle",
+            wc.read(ctx, id, t + wc.EGG_LIFE_MS + 5_000).stage)
+
+        // 느릿느릿 누르면 안 뻗는다 (3초 안에 다섯 번이어야)
+        val slow = 8
+        repeat(6) { wc.tap(ctx, slow, t); t += 900 }
+        assertEquals("poke", wc.read(ctx, slow, t).stage)
+    }
+
+    /** 위젯에서 알을 깨면 뜨는 투명한 판 — 위젯이 있던 줄(여기선 화면 1500px 줄)에 판만 깔린다. */
+    @Test
+    fun `위젯 공룡 점프 판 그림을 남긴다`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val home = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+        WallpaperArt.render(ctx, Canvas(home), snap(37f, 62f), now, Look.DEFAULT, null, meter = false)
+        val v = com.kyijgnes.cooldown.dino.OverlayView(ctx, 312, android.graphics.Rect(860, 1440, 1040, 1560))
+        v.layout(0, 0, 1080, 2340)
+        val g = v.board.game
+        g.pressJump(); g.releaseJump()
+        repeat(900) { if (g.state == "run") { dinoBot(g); g.step() } }
+        v.board.paint(Canvas(home), v.top(), 1080f)
+        save(home, "위젯_공룡점프.png")
+    }
+
     @Test
     fun `초기화 시각이 지나면 0퍼센트로 본다`() {
         val past = Limit("5시간", 47f, now - 1_000L)
