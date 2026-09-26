@@ -44,9 +44,14 @@ object SharkPack {
     private const val SHADOW_H = 21.25f
     private const val SHADOW_GROW = 0.3f
 
+    private const val PKG = "com.kyijgnes.sharkwallpaper"
+    private const val TAG = "cooldown-wallpaper"
+    private const val RETRY_MS = 15_000L   // 못 읽었으면 이만큼 뒤에 다시 (매 프레임 두드리지 않게)
+
     private var checked = false
     private var present = false
-    private val art = HashMap<String, Bitmap?>()
+    private val art = HashMap<String, Bitmap>()        // 읽은 그림 — **읽은 것만** 담는다
+    private val failedAt = HashMap<String, Long>()     // 못 읽은 때 — RETRY_MS 뒤 다시 본다
     private var tinted: PorterDuffColorFilter? = null
     private var tintOf = 0
 
@@ -67,6 +72,7 @@ object SharkPack {
     fun forget() {
         checked = false
         art.clear()
+        failedAt.clear()
     }
 
     /**
@@ -172,21 +178,79 @@ object SharkPack {
         ),
     )
 
-    /** **잠겨 있으면 입을 다물고, 풀면 벌린다.** 그림은 상어 앱에서 한 번만 읽어 둔다. */
+    /**
+     * **잠겨 있으면 입을 다물고, 풀면 벌린다.** 그림은 상어 앱에서 한 번 읽어 두고 계속 쓴다.
+     *
+     * ★★ **못 읽은 것을 영영 기억하지 않는다**(2026-09-26 "갑자기 상어가 안 뜬다"). 예전엔 한 번 실패하면
+     *   null 을 담아 두고 프로세스가 죽을 때까지 다시 안 읽어서, 한순간의 실패가 **상어가 통째로 사라진 것**
+     *   으로 보였다. 지금은 `RETRY_MS` 뒤에 다시 읽는다.
+     * ★★ **읽는 길이 셋이다** — 하나가 막혀도 상어가 뜬다:
+     *   1. 상어 앱의 통로(provider). 원래 길이다. 그런데 이 길은 **상어 앱 프로세스를 띄워야** 해서,
+     *      아무도 안 여는 상어 앱을 갤럭시가 '잠자는 앱(깊은 잠)' 으로 넣으면 막힐 수 있다.
+     *   2. 상어 앱 **설치 파일의 그림을 직접**(`getResourcesForApplication`). 프로세스를 안 띄우므로 자고 있어도 된다.
+     *   3. 한 번이라도 읽었을 때 **우리 앱 안에 떠 둔 사본**(`filesDir/shark/`). 폰 안에만 있고 어디로도 안 나간다.
+     *   못 읽으면 까닭을 `cooldown-wallpaper` 로그에 남긴다.
+     */
     private fun sharkArt(ctx: Context, locked: Boolean): Bitmap? {
         val name = if (locked) "shark" else "shark_open"
-        if (art.containsKey(name)) return art[name]
-        val bmp = try {
-            ctx.contentResolver.openInputStream(Uri.parse("content://$AUTHORITY/$name")).use {
-                BitmapFactory.decodeStream(it)
-            }
-        } catch (e: Exception) {
-            null
-        } catch (e: OutOfMemoryError) {
-            null
+        art[name]?.let { return it }
+        val now = android.os.SystemClock.elapsedRealtime()
+        failedAt[name]?.let { if (now - it < RETRY_MS) return null }
+        val bmp = fromProvider(ctx, name) ?: fromApk(ctx, name) ?: fromCopy(ctx, name)
+        if (bmp == null) {
+            failedAt[name] = now
+            android.util.Log.w(TAG, "상어 그림($name)을 못 읽었다 — ${RETRY_MS / 1000}초 뒤 다시")
+            return null
         }
+        failedAt.remove(name)
         art[name] = bmp
         return bmp
+    }
+
+    /** 1. 상어 앱 통로 — 읽으면 사본도 떠 둔다. */
+    private fun fromProvider(ctx: Context, name: String): Bitmap? = try {
+        val bytes = ctx.contentResolver.openInputStream(Uri.parse("content://$AUTHORITY/$name"))
+            ?.use { it.readBytes() }
+        bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.also { keepCopy(ctx, name, bytes) }
+    } catch (e: Exception) {
+        android.util.Log.w(TAG, "상어 통로 막힘($name): $e")
+        null
+    } catch (e: OutOfMemoryError) {
+        null
+    }
+
+    /** 2. 상어 앱 설치 파일의 그림 — 상어 앱이 잠들어 있어도 읽힌다. */
+    private fun fromApk(ctx: Context, name: String): Bitmap? = try {
+        val res = ctx.packageManager.getResourcesForApplication(PKG)
+        val id = res.getIdentifier(name, "drawable", PKG)
+        if (id == 0) null else res.openRawResource(id).use { it.readBytes() }.let { bytes ->
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.also { keepCopy(ctx, name, bytes) }
+        }
+    } catch (e: Exception) {
+        android.util.Log.w(TAG, "상어 설치 파일 못 읽음($name): $e")
+        null
+    } catch (e: OutOfMemoryError) {
+        null
+    }
+
+    /** 3. 떠 둔 사본. */
+    private fun fromCopy(ctx: Context, name: String): Bitmap? = try {
+        val f = java.io.File(java.io.File(ctx.filesDir, "shark"), "$name.png")
+        if (f.exists()) BitmapFactory.decodeFile(f.path) else null
+    } catch (e: Exception) {
+        null
+    } catch (e: OutOfMemoryError) {
+        null
+    }
+
+    private fun keepCopy(ctx: Context, name: String, bytes: ByteArray) {
+        try {
+            val dir = java.io.File(ctx.filesDir, "shark").apply { mkdirs() }
+            val f = java.io.File(dir, "$name.png")
+            if (!f.exists() || f.length() != bytes.size.toLong()) f.writeBytes(bytes)
+        } catch (e: Exception) {
+            // 사본은 덤이다 — 못 떠도 지금 그림은 그린다
+        }
     }
 
     /** 어둡게에서는 곱하기로 상어를 깊은 바다색까지 내린다. 흰색이면 원본 그대로. */
