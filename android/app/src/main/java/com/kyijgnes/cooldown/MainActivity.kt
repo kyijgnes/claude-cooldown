@@ -1,7 +1,9 @@
 package com.kyijgnes.cooldown
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.text.format.DateFormat
 import android.view.View
@@ -36,6 +38,9 @@ class MainActivity : Activity() {
 
     /** 공룡 점프 판 — 떠 있는 동안만 있다 (게이지 자리에 얹힌다). */
     private var board: DinoView? = null
+
+    /** 판이 떠 있는 동안 뒤로 가기를 받는 것 (안드로이드 13+ 의 `OnBackInvokedCallback`). */
+    private var backCallback: Any? = null
 
     /** 이번에 앱을 켠 뒤 연결 화면으로 한 번 보냈나 (계속 튕겨 나가지 않게). */
     private var sentToPair = false
@@ -111,6 +116,7 @@ class MainActivity : Activity() {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         showValues()
         v.resume()
+        holdBack(true)
     }
 
     /** 판을 접고 게이지로 — 클로디가 펑 하고 돌아온다. */
@@ -123,9 +129,33 @@ class MainActivity : Activity() {
         claudi.resume()
         claudi.mascot.unmorph()
         showValues()
+        holdBack(false)
     }
 
-    @Deprecated("뒤로 가기를 판 닫기로 쓴다 (판이 없으면 원래대로)")
+    /**
+     * 뒤로 가기로 판을 닫는다. ★ **안드로이드 16(API 36)+ 에 targetSdk 36 이면 뒤로 가기 제스처가
+     * `onBackPressed` 를 부르지 않는다**(예측형 뒤로 가기가 기본으로 켜진다). 그래서 판이 떠 있는
+     * 동안만 `OnBackInvokedCallback` 을 걸어 둔다(없으면 앱이 통째로 닫힌다. 릴리스 린트가 잡았다).
+     * 13~15 에서 따로 켜지 않은 앱은 그 콜백 대신 아래 `onBackPressed` 가 불린다.
+     */
+    private fun holdBack(on: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val dispatcher = onBackInvokedDispatcher
+        if (on && backCallback == null) {
+            val cb = android.window.OnBackInvokedCallback { endGame() }
+            dispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb)
+            backCallback = cb
+        } else if (!on) {
+            (backCallback as? android.window.OnBackInvokedCallback)?.let {
+                dispatcher.unregisterOnBackInvokedCallback(it)
+            }
+            backCallback = null
+        }
+    }
+
+    /** 안드로이드 12 이하와, 13~15 에서 예측형 뒤로 가기를 안 켠 경우 — 여기로 온다. */
+    @SuppressLint("GestureBackNavigation")   // 16+ 는 위 holdBack 이 받는다
+    @Deprecated("16+ 는 holdBack 의 OnBackInvokedCallback 이 받는다")
     override fun onBackPressed() {
         if (board != null) endGame() else @Suppress("DEPRECATION") super.onBackPressed()
     }
