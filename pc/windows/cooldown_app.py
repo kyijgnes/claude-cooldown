@@ -250,7 +250,16 @@ def clamp_to_screen(x: int, y: int, w: int, h: int) -> tuple[int, int]:
     제목표시줄이 없어 끌어올 수도 없으니 창째로 안쪽에 넣는다.
     기준은 화면 전체가 아니라 **작업 영역**(작업표시줄을 뺀 자리)이다 —
     전체 기준이면 작업표시줄에 덮여 12px 만 남는다.
+
+    ★ 다만 **작업표시줄 띠 위에 놓은 슬림 바는 그 띠에 둔다**(`_on_band`, 2026-10-03).
+      고정을 풀고 작업표시줄을 따라 옮긴 것을 작업 영역으로 밀어 올리면 놓은 자리가
+      사라진다. 띠 안에서는 가로만 가두고 세로는 띠 한가운데에 맞춘다.
     """
+    bar = taskbar_rect()
+    if _on_band(bar, x, y, w, h):
+        left, top, right, bottom = bar
+        x = left if w >= right - left else max(left, min(x, right - w))
+        return x, top + (bottom - top - h) // 2
     try:
         import ctypes
         from ctypes import wintypes
@@ -500,6 +509,83 @@ def taskbar_slot(width: int, height: int) -> tuple[int, int] | None:
         return x, y
     except Exception:  # noqa: BLE001
         return None
+
+
+def taskbar_rect() -> tuple[int, int, int, int] | None:
+    try:
+        import win32gui
+
+        bar = win32gui.FindWindow("Shell_TrayWnd", None)
+        return tuple(win32gui.GetWindowRect(bar)) if bar else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _on_band(rect, x: int, y: int, w: int, h: int) -> bool:
+    """그 자리가 **작업표시줄 띠 위**인가 (띠 높이 안에 들어가고 한가운데가 띠 안).
+
+    고정을 풀고 작업표시줄을 따라 옮겨 둔 슬림 바가 여기에 든다. 그런 바도 작업표시줄에
+    덮이지 않게 지키고(`_stay_above`), 다시 켤 때 그 자리를 지킨다(`clamp_to_screen`).
+    """
+    if rect is None:
+        return False
+    left, top, right, bottom = rect
+    return (h <= bottom - top and top <= y + h // 2 <= bottom
+            and x < right and x + w > left)
+
+
+def on_taskbar(x: int, y: int, w: int, h: int) -> bool:
+    return _on_band(taskbar_rect(), x, y, w, h)
+
+
+_TASKBAR_CLASSES = ("Shell_TrayWnd", "Shell_SecondaryTrayWnd")
+
+
+def taskbar_over(root: tk.Tk) -> bool:
+    """**작업표시줄이** 이 창을 덮고 있는가.
+
+    ★★ 맨 앞으로 다시 올리는 것은 이때만이다(2026-10-03). 붙어 있는 동안 250ms 마다
+      무조건 올렸더니, 옆에 붙은 어드민 상담 알림판이 이 바에 조금이라도 걸치는 동안
+      두 위젯이 서로 제가 앞이라고 번갈아 올라서서 **깜빡였다.** 작업표시줄은 눌릴 때마다
+      스스로 맨 앞으로 오므로 그것만 이기면 된다. 다른 위젯과는 다투지 않는다.
+
+    창과 작업표시줄이 겹치는 띠 안의 세 점을 `WindowFromPoint` 로 짚어, 그 창의 맨 위
+    조상(GA_ROOT)이 작업표시줄이면 덮인 것이다(작업표시줄 안의 XAML 자식 창이 잡혀도
+    조상은 작업표시줄이다). 작업표시줄과 안 겹치면 늘 거짓.
+    ★ `WindowFromPoint` 는 제 스레드의 창에 메시지를 보낼 수 있어 `gil_held` 로 부른다.
+    """
+    rect = taskbar_rect()
+    if rect is None:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        u = gil_held("user32")
+        u.WindowFromPoint.restype = wintypes.HWND
+        u.WindowFromPoint.argtypes = [wintypes.POINT]
+        u.GetAncestor.restype = wintypes.HWND
+        u.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        x0, y0 = root.winfo_rootx(), root.winfo_rooty()
+        left, top = max(x0, rect[0]), max(y0, rect[1])
+        right = min(x0 + root.winfo_width(), rect[2])
+        bottom = min(y0 + root.winfo_height(), rect[3])
+        if right - left < 4 or bottom - top < 4:
+            return False
+        buf = ctypes.create_unicode_buffer(64)
+        for fx in (0.25, 0.5, 0.75):
+            hwnd = u.WindowFromPoint(
+                wintypes.POINT(int(left + (right - left) * fx), (top + bottom) // 2)
+            )
+            if not hwnd:
+                continue
+            u.GetClassNameW(u.GetAncestor(hwnd, 2) or hwnd, buf, 64)  # 2 = GA_ROOT
+            if buf.value in _TASKBAR_CLASSES:
+                return True
+        return False
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def gil_held(lib: str):
@@ -891,6 +977,8 @@ class App:
     # -------------------------------------------------- 메뉴
     def _build_menu(self) -> None:
         self.var_topmost = tk.BooleanVar(self.root, bool(self.state["topmost"]))
+        self.var_dock = tk.BooleanVar(self.root, bool(self.state["dock"]))
+        self._dock_item = False   # 메뉴에 `작업표시줄에 고정` 이 들어 있나 (`_sync_dock_item`)
         self.var_autostart = tk.BooleanVar(self.root, autostart_enabled())
         self.var_skin = tk.StringVar(self.root, self.skin.key)
         self.var_theme = tk.StringVar(self.root, self.state["theme"])
@@ -903,6 +991,7 @@ class App:
         )
 
         # 메인 메뉴는 **갈래(하위 메뉴)로만** 이룬다 — 하나의 앱이지만 기능은 직관적으로 분리.
+        # 낱개는 맨 아래 종료와, 작업표시줄 바일 때만 그 바로 위에 서는 `작업표시줄에 고정` 뿐.
         #   · 사용량: 지금 이 창의 속도 · 쌓인 날들의 통계 (읽는 쪽)
         #   · 디자인: 스킨 넷을 곧바로 + 밝기·항상 위 (옛 이름 '쿨다운 (사용량 표시)')
         #   · 클로드 모닝 스타터: 5시간 창을 앵커 시각에 맞춰 여는 기능
@@ -950,8 +1039,8 @@ class App:
             )
         cool.add_cascade(label="밝기", menu=theme)
 
-        # '작업표시줄에 붙이기' 는 따로 두지 않는다 — 여기서 '작업표시줄 슬림 바' 를 고르면
-        # 바로 작업표시줄에 붙고, 끌어 옮기면 그 자리에 남는다.
+        # 여기서 '작업표시줄 슬림 바' 를 고르면 바로 작업표시줄에 붙고, 끌어 옮기면 그 자리에
+        # 남는다. 고정을 켜고 끄는 것은 이 갈래가 아니라 메뉴 맨 아래(`_sync_dock_item`).
         cool.add_checkbutton(
             label="항상 위에 표시", variable=self.var_topmost, command=self.toggle_topmost
         )
@@ -1140,16 +1229,67 @@ class App:
                 self.refresh_now()
             return
 
-        # 확실히 끌어 옮겼다 — 자유 위치로 떼어 낸다. (다시 붙이려면 우클릭 메뉴에서)
+        # 확실히 끌어 옮겼다 — 자유 위치로 떼어 낸다. (다시 붙이려면 우클릭 > 작업표시줄에 고정)
+        # 작업표시줄을 따라 옮겼으면 작업표시줄 위 그대로 둔다(`clamp_to_screen`).
         x, y = clamp_to_screen(
             self.root.winfo_x(), self.root.winfo_y(), self.skin.width, self.height
         )
         self.root.geometry(f"+{x}+{y}")
         self.state.update(x=x, y=y, dock=False)
-        self.root.attributes("-topmost", bool(self.state["topmost"]))
+        on_bar = on_taskbar(x, y, self.skin.width, self.height)
+        self.root.attributes("-topmost", on_bar or bool(self.state["topmost"]))
+        self._topmost_now = None   # 손으로 건드렸다 — 다음 tick 이 다시 맞춘다
         save_state(self.state)
 
+    def _sync_dock_item(self) -> None:
+        """작업표시줄 바(슬림·좁은 슬림)일 때만 메뉴 맨 아래, `종료` 바로 위에
+        `작업표시줄에 고정` 을 세운다. 다른 디자인에선 뺀다(붙일 수 없는 디자인이다).
+
+        ★ 갈래 안이 아니라 **메인 메뉴에 곧바로** 둔다(2026-10-03 지시: 누르기 편하게).
+          바가 화면 맨 아래라 메뉴는 위로 펼쳐지고, 맨 아래 줄이 손가락에서 가장 가깝다.
+          예전엔 고정 토글이 없어 '디자인 > 슬림 바 다시 고르기' 로만 되붙였다.
+        """
+        want = bool(self.skin.dockable)
+        if want and not self._dock_item:
+            at = self._menu_at("command", "종료")
+            self.menu.insert_checkbutton(
+                self.menu.index("end") + 1 if at is None else at,
+                label="작업표시줄에 고정", variable=self.var_dock,
+                command=self.toggle_dock,
+            )
+            self._dock_item = True
+        elif self._dock_item and not want:
+            at = self._menu_at("checkbutton", "작업표시줄에 고정")
+            if at is not None:
+                self.menu.delete(at)
+            self._dock_item = False
+        self.var_dock.set(bool(self.state["dock"]) and want)
+
+    def _menu_at(self, kind: str, label: str) -> int | None:
+        """메인 메뉴에서 그 이름의 줄 번호. ★ Tk 의 이름 찾기(`index("종료")`)는 글로브
+        무늬로 맞춰 보므로 쓰지 않고 줄마다 대조한다."""
+        end = self.menu.index("end")
+        for i in range((end if end is not None else -1) + 1):
+            if self.menu.type(i) == kind and self.menu.entrycget(i, "label") == label:
+                return i
+        return None
+
+    def toggle_dock(self) -> None:
+        """고정을 켜면 작업표시줄 빈 자리로 붙고, 끄면 **그 자리에 그대로** 둔다
+        (끌어서 옮길 수 있게 될 뿐 옛 떼어 둔 자리로 튀지 않는다)."""
+        want = bool(self.var_dock.get())
+        if want:
+            self.state["dock"] = True
+            save_state(self.state)
+            self.show_window()
+        else:
+            self.state.update(dock=False, x=self.root.winfo_x(), y=self.root.winfo_y())
+            save_state(self.state)
+            self.show_window()   # 같은 자리 · 작업표시줄 위면 '항상 위' 를 그대로 지킨다
+        applog(f"작업표시줄 고정 → {want}")
+
     def _popup(self, e):
+        self._sync_dock_item()
         self.var_topmost.set(bool(self.state["topmost"]))
         self.var_autostart.set(autostart_enabled())
         self.var_skin.set(self.skin.key)
@@ -1342,7 +1482,9 @@ class App:
                 self.state["x"], self.state["y"], self.skin.width, self.height
             )
         # 작업표시줄 자체가 항상 위라, 그 위에 얹으려면 이쪽도 항상 위여야 한다
-        self.root.attributes("-topmost", docked or bool(self.state["topmost"]))
+        # (고정을 풀고 작업표시줄 위에 옮겨 둔 것도 같다)
+        on_bar = docked or on_taskbar(spot[0], spot[1], self.skin.width, self.height)
+        self.root.attributes("-topmost", on_bar or bool(self.state["topmost"]))
         self._topmost_now = None   # 손으로 건드렸다 — 다음 tick 이 다시 맞춘다
         self.root.geometry(f"{self.skin.width}x{self.height}+{spot[0]}+{spot[1]}")
         round_corners(self.root)
@@ -1556,7 +1698,8 @@ class App:
           돌아올 때 자리·모양을 다시 잡아야 한다). 끝나면 원래대로 되돌린다.
         """
         try:
-            docked = self.state["dock"] and self.skin.dockable
+            # 고정을 풀었어도 작업표시줄 위에 옮겨 둔 바는 붙어 있는 것처럼 지킨다
+            docked = (self.state["dock"] and self.skin.dockable) or self._on_taskbar()
             behind = fullscreen_over(self.root)
             want = False if behind else (docked or bool(self.state["topmost"]))
             if want != self._topmost_now:
@@ -1570,13 +1713,21 @@ class App:
                     #   그 자리에서 여전히 영상 위에 있다. 한 번 **맨 뒤로 내린다.**
                     #   (Tk 의 lower 는 Tcl 안에서 SetWindowPos 를 부르므로 GIL 문제가 없다)
                     self.root.lower()
-            if not behind and docked and not self._menu_open and not popup_menu_open():
+            # ★★ **작업표시줄에 덮였을 때만** 올린다(`taskbar_over`). 무조건 올리면 옆의
+            #   어드민 상담 알림판과 걸쳐 있는 동안 둘이 번갈아 앞에 서며 깜빡인다.
+            if (not behind and docked and not self._menu_open
+                    and not popup_menu_open() and taskbar_over(self.root)):
                 raise_above_taskbar(self.root)
         except Exception:  # noqa: BLE001
             pass
         finally:
             if self.alive:
                 self.root.after(STAY_TICK, self._stay_above)
+
+    def _on_taskbar(self) -> bool:
+        """고정을 풀었어도 작업표시줄 위에 놓여 있는가 (슬림 바를 작업표시줄을 따라 옮긴 것)."""
+        r = self.root
+        return on_taskbar(r.winfo_x(), r.winfo_y(), r.winfo_width(), r.winfo_height())
 
     def _reassert_dock(self):
         """작업표시줄 아이콘이 늘거나 줄면 빈 자리가 옮겨간다 — 갱신할 때마다 다시 맞춘다."""
@@ -2872,7 +3023,8 @@ class App:
         r = self.root
         x, y, h0 = r.winfo_x(), r.winfo_y(), r.winfo_height()
         w, h = max(self.skin.width, cooldown_dino.MIN_W), cooldown_dino.H
-        docked = bool(self.state["dock"]) and self.skin.dockable
+        # 작업표시줄 위에 옮겨 둔 바도 붙은 바처럼 위로 자란다
+        docked = (bool(self.state["dock"]) and self.skin.dockable) or self._on_taskbar()
         x, y = clamp_to_screen(x, y + h0 - h if docked else y, w, h)
         self.body.pack_forget()
         if getattr(self, "_status", None) is not None:
