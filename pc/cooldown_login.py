@@ -26,6 +26,12 @@
    잇기` 에 멎어 있었다. 그래서 자식에게는 늘 `cooldown_ping.child_env()` 를 준다 —
    까닭·실측은 그 함수 주석에.
 
+**로그인 자체도 한 달이면 끝난다**(`expiry`). 위의 되살리기는 리프레시 토큰이 살아 있어야
+되는 일이고, 그 리프레시 토큰은 `refreshTokenExpiresAt`(발급 약 27~30일 뒤)에 **절대 만료**된다.
+원격 대기가 쉬지 않고 돌아도 늘어나지 않는다. 그 순간 CLI 가 자격 파일의 토큰을 빈 값으로
+지우고 사람이 `claude auth login` 을 다시 해야 한다(2026-10-07 05:21 만료 → 09:34 지워짐,
+폰 원격 세션에서 '다시 로그인해야 합니다' 를 보고서야 알았다). 그래서 3일 전부터 미리 알린다.
+
 단독 확인:
     python cooldown_login.py            상태만 보기
     python cooldown_login.py --revive   사용량 안 쓰는 되살리기 한 번
@@ -37,6 +43,8 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from cooldown_ping import child_env, find_claude
 import cooldown_core
@@ -62,6 +70,85 @@ STALE = "stale"  # 로그인은 살아 있는데 토큰만 낡았다 → 되살�
 LOGGED_OUT = "logged_out"  # 진짜로 로그아웃됐다 → 사람이 다시 로그인해야 한다
 NO_CLI = "no_cli"  # 클로드 코드가 이 PC 에 없다 → 되살릴 방법이 없다
 UNKNOWN = "unknown"
+
+# 로그인이 끝나는 날 며칠 전부터 알릴지. **달력 날짜로 센다** — 11/03 23:11 에 끝나면
+# 10/31 하루 내내 D-3 이다(시각으로 세면 같은 날 안에서 D-3 이 D-2 로 바뀐다).
+WARN_DAYS = 3
+# 가짜 자격 파일 자리(시험용). 이 환경변수가 있으면 **로그인 만료 판정만** 그 파일을 읽는다 —
+# 사용량 조회·되살리기는 진짜 파일 그대로라, 가짜 토큰이 서버로 나갈 일이 없다.
+FAKE_ENV = "COOLDOWN_FAKE_LOGIN"
+
+
+@dataclass(frozen=True)
+class Expiry:
+    """클로드 코드 로그인(리프레시 토큰)이 언제 끝나나. 토큰 원문은 담지 않는다."""
+
+    at: datetime | None  # 끝나는 시각 (UTC aware). 자격 파일에 없으면 None
+    gone: bool  # 이미 끝났다 — 사람이 다시 로그인해야 한다
+    days: int | None  # 끝나는 날까지 남은 날수(달력). 모르거나 끝났으면 None
+
+    @property
+    def soon(self) -> bool:
+        """WARN_DAYS 안쪽으로 다가왔다 (아직 안 끝남)."""
+        return not self.gone and self.days is not None and self.days <= WARN_DAYS
+
+    @property
+    def short(self) -> str:
+        """위젯 알림 자리에 얹는 한 마디. 알릴 것이 없으면 빈 문자열."""
+        if self.gone:
+            return "로그인 필요"
+        if not self.soon:
+            return ""
+        return "로그인 만료 오늘" if self.days == 0 else f"로그인 만료 D-{self.days}"
+
+    @property
+    def when(self) -> str:
+        """끝나는 시각 `11/03 23:11`. 모르면 빈 문자열."""
+        return f"{self.at.astimezone():%m/%d %H:%M}" if self.at else ""
+
+
+def cred_path() -> str:
+    """로그인 만료 판정이 읽는 자격 파일. 시험할 때는 FAKE_ENV 가 가리키는 가짜."""
+    return os.environ.get(FAKE_ENV) or cooldown_core.CRED_PATH
+
+
+def expiry(now: datetime | None = None) -> Expiry | None:
+    """자격 파일만 보고 로그인이 언제 끝나나 판정한다. **CLI 를 부르지 않는다**(1분마다 불러도 공짜).
+
+    풀린 것으로 보는 셋(2026-10-07 실측: 갱신에 실패한 CLI 가 남긴 모양이 이렇다):
+      · accessToken 이나 refreshToken 이 빈 값
+      · expiresAt 이 0
+      · refreshTokenExpiresAt 이 지났다(토큰은 아직 남아 있어도 다음 갱신에서 지워진다)
+    파일이 없거나 못 읽으면(CLI 가 쓰는 중) None — 모를 때는 아무것도 띄우지 않는다.
+    """
+    try:
+        with open(cred_path(), encoding="utf-8") as f:
+            oauth = json.load(f).get("claudeAiOauth")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(oauth, dict):
+        return None
+
+    raw = oauth.get("refreshTokenExpiresAt")
+    at = None
+    if isinstance(raw, (int, float)) and raw > 0:
+        try:
+            at = datetime.fromtimestamp(raw / 1000, timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            at = None
+
+    now = now or datetime.now(timezone.utc)
+    wiped = (
+        not oauth.get("accessToken")
+        or not oauth.get("refreshToken")
+        or oauth.get("expiresAt") == 0
+    )
+    if wiped or (at is not None and now >= at):
+        return Expiry(at, True, None)
+    if at is None:  # 옛 CLI 라 끝나는 날을 안 적어 둔다 — 알릴 길이 없다
+        return Expiry(None, False, None)
+    days = (at.astimezone().date() - now.astimezone().date()).days
+    return Expiry(at, False, days)
 
 
 def _run(args: list[str], timeout: int) -> tuple[int, str]:
@@ -155,20 +242,29 @@ def login_command() -> str:
     return "claude auth login"
 
 
+def login_cli() -> str | None:
+    """다시 로그인에 쓸 CLI. **npm 전역 것을 먼저** 고른다 — 원격 대기·핑이 쓰는 것이 그것이다.
+    (자격 파일은 어느 CLI 든 같은 `~/.claude/.credentials.json` 이라, 없으면 찾은 것으로 한다)"""
+    npm = os.path.join(os.environ.get("APPDATA", ""), "npm", "claude.cmd")
+    return npm if os.path.exists(npm) else find_claude()
+
+
 def open_login_console() -> bool:
-    """`claude auth login` 을 **보이는 콘솔 창**에서 시작한다.
+    """`claude auth login` 을 **보이는 파워셸 창**에서 시작한다.
 
     로그인 자체는 브라우저에서 사람이 한다 — 위젯은 창만 열어 준다
-    (자격 증명을 대신 넣지 않는다).
+    (자격 증명을 대신 넣지 않는다). 승인 뒤 브라우저가 내준 코드를 이 창에 붙여 넣어야 끝난다.
     """
-    claude = find_claude()
+    claude = login_cli()
     if not claude:
         return False
+    quoted = "'" + claude.replace("'", "''") + "'"
+    script = f"$Host.UI.RawUI.WindowTitle = '클로드 코드 로그인'; & {quoted} auth login"
     try:
         subprocess.Popen(
-            f'start "클로드 코드 로그인" cmd /k "{claude}" auth login',
-            shell=True,
+            ["powershell", "-NoExit", "-NoProfile", "-Command", script],
             env=child_env(),  # ★ 장기 토큰이 물려 가면 로그인해도 그쪽이 이긴다
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
         )
         return True
     except Exception:  # noqa: BLE001
@@ -180,6 +276,12 @@ def open_login_console() -> bool:
 if __name__ == "__main__":
     exp = cooldown_core.token_expiry()
     print(f"토큰 만료: {exp.astimezone():%Y-%m-%d %H:%M} " if exp else "토큰 만료: 모름 ")
+    login = expiry()
+    if login is None:
+        print("로그인 유지: 모름")
+    else:
+        left = "끝남" if login.gone else f"{login.days}일 남음" if login.days is not None else "날짜 없음"
+        print(f"로그인 유지: {login.when or '-'} ({left}) · 위젯 알림: {login.short or '없음'}")
     st = state()
     print(f"상태: {st}")
     if st != OK:

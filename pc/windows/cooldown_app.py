@@ -180,6 +180,9 @@ UNDOCK_SLOP = 120  # 붙여 둔 상태에선 이만큼 넘게 끌어야 떼어 �
 MANUAL_FLOOR = 15  # '지금 새로고침' 을 연타해도 이 간격은 지킨다 (초)
 REVIVE_GAP = 600  # 토큰이 낡았을 때 조용히 되살려 보는 간격 (초)
 REVIVE_TRIES = 2  # 연달아 이만큼 실패하면 자동 시도를 멈춘다 (사람이 누를 때까지)
+# 자격 파일이 아예 없을 때만 `claude auth status` 로 로그인돼 있나 묻는 간격 (초).
+# 파일이 있으면 그것만 보고 판정하므로(공짜) CLI 를 띄울 일이 없다.
+AUTH_GAP = 1800
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
 # 윈도우 업데이트가 재시작을 기다리는지 보는 주기 (초). 레지스트리 두 곳을 읽는
 # 것뿐이라 1ms 안쪽이지만, 팻말은 하루에 몇 번 서지도 않으므로 1분이면 넉넉하다.
@@ -804,6 +807,16 @@ class App:
         self._login_state = ""  # cooldown_login 의 상태 낱말 (모르면 빈 문자열)
         self._login_account = ""  # 로그인된 계정 (알아냈을 때만)
         self._login_render = None  # 로그인 팝업이 떠 있으면 그걸 다시 그리는 함수
+        # 로그인 자체가 끝나는 날 — 리프레시 토큰은 약 한 달 뒤 **절대 만료**된다.
+        # 자격 파일만 보고 1분마다 판정한다(`_expiry_tick`). 모르면 None.
+        self._expiry: cooldown_login.Expiry | None = None
+        self._login_shown = ""  # 위젯에 얹어 둔 로그인 한 마디 (바뀔 때만 다시 그린다)
+        self._relogin_item = False  # 트레이 메뉴에 `클로드 다시 로그인` 이 보이나
+        # 자격 파일이 없을 때만 CLI 에게 묻는다 — 그 답(로그인됐나, 모르면 None)
+        self.auth_out: queue.Queue = queue.Queue()
+        self._auth_busy = False
+        self._auth_at = float("-inf")  # 마지막으로 물은 때 (monotonic)
+        self._auth_logged_in: bool | None = None
 
         # 폰으로 보내기 — 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다
         self.push_cfg = cooldown_push.load_cfg()
@@ -876,6 +889,8 @@ class App:
         self.root.after(3000, self._ping_tick)  # 첫 조회가 들어올 시간을 준 뒤 시작
         # 재시작 대기는 켜자마자 본다 — 자고 일어나면 이미 밀려 있는 것이 흔하다
         self.root.after(1000, self._reboot_tick)
+        # 로그인이 끝나는 날도 켜자마자 — 자격 파일 하나 읽는 것이라 기다릴 까닭이 없다
+        self.root.after(1200, self._expiry_tick)
         # 원격 대기는 사용량과 무관하므로 곧바로 — 켜 두기로 했으면 여기서 되살아난다
         self.root.after(1500, self._remote_tick)
 
@@ -1128,6 +1143,14 @@ class App:
                     lambda: self.commands.put("apply_update"),
                     visible=lambda item: self._update_pending is not None,
                 ),
+                # 클로드 코드 로그인이 끝났거나 끝나는 날이 다가왔을 때만 나타난다.
+                # ★ 트레이 메뉴는 한 번 지어 두고 다시 안 짓는다 — 나타나고 사라질 때
+                #   `_expiry_tick` 이 `update_menu()` 를 부른다.
+                pystray.MenuItem(
+                    "클로드 다시 로그인",
+                    lambda: self.commands.put("relogin"),
+                    visible=lambda item: self._relogin_item,
+                ),
                 pystray.MenuItem("지금 새로고침", lambda: self.refresh_now()),
                 pystray.MenuItem(
                     "이번 주 사용 속도", lambda: self.commands.put("pace")
@@ -1223,7 +1246,8 @@ class App:
             # ★ 로그인이 막혀 있으면 새로고침은 어차피 헛일이다 (토큰이 낡은 걸
             #   이미 안다) — 그 클릭을 **고칠 수 있는 곳**으로 보낸다. 그래서
             #   위젯이 '눌러서 로그인 잇기' 라고 적어 둘 수 있다.
-            if isinstance(self.last_error, LoginRequired):
+            #   값은 멀쩡한데 로그인이 끝나 `로그인 필요` 가 떠 있을 때도 같다.
+            if isinstance(self.last_error, LoginRequired) or self._login_gone():
                 self.open_login()
             else:
                 self.refresh_now()
@@ -1550,6 +1574,7 @@ class App:
                 "pace": self.open_pace,
                 "stats": self.open_stats,
                 "login": self.open_login,
+                "relogin": self.relogin,
                 "apply_update": self.apply_update,  # [업데이트 대기]
             }[cmd]()
             if cmd == "quit":
@@ -1634,6 +1659,16 @@ class App:
                 break
             self._on_revive_result(ok, state, account)
 
+        # 자격 파일이 없을 때 CLI 에게 물어본 답 (로그인됐나)
+        while True:
+            try:
+                logged_in = self.auth_out.get_nowait()
+            except queue.Empty:
+                break
+            self._auth_busy = False
+            self._auth_logged_in = logged_in
+            self._on_expiry()
+
         while True:
             try:
                 self.push_error = self.push_out.get_nowait()
@@ -1657,7 +1692,8 @@ class App:
                 return "로그인 잇는 중"
             if self._login_state == cooldown_login.NO_CLI:
                 return "클로드 코드 없음"
-            if self._login_state == cooldown_login.LOGGED_OUT:
+            # 로그아웃(CLI 가 말함) · 로그인이 끝남(자격 파일로 확실) — 잇기로는 안 된다
+            if self._login_gone():
                 return "클로드 코드 로그인 필요"
             if isinstance(err, TokenStale):
                 return "눌러서 로그인 잇기"
@@ -2126,6 +2162,123 @@ class App:
 
     # --------------------------------------- 윈도우 업데이트 재시작 대기 끝
 
+    # ------------------------------------------- 클로드 코드 로그인이 끝나는 날
+    # 아래 '로그인 잇기' 는 리프레시 토큰이 살아 있어야 되는 일이다. 그 리프레시 토큰은 발급
+    # 약 한 달 뒤 **절대 만료**되고(원격 대기가 쉬지 않고 돌아도 안 늘어난다) 그때는 사람이
+    # `claude auth login` 을 다시 해야 한다. 2026-10-07 에 폰 원격 세션이 '다시 로그인해야
+    # 합니다' 로 멎고서야 알았다. 판정은 cooldown_login.expiry 에만 있다. 여기는 언제 알릴지만.
+
+    def _expiry_tick(self) -> None:
+        """자격 파일을 읽어 판정한다(CLI 를 안 부른다, 1분마다). 파일이 없을 때만 CLI 에게 묻는다."""
+        try:
+            exp = cooldown_login.expiry()
+            # 못 읽은 것(CLI 가 쓰는 중)은 옛 판정을 지킨다 — 안 그러면 줄이 1분 사라졌다 돌아온다.
+            # 파일이 아예 없을 때만 '모름' 으로 바꾸고 CLI 에게 묻는다.
+            if exp is not None or not os.path.exists(cooldown_login.cred_path()):
+                self._expiry = exp
+            if self._expiry is None:
+                self._auth_check()
+            else:
+                self._auth_logged_in = None  # 파일이 있으면 그것만 본다
+            self._on_expiry()
+        except Exception:  # noqa: BLE001  못 읽었으면 다음 차례에 다시
+            pass
+        finally:
+            if self.alive:
+                self.root.after(TICK * 1000, self._expiry_tick)
+
+    def _auth_check(self) -> None:
+        """`claude auth status` 를 창 없이 묻는다(몇 초 걸려 제 스레드에서). AUTH_GAP 에 한 번."""
+        now = time.monotonic()
+        if self._auth_busy or now - self._auth_at < AUTH_GAP:
+            return
+        self._auth_busy = True
+        self._auth_at = now
+
+        def worker():
+            try:
+                status = cooldown_login.auth_status()
+                self.auth_out.put(None if status is None else bool(status.get("loggedIn")))
+            except Exception:  # noqa: BLE001
+                self.auth_out.put(None)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _login_gone(self) -> bool:
+        """다시 로그인해야 하나 — 자격 파일이 1순위, 파일이 없으면 CLI 가 말한 것."""
+        if self._login_state == cooldown_login.LOGGED_OUT:
+            return True
+        if self._expiry is not None:
+            return self._expiry.gone
+        return self._auth_logged_in is False
+
+    def _login_short(self) -> str:
+        """위젯 알림 자리의 한 마디 — `로그인 필요` · `로그인 만료 D-3`. 없으면 빈 문자열."""
+        if self._login_gone():
+            return "로그인 필요"
+        return self._expiry.short if self._expiry is not None else ""
+
+    def _login_line(self) -> str:
+        """트레이 풍선 도움말·알림의 한 줄. 위젯보다 자리가 있어 끝나는 시각까지 말한다."""
+        if self._login_gone():
+            return "클로드 코드 로그인 필요"
+        exp = self._expiry
+        if exp is None or not exp.soon:
+            return ""
+        return f"클로드 코드 {exp.short} ({exp.when})"
+
+    def _on_expiry(self) -> None:
+        """판정이 바뀌었으면 위젯·트레이 메뉴를 고치고, 알릴 날이면 한 번 알린다."""
+        short = self._login_short()
+        if short != self._login_shown:
+            self._login_shown = short
+            self._redraw()
+            self._refresh_error_text()  # 막혀 있으면 오류 한 줄도 (`클로드 코드 로그인 필요`)
+            self._render_login()
+            if self.last_usage is not None and self.last_error is None:
+                self.tray.title = self._tray_text(self.last_usage)[:127]
+        item = bool(short)
+        if item != self._relogin_item:
+            self._relogin_item = item
+            try:
+                self.tray.update_menu()
+            except Exception:  # noqa: BLE001 — 트레이가 아직 안 떴으면 뜰 때 짓는다
+                pass
+        self._login_warn()
+
+    def _login_warn(self) -> None:
+        """트레이 알림은 **종류마다 하루 한 번만**(`D-3` · `로그인 필요`).
+
+        보낸 날을 상태 파일에 적어 두므로 껐다 켜도 같은 날은 다시 안 뜬다. 판정이 들락거려도
+        (CLI 가 파일을 쓰는 순간 등) 날짜로 막으므로 되풀이되지 않는다 — 업데이트 대기 알림이
+        하룻밤에 100통 쌓였던 일(2026-08-14)을 되풀이하지 않는다.
+        """
+        line = self._login_line()
+        if not line:
+            return
+        kind = "gone" if self._login_gone() else "soon"
+        today = f"{datetime.now():%Y-%m-%d}"
+        warned = self.state.get("login_warned")
+        if not isinstance(warned, dict):
+            warned = {}
+        if warned.get(kind) == today:
+            return
+        warned[kind] = today
+        self.state["login_warned"] = warned
+        save_state(self.state)
+        applog(f"로그인 알림 — {line}")
+        self._tray_say(f"{line}\n트레이 메뉴 > 클로드 다시 로그인")
+
+    def relogin(self) -> None:
+        """`클로드 다시 로그인` — 장기 토큰을 뺀 파워셸 창에 `claude auth login` 을 띄운다.
+        로그인은 사람이 브라우저에서 한다. 끝나면 `_expiry_tick` 이 1분 안에 알아챈다."""
+        if cooldown_login.open_login_console():
+            applog("클로드 다시 로그인 — 로그인 창 열기")
+        else:
+            self._tray_say("클로드 코드 없음")
+
+    # --------------------------------------- 클로드 코드 로그인이 끝나는 날 끝
+
     def _notice_text(self) -> str:
         """위젯에 얹을 알림 문구 (값은 멀쩡할 때) — 자동 시작이 실패했거나 놓쳤을 때.
 
@@ -2139,11 +2292,18 @@ class App:
         # [업데이트 대기] 핑보다 앞선다 — 이건 놓치면 작업이 통째로 날아간다
         if self._update_pending is not None:
             return self._update_pending.short
+        # 클로드 코드 로그인이 끝났으면 핑·원격 대기도 다 막힌다 — 그 실패들의 뿌리라 앞에 둔다
+        login = self._login_short()
+        if login and self._login_gone():
+            return login
         if self.ping_cfg.get("enabled"):
             if self._ping_fail is not None:  # 실패가 놓침보다 급하다 (지금 안 열린 것)
                 return f"{self._ping_fail[0]:%H:%M} 핑 실패"
             if self._missed_dt is not None:
                 return f"{self._missed_dt:%H:%M} 핑 놓침"
+        # 끝나는 날이 다가오는 것(`로그인 만료 D-3`)은 핑 뒤다 — 지금 막힌 것은 없다
+        if login:
+            return login
         # [오래 도는 작업] 핑보다 뒤다 — 지금 당장 잃는 것은 없지만, 클로드가 업데이트되면
         # 끊기므로 사람이 알고는 있어야 한다. 이름은 자리가 없어 빼고 기간만 말한다.
         long_job = self._long_job()
@@ -2217,6 +2377,9 @@ class App:
         # 위젯 알림 자리는 한 줄뿐이라 '몇 건인지'까지는 못 적는다 — 여기서 마저 말한다
         if self._reboot_pending is not None:
             parts.append(f"{self._reboot_pending.line}  ·  {self._reboot_pending.when}")
+        login = self._login_line()
+        if login:
+            parts.append(login)
         if self.ping_cfg.get("enabled"):
             if self._missed_dt is not None:
                 parts.append(f"자동 시작 놓침 {self._missed_dt:%H:%M} (컴퓨터 꺼짐 등)")
@@ -2265,6 +2428,9 @@ class App:
         띄우지 않는다. 그 뒤로는 사람이 '지금 잇기' 를 누를 때 다시 시도한다.
         """
         if self._revive_busy or self._revive_fails >= REVIVE_TRIES:
+            return
+        # 로그인 자체가 끝났으면(자격 파일로 확실) CLI 도 새 토큰을 못 낸다 — 헛걸음 안 한다
+        if self._expiry is not None and self._expiry.gone:
             return
         now = time.monotonic()
         if self._revive_at and now - self._revive_at < REVIVE_GAP:
@@ -2321,6 +2487,7 @@ class App:
             self._revive_fails += 1
         self._refresh_error_text()
         self._render_login()
+        self._on_expiry()  # 로그아웃으로 판정됐으면 `로그인 필요`·트레이 메뉴도 곧바로
 
     def _refresh_error_text(self) -> None:
         """오류가 떠 있는 채로 로그인 상태만 바뀌었을 때 그 한 줄만 다시 단다."""
@@ -2899,7 +3066,10 @@ class App:
                 stale = token_stale()
                 busy = self._revive_busy
                 st = self._login_state
+                if not st and self._login_gone():
+                    st = cooldown_login.LOGGED_OUT  # 자격 파일만 봐도 끝난 게 확실하다
                 expiry = token_expiry()
+                login = self._expiry
 
                 # ---- 클로드 코드: 로그인돼 있나
                 # 아직 안 알아본 상태(빈 문자열)에서 '로그인됨' 이라고 적지 않는다 —
@@ -2925,11 +3095,31 @@ class App:
                     since = f"{expiry.astimezone():%H:%M} 부터 막힘" if expiry else "막힘"
                     self._pair(wrap, "사용량 읽기", since, P.red)
 
-                if stale is False and not busy:
+                # ---- 로그인 유지: 다시 로그인해야 하는 때 (약 한 달마다 온다)
+                if login is not None and (login.at is not None or login.gone):
+                    if login.gone:
+                        until = f"{login.when} 끝남" if login.at else "끝남"
+                        self._pair(wrap, "로그인 유지", until, P.red)
+                    elif login.soon:
+                        until = (
+                            f"오늘 {login.at.astimezone():%H:%M} 까지"
+                            if login.days == 0
+                            else f"D-{login.days} · {login.when} 까지"
+                        )
+                        self._pair(wrap, "로그인 유지", until, P.amber)
+                    else:
+                        self._pair(wrap, "로그인 유지", f"{login.when} 까지", P.green)
+
+                if stale is False and not busy and st != cooldown_login.LOGGED_OUT:
                     tk.Label(
                         wrap, text="이어져 있어요.", bg=P.bg, fg=P.faint,
                         font=(KR, 9), anchor="w",
                     ).pack(fill="x", pady=(10, 2))
+                    if login is not None and login.soon:
+                        # 끝나는 날 전에 다시 로그인하면 거기서부터 한 달이 새로 선다
+                        self._themed_button(
+                            wrap, "다시 로그인", self.relogin, primary=True, width=0
+                        ).pack(anchor="e")
                     self._refit_panel(top, W)
                     return
 
@@ -2956,9 +3146,7 @@ class App:
                     ).pack(fill="x", pady=(10, 8))
                     if st == cooldown_login.LOGGED_OUT:
                         self._themed_button(
-                            wrap, "로그인 창 열기",
-                            cooldown_login.open_login_console,
-                            primary=True, width=0,
+                            wrap, "로그인 창 열기", self.relogin, primary=True, width=0,
                         ).pack(anchor="e")
                     self._refit_panel(top, W)
                     return
@@ -2991,7 +3179,13 @@ class App:
 
             # 막혀 있는데 아직 까닭을 안 알아봤으면(앱을 막 켰다 등) 여기서 알아본다.
             # `_login_render` 를 아직 안 걸어 둔 자리라 다시 그리기가 겹치지 않는다.
-            if token_stale() and not self._login_state and not self._revive_busy:
+            # 로그인 자체가 끝났으면 잇기로는 안 된다 — 헛걸음 안 하고 곧바로 `로그인 창 열기`.
+            if (
+                token_stale()
+                and not self._login_state
+                and not self._revive_busy
+                and not self._login_gone()
+            ):
                 self._start_revive(paid=self._five_open())
 
             render()
