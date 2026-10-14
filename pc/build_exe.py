@@ -68,6 +68,7 @@ HIDDEN = [
     "cooldown_push",  # 폰으로 보내기 (릴레이 업로드)
     "cooldown_remote",  # 클로드 코드 원격 대기 (claude rc 상주)
     "cooldown_cli",  # 클로드 코드(npm) 새 판 받기
+    "cooldown_api",  # API 키로 부른 것의 비용(다른 프로그램이 남긴 기록)
     "cooldown_stats",  # 사용량 기록·통계
     "cooldown_update",  # [업데이트 대기] 클로드 업데이트 감시
     "cooldown_leftover",  # [남은 식구] 강제 업데이트 뒤 안 켜지는 클로드 풀기

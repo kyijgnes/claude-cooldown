@@ -56,6 +56,7 @@ from cooldown_core import (  # noqa: E402
     token_stale,
 )
 
+import cooldown_api  # noqa: E402  API 키로 부른 것의 비용(기록이 있는 PC 만)
 import cooldown_cli  # noqa: E402  클로드 코드(npm) 새 판이 나오면 바로 받기
 import cooldown_job  # noqa: E402  세션에서 띄워져도 클로드 데스크톱과 같이 죽지 않게
 import cooldown_login  # noqa: E402
@@ -1026,6 +1027,9 @@ class App:
         used.add_command(label="이번 주 사용 속도…", command=self.open_pace)
         # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
         used.add_command(label="사용량 통계…", command=self.open_stats)
+        # 구독 한도와 따로, API 키로 부른 것의 돈 — 그런 기록이 있는 PC 에서만 보인다
+        if cooldown_api.available():
+            used.add_command(label="API 사용량…", command=self.open_api)
         self.menu.add_cascade(label="사용량", menu=used)
         self.menu.add_separator()
 
@@ -1156,6 +1160,11 @@ class App:
                     "이번 주 사용 속도", lambda: self.commands.put("pace")
                 ),
                 pystray.MenuItem("사용량 통계", lambda: self.commands.put("stats")),
+                pystray.MenuItem(
+                    "API 사용량",
+                    lambda: self.commands.put("api"),
+                    visible=lambda item: cooldown_api.available(),
+                ),
                 pystray.MenuItem("로그인 상태", lambda: self.commands.put("login")),
                 pystray.MenuItem(
                     "윈도우 켤 때 자동 실행",
@@ -1573,6 +1582,7 @@ class App:
                 "toggle_autostart": self.toggle_autostart,
                 "pace": self.open_pace,
                 "stats": self.open_stats,
+                "api": self.open_api,
                 "login": self.open_login,
                 "relogin": self.relogin,
                 "apply_update": self.apply_update,  # [업데이트 대기]
@@ -3383,6 +3393,91 @@ class App:
             self._finalize_panel(top, W)
         except Exception:  # noqa: BLE001
             pass
+
+    # -------------------------------------------------- API 사용량
+    def open_api(self):
+        """API 키로 부른 것이 얼마 들었나 — 구독 한도(위 통계)와는 따로 내는 돈이다.
+
+        재료는 API 를 부르는 프로그램이 남긴 기록(`cooldown_api.sources`). 셈은 전부
+        `cooldown_api.analyze` 가 하고, 여기서는 그리기만 한다.
+        """
+        W = 344
+        try:
+            rep = cooldown_api.analyze(cooldown_api.read_rows())
+            usd = cooldown_api.usd_text
+            top, body = self._open_panel("API 사용량")
+            wrap = tk.Frame(body, bg=P.bg)
+            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
+            inner = W - PANEL_PAD * 2
+
+            if not rep.rows:
+                tk.Label(
+                    wrap, text="쌓인 기록 없음", bg=P.bg, fg=P.title, font=(KR, 12, "bold")
+                ).pack(anchor="w", pady=(6, 10))
+                self._finalize_panel(top, W)
+                return
+
+            # 맨 위 한 줄이 단위를 말한다(사용량 통계와 같은 결)
+            span = (datetime.now().date() - rep.first.date()).days + 1
+            tk.Label(
+                wrap, text=f"기록 {span}일 ({rep.first:%m/%d} 부터) · 응답 토큰으로 센 달러",
+                bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
+            ).pack(fill="x", pady=(0, 8))
+
+            now = datetime.now()
+            self._section(wrap, "이번 달", f"{now.month}월 · {rep.month_count}건")
+            self._pair(wrap, "쓴 돈", usd(rep.month_usd), P.title)
+            self._pair(wrap, "오늘", f"{usd(rep.today_usd)} · {rep.today_count}건", P.sub)
+            if rep.forecast is not None:
+                self._pair(wrap, "이 속도면 달말에", usd(rep.forecast), P.sub)
+            if rep.last_month_usd > 0:
+                self._pair(wrap, "지난 달", usd(rep.last_month_usd), P.sub)
+
+            self._rule(wrap)
+            self._section(wrap, "일별", f"최근 {len(rep.days)}일")
+            self._chart_usd_days(wrap, rep.days, inner)
+            busiest = max(rep.days, key=lambda dv: dv[1])
+            if busiest[1] > 0:
+                self._pair(wrap, "가장 많이 쓴 날",
+                           f"{self._day_text(busiest[0])} {usd(busiest[1])}", P.sub)
+
+            if rep.by_who:
+                self._rule(wrap)
+                self._section(wrap, "쓴 곳", "이번 달")
+                for name, n, value in rep.by_who:
+                    self._pair(wrap, f"{name} · {n}건", usd(value), P.sub)
+
+            self._finalize_panel(top, W)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _chart_usd_days(parent: tk.Misc, days: list, width: int, height: int = 52) -> None:
+        """날짜별 달러 막대. 한도가 없는 돈이라 적정선도 등급색도 없다 — 오늘만 밝게."""
+        c = tk.Canvas(
+            parent, width=width, height=height + 13, bg=P.bg, highlightthickness=0, bd=0
+        )
+        c.pack(fill="x", pady=(0, 8))
+        n = max(1, len(days))
+        pitch = width / n
+        bar_w = max(3.0, pitch - 4)
+        top_v = max([v for _d, v in days] + [0.0]) * 1.15 or 1.0
+        today = datetime.now().date()
+        for i, (day, value) in enumerate(days):
+            x = i * pitch + (pitch - bar_w) / 2
+            if value <= 0:  # 안 쓴 날도 자리는 남긴다
+                c.create_rectangle(x, height - 2, x + bar_w, height, fill=P.track, width=0)
+            else:
+                h = value / top_v * height
+                c.create_rectangle(
+                    x, height - max(2.0, h), x + bar_w, height,
+                    fill=P.title if day == today else P.label, width=0,
+                )
+            c.create_text(
+                x + bar_w / 2, height + 7,
+                text="월화수목금토일"[day.weekday()],
+                font=(KR, 7), fill=P.title if day == today else P.faint,
+            )
 
     def _build_stats_tabs(self, bar, top, content, rep, inner: int, W: int) -> None:
         """기간 고르는 줄. 고른 것만 밝고 밑에 초록 밑줄이 선다 (툴팁 없이 지금 상태를 보임)."""
