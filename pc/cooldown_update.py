@@ -294,25 +294,43 @@ def user_idle_min() -> float:
 #   그건 위젯이 띄운 것이라 죽여도 잃을 것이 없고, 세면 늘 '작업 중' 이 된다.
 # ★ **위젯 제 자손도 뺀다**(`$self`). 위젯이 세션에서 뜬 판이면 제 파워셸을 세어
 #   저를 붙잡고 영영 물러나게 된다.
+# ★ 데스크톱 세션 아래 npm 클로드 CLI(`…\@anthropic-ai\claude-code\…\claude.exe
+#   --print --sdk-url`)도 세지 않는다. 그 자체가 세션이라 '55시간째 작업' 으로 잡혔다
+#   (2026-10-18). **뿌리로 삼지는 않는다** — 원격 대기(`claude rc`, 위젯 자손) 아래 세션까지
+#   뿌리가 되면 데스크톱 업데이트와 무관한 것을 세게 된다. 그 아래 자손은 데스크톱 뿌리로 센다.
+# ★★ **MCP 연결 프로그램(`… --mcp`)과 그것을 띄운 `cmd /c` 껍데기는 뺀다**(2026-10-18).
+#   세션이 열려 있는 동안 내내 떠 있고 일은 안 한다. 어드민 클로드 연결이 세션마다 하나씩
+#   붙어서, 열어만 둔 세션 하나가 위젯에 `세션 작업 55시간째` 로 떴다. 업데이트에 같이
+#   꺼져도 잃을 것이 없다(세션을 다시 열면 새로 붙는다).
 
 BUSY_SAMPLE = 3  # CPU 를 재는 두 번 사이 간격(초)
 
 _JOBS_PS = r"""
 $self = __SELF__
 $mark = '*\Claude\claude-code\*'
+$npm = '*\@anthropic-ai\claude-code\*'
 function Snap {
   $all = Get-CimInstance Win32_Process
   $cli = @{}
   $map = @{}
+  $skip = @{}
   foreach ($p in $all) {
     $map[[int]$p.ProcessId] = $p
     if ($p.ExecutablePath -like $mark) { $cli[[int]$p.ProcessId] = $true }
+    if ($p.ExecutablePath -like $npm) { $skip[[int]$p.ProcessId] = $true }
+  }
+  foreach ($p in $all) {
+    if ($p.CommandLine -notmatch '\s--mcp(\s|$)') { continue }
+    $skip[[int]$p.ProcessId] = $true
+    $par = $map[[int]$p.ParentProcessId]
+    if ($par -and $par.Name -eq 'cmd.exe') { $skip[[int]$par.ProcessId] = $true }
   }
   $out = @{}
   foreach ($p in $all) {
     $id = [int]$p.ProcessId
     if ($id -eq $self) { continue }
     if ($cli[$id]) { continue }
+    if ($skip[$id]) { continue }
     if ($p.Name -eq 'conhost.exe') { continue }
     $cur = [int]$p.ParentProcessId
     $hop = 0
