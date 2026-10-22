@@ -39,6 +39,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -271,6 +272,64 @@ def open_login_console() -> bool:
         return False
 
 
+# 처음 쓰는 PC(친구들)를 위한 설치 창. 클로드 코드가 없으면 위젯은 아무것도 못 한다 —
+# 사용량을 읽을 열쇠(자격 파일)를 내주는 것이 클로드 코드 CLI 뿐이라서.
+# 설치는 공식 네이티브 설치기(node·npm 이 필요 없다)로 `~\.local\bin\claude.exe` 에 깔고,
+# 윈도우판 클로드 코드가 쓰는 Git(Git Bash)이 없으면 winget 으로 먼저 깐다.
+# 끝나면 같은 창에서 `auth login` 까지 이어 간다(로그인은 사람이 브라우저에서 한다).
+INSTALL_URL = "https://claude.ai/install.ps1"
+_INSTALL_PS = r"""
+$Host.UI.RawUI.WindowTitle = '클로드 코드 설치'
+$ErrorActionPreference = 'Continue'
+function Say($t) { Write-Host ''; Write-Host "== $t" -ForegroundColor Cyan }
+function Refresh-Path {
+  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  Say 'Git 설치 (클로드 코드가 씀)'
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
+    Refresh-Path
+  } else {
+    Write-Host 'winget 이 없어 Git 을 못 깔았습니다. https://git-scm.com 에서 받아 깔아 주세요.' -ForegroundColor Yellow
+  }
+}
+Say '클로드 코드 설치'
+irm __URL__ | iex
+Refresh-Path
+$claude = Join-Path $env:USERPROFILE '.local\bin\claude.exe'
+if (-not (Test-Path $claude)) { $c = Get-Command claude -ErrorAction SilentlyContinue; if ($c) { $claude = $c.Source } }
+if (-not (Test-Path $claude)) {
+  Write-Host '설치가 끝나지 않았습니다. 이 창의 오류를 확인해 주세요.' -ForegroundColor Red
+  return
+}
+Say '클로드 로그인 (브라우저에서 승인 뒤 나온 코드를 여기에 붙여 넣기)'
+& $claude auth login
+Say '끝. 이 창은 닫아도 됩니다. 위젯은 1분 안에 저절로 이어집니다.'
+"""
+
+
+def open_install_console() -> bool:
+    """클로드 코드 설치 → 로그인을 **보이는 파워셸 창**에서 차례로 한다.
+
+    설치기는 Anthropic 공식 것(`INSTALL_URL`)이다. 위젯은 창만 열어 줄 뿐
+    자격 증명을 대신 넣지 않는다(로그인 창과 같다). 다 되면 `_tick` 이 1분 안에 알아챈다.
+    """
+    script = _INSTALL_PS.replace("__URL__", INSTALL_URL)
+    # 여러 줄·따옴표·한글이 명령줄에서 안 깨지게 -EncodedCommand(UTF-16LE base64)로 넘긴다
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    try:
+        subprocess.Popen(
+            ["powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-EncodedCommand", encoded],
+            env=child_env(),  # ★ 장기 토큰이 물려 가면 로그인해도 그쪽이 이긴다
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---------------------------------------------------------------- 단독 실행
 
 if __name__ == "__main__":
@@ -294,3 +353,5 @@ if __name__ == "__main__":
             print(f"토큰 만료: {exp.astimezone():%Y-%m-%d %H:%M}")
     if not os.path.exists(cooldown_core.CRED_PATH):
         print("(자격 파일이 없습니다 — 클로드 코드에 로그인하세요)")
+    if "--install" in sys.argv:
+        print("설치 창:", "열림" if open_install_console() else "못 엶")

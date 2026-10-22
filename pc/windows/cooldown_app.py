@@ -808,6 +808,7 @@ class App:
         self._login_state = ""  # cooldown_login 의 상태 낱말 (모르면 빈 문자열)
         self._login_account = ""  # 로그인된 계정 (알아냈을 때만)
         self._login_render = None  # 로그인 팝업이 떠 있으면 그걸 다시 그리는 함수
+        self._setup_shown = False  # 처음 쓰는 PC 에 설치·로그인 팝업을 띄웠나 (켤 때마다 한 번)
         # 로그인 자체가 끝나는 날 — 리프레시 토큰은 약 한 달 뒤 **절대 만료**된다.
         # 자격 파일만 보고 1분마다 판정한다(`_expiry_tick`). 모르면 None.
         self._expiry: cooldown_login.Expiry | None = None
@@ -1701,7 +1702,7 @@ class App:
             if self._revive_busy:
                 return "로그인 잇는 중"
             if self._login_state == cooldown_login.NO_CLI:
-                return "클로드 코드 없음"
+                return "눌러서 클로드 코드 설치"
             # 로그아웃(CLI 가 말함) · 로그인이 끝남(자격 파일로 확실) — 잇기로는 안 된다
             if self._login_gone():
                 return "클로드 코드 로그인 필요"
@@ -2285,7 +2286,15 @@ class App:
         if cooldown_login.open_login_console():
             applog("클로드 다시 로그인 — 로그인 창 열기")
         else:
-            self._tray_say("클로드 코드 없음")
+            self.install_cli()
+
+    def install_cli(self) -> None:
+        """`설치하고 로그인` — 처음 쓰는 PC. 파워셸 창에서 공식 설치기 → `auth login` 까지.
+        끝나면 자격 파일이 생기고 `_tick` 이 1분 안에 알아채 조회를 다시 한다."""
+        if cooldown_login.open_install_console():
+            applog("클로드 코드 설치 — 설치 창 열기")
+        else:
+            self._tray_say("설치 창을 못 열었습니다")
 
     # --------------------------------------- 클로드 코드 로그인이 끝나는 날 끝
 
@@ -2413,6 +2422,20 @@ class App:
             self._maybe_revive()
         elif not isinstance(err, LoginRequired):
             self._login_state = ""  # 로그인 문제가 아니면 옛 판정을 붙들지 않는다
+        else:
+            # 자격 파일이 아예 없다 = 처음 쓰는 PC 다. 되살리기 사다리를 탈 일이 아니라
+            # 깔거나(클로드 코드 없음) 로그인해야(한 번도 안 함) 한다. 둘 다 CLI 를 안 부르고 안다.
+            if not self._login_state:
+                if cooldown_ping.find_claude() is None:
+                    self._login_state = cooldown_login.NO_CLI
+                elif not os.path.exists(cooldown_login.cred_path()):
+                    self._login_state = cooldown_login.LOGGED_OUT
+            # 켜자마자 할 일을 보여 준다 — 위젯에 '클로드 코드 없음' 만 떠 있으면 무엇을 할지 모른다
+            if not self._setup_shown and self._login_state in (
+                cooldown_login.NO_CLI, cooldown_login.LOGGED_OUT
+            ):
+                self._setup_shown = True
+                self.root.after(800, self.open_login)
         text = self._error_text(err)
         self.skin.show_error(text, keep, self.last_error_stamp)
         self._sync_status()  # 상태 점을 빨강으로 (붉은 바탕에 맞춰 자리도 다시)
@@ -3147,14 +3170,18 @@ class App:
                     tk.Label(
                         wrap,
                         text=(
-                            "클로드 코드를 설치해 주세요."
+                            "클로드 코드 설치와 로그인이 필요합니다."
                             if st == cooldown_login.NO_CLI
                             else f"{cooldown_login.login_command()} 을 실행해 주세요."
                         ),
                         bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w",
                         wraplength=W - PANEL_PAD * 2, justify="left",
                     ).pack(fill="x", pady=(10, 8))
-                    if st == cooldown_login.LOGGED_OUT:
+                    if st == cooldown_login.NO_CLI:
+                        self._themed_button(
+                            wrap, "설치하고 로그인", self.install_cli, primary=True, width=0,
+                        ).pack(anchor="e")
+                    elif st == cooldown_login.LOGGED_OUT:
                         self._themed_button(
                             wrap, "로그인 창 열기", self.relogin, primary=True, width=0,
                         ).pack(anchor="e")
