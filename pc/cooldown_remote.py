@@ -34,7 +34,7 @@ import subprocess
 import sys
 from datetime import datetime
 
-import cooldown_cli  # 띄울 때 클로드 코드 판을 적어 둔다 (무엇이 돌고 있나 볼 때)
+import cooldown_cli  # 띄울 때 클로드 코드 버전을 적어 둔다 (무엇이 돌고 있나 볼 때)
 import cooldown_push  # 릴레이 주소·키는 '폰으로 보내기' 설정을 그대로 쓴다
 # claude 실행 파일 찾기·자식 환경변수는 한 곳(cooldown_ping)에만 둔다
 from cooldown_ping import child_env, find_claude
@@ -44,8 +44,8 @@ LOG_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.log")
 # 앱이 죽어도 자식은 살아남는다. 다시 켰을 때 그 놈을 알아보려고 PID 를 적어 둔다.
 PID_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.pid")
 # 그 놈을 **어떻게** 띄웠나 — `{pid, clean_env, cli}`. PID 파일과 따로 두는 까닭:
-# 옛 판 위젯은 PID 파일을 숫자 하나로 읽어서, 거기 뭘 덧붙이면 이어받기에 실패하고
-# 원격을 하나 더 띄운다(폰에 이 PC 가 두 번 뜬다). 옛 판은 이 파일을 모르고 지나간다.
+# 옛 버전 위젯은 PID 파일을 숫자 하나로 읽어서, 거기 뭘 덧붙이면 이어받기에 실패하고
+# 원격을 하나 더 띄운다(폰에 이 PC 가 두 번 뜬다). 옛 버전은 이 파일을 모르고 지나간다.
 META_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_remote.meta.json")
 
 # 띄운 뒤 이만큼 안에 죽으면 '뜨다 만 것' 으로 본다 (등록까지 3초쯤 걸린다)
@@ -188,7 +188,7 @@ def _read_meta() -> dict:
 
 def _write_meta(pid: int, cli: str) -> None:
     """띄운 모양을 적어 둔다. `clean_env` = 내 PyInstaller 자국을 걷어내고 띄웠다.
-    `cli` 는 띄울 때의 클로드 코드 판 — 판정에는 안 쓰고, 무엇이 돌고 있나 볼 때 쓴다."""
+    `cli` 는 띄울 때의 클로드 코드 버전 — 판정에는 안 쓰고, 무엇이 돌고 있나 볼 때 쓴다."""
     try:
         with open(META_PATH, "w", encoding="utf-8") as f:
             json.dump({"pid": pid, "clean_env": True, "cli": cli}, f)
@@ -343,13 +343,13 @@ class Remote:
     def stale(self) -> str:
         """갈아 끼워야 할 까닭이 있으면 그 까닭(명사형), 아니면 빈 문자열.
 
-        **옛 판 위젯이 띄운 것**뿐이다 — 띄운 모양이 안 적혀 있다(v0.29 앞). 그때는 위젯의
+        **옛 버전 위젯이 띄운 것**뿐이다 — 띄운 모양이 안 적혀 있다(v0.29 앞). 그때는 위젯의
         PyInstaller 환경(`TCL_LIBRARY` 등)을 그대로 물려줬고, 이 원격 아래로 새로 여는
         세션이 **전부** 그것을 이어받는다(`cooldown_env`). 이어받기만 하면 며칠이고 간다.
 
-        ★ **클로드 코드가 새 판으로 올라간 것은 까닭이 아니다.** 원격 대기는 세션을 경로로
-          띄우므로 새로 여는 세션은 이미 새 판이다(2026-09-23 실측: 05:25 에 띄운 원격 아래
-          14:09 에 연 세션이 13:42 에 올린 새 판·새 모델로 돌았다). 그걸로 갈아 끼우면 클로드
+        ★ **클로드 코드가 새 버전으로 올라간 것은 까닭이 아니다.** 원격 대기는 세션을 경로로
+          띄우므로 새로 여는 세션은 이미 새 버전이다(2026-09-23 실측: 05:25 에 띄운 원격 아래
+          14:09 에 연 세션이 13:42 에 올린 새 버전·새 모델로 돌았다). 그걸로 갈아 끼우면 클로드
           코드가 나올 때마다(거의 날마다) 폰에서 열어 둔 세션이 다 죽는다.
         """
         if not self._pid:
@@ -360,7 +360,7 @@ class Remote:
             return ""
         meta = _read_meta()
         if meta.get("pid") != self._pid or not meta.get("clean_env"):
-            return "옛 판 위젯이 띄운 것"
+            return "옛 버전 위젯이 띄운 것"
         return ""
 
     # -------------------------------------------------- 켜기 · 끄기
@@ -408,7 +408,7 @@ class Remote:
         _write_pid(p.pid)
         cli = cooldown_cli.installed()
         _write_meta(p.pid, cli)
-        _log(f"켬: pid={p.pid} 폴더={folder} 판={cli or '?'}")
+        _log(f"켬: pid={p.pid} 폴더={folder} 버전={cli or '?'}")
         return True, "켜짐"
 
     def stop(self) -> None:

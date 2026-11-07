@@ -48,7 +48,7 @@ import cooldown_env
 
 MARK = "--job-escaped"  # 다시 띄운 프로세스에 붙는 표시
 CLAUDE_MARK = "\\windowsapps\\claude_"  # 클로드 데스크톱 본체 경로(소문자로 견줌). cooldown_update.PKG_MARK 와 같은 결
-# 다시 띄운 것이 뮤텍스를 잡을 때까지 기다리는 한도 (초). 새 판 exe 를 처음 켤 땐 디펜더가 훑느라 오래 걸린다.
+# 다시 띄운 것이 뮤텍스를 잡을 때까지 기다리는 한도 (초). 새 버전 exe 를 처음 켤 땐 디펜더가 훑느라 오래 걸린다.
 WAIT_UP = 60
 LNK_PATH = os.path.join(os.path.expanduser("~"), ".claude_cooldown_relaunch.lnk")
 

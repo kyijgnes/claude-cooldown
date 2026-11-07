@@ -275,7 +275,7 @@ def open_login_console() -> bool:
 # 처음 쓰는 PC(친구들)를 위한 설치 창. 클로드 코드가 없으면 위젯은 아무것도 못 한다 —
 # 사용량을 읽을 열쇠(자격 파일)를 내주는 것이 클로드 코드 CLI 뿐이라서.
 # 설치는 공식 네이티브 설치기(node·npm 이 필요 없다)로 `~\.local\bin\claude.exe` 에 깔고,
-# 윈도우판 클로드 코드가 쓰는 Git(Git Bash)이 없으면 winget 으로 먼저 깐다.
+# 윈도우용 클로드 코드가 쓰는 Git(Git Bash)이 없으면 winget 으로 먼저 깐다.
 # 끝나면 같은 창에서 `auth login` 까지 이어 간다(로그인은 사람이 브라우저에서 한다).
 INSTALL_URL = "https://claude.ai/install.ps1"
 _INSTALL_PS = r"""

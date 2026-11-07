@@ -19,7 +19,7 @@ exe(PyInstaller onedir)로 돌면 부트로더가 **제 런타임 자리를 환�
 
 2026-09-23 어드민 v2.57 릴리스가 이것으로 멈췄다(파이썬도 tkinter 도 멀쩡했다).
 영구 변수가 아니라 **물려받은 것**이라 겉으로 드러나지도 않는다. 게다가 폴더 이름에
-판 번호가 박혀 있어, 위젯을 한 판 올리면 물려받은 쪽은 **없어진 자리**를 가리킨다.
+버전 번호가 박혀 있어, 위젯을 한 버전 올리면 물려받은 쪽은 **없어진 자리**를 가리킨다.
 
 **그래서 밖으로 무엇을 띄우든 `clean_env()` 를 준다.**
 
@@ -40,7 +40,7 @@ import sys
 
 # PyInstaller 부트로더·런타임 훅이 넣는 것. 자식에게는 하나도 넘기지 않는다.
 PYI_VARS = (
-    "_MEIPASS2",                   # onefile 부트로더(옛 판)
+    "_MEIPASS2",                   # onefile 부트로더(옛 버전)
     "_PYI_APPLICATION_HOME_DIR",
     "_PYI_ARCHIVE_FILE",
     "_PYI_PARENT_PROCESS_LEVEL",
@@ -102,7 +102,7 @@ def _packed(value: str) -> bool:
     """PyInstaller 가 제 속에 싸 둔 Tcl/Tk 자리인가(`…\\_internal\\_tcl_data`).
 
     폴더가 아직 살아 있어도 **남의 exe 것**이면 쓰면 안 된다. 거기 든 Tcl 은 그 exe 에
-    맞춰 싸인 판이라, 다른 파이썬이 끌어다 쓰면 판이 어긋나 창이 안 뜬다.
+    맞춰 싸인 버전이라, 다른 파이썬이 끌어다 쓰면 버전이 어긋나 창이 안 뜬다.
     """
     p = _norm(value)
     return bool(p) and (
@@ -174,8 +174,8 @@ def heal_self() -> list[str]:
     path = os.environ.get("PATH", "")
     if path:
         parts = path.split(os.pathsep)
-        # 남의 exe 가 물려준 런타임 자리(`…\_internal\pywin32_system32`)를 뺀다. 판 번호가
-        # 박혀 있어 그 exe 가 한 판 오르면 없어진 자리를 가리킨 채 남는다. 내 것은 놔둔다.
+        # 남의 exe 가 물려준 런타임 자리(`…\_internal\pywin32_system32`)를 뺀다. 버전 번호가
+        # 박혀 있어 그 exe 가 한 버전 오르면 없어진 자리를 가리킨 채 남는다. 내 것은 놔둔다.
         kept = [p for p in parts if not (p and _packed(p) and not _mine(p))]
         if len(kept) != len(parts):
             os.environ["PATH"] = os.pathsep.join(kept)

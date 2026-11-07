@@ -1,17 +1,17 @@
 """릴리스를 몇 번 내려받았나 적어 두기 · 옛 릴리스 지우기
 
-★ GitHub 은 **릴리스를 지우면 내려받은 횟수도 같이 지운다.** 옛 판을 손으로 지워 온 탓에
-v0.23 이전 숫자는 이제 어디에도 없다. 그래서 **적고 나서 지운다** — 순서를 바꾸면 그 판
+★ GitHub 은 **릴리스를 지우면 내려받은 횟수도 같이 지운다.** 옛 버전을 손으로 지워 온 탓에
+v0.23 이전 숫자는 이제 어디에도 없다. 그래서 **적고 나서 지운다** — 순서를 바꾸면 그 버전
 숫자가 그대로 사라진다. 지우는 일을 이 도구가 같이 하므로 적는 것을 잊을 수가 없다.
 
     python pc/cooldown_release.py            지금 숫자를 적고 합계를 보여 준다
-    python pc/cooldown_release.py --prune    적은 뒤 최신 판만 남기고 옛 릴리스를 지운다
+    python pc/cooldown_release.py --prune    적은 뒤 최신 버전만 남기고 옛 릴리스를 지운다
     python pc/cooldown_release.py --prune --yes   묻지 않고
 
 - 적어 두는 곳은 `~/.claude_cooldown_downloads.json`(집 폴더라 저장소에 안 섞인다).
-- 횟수는 **늘기만 한다** — 다시 적을 때 큰 쪽을 남기므로, 지워진 판도 마지막 숫자가 남는다.
+- 횟수는 **늘기만 한다** — 다시 적을 때 큰 쪽을 남기므로, 지워진 버전도 마지막 숫자가 남는다.
 - `gh release delete` 는 **git 태그를 건드리지 않는다**(`--cleanup-tag` 를 안 준다).
-  어느 커밋이 어느 판인지는 태그가 계속 말해 준다.
+  어느 커밋이 어느 버전인지는 태그가 계속 말해 준다.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def slug() -> str:
 def fetch(repo: str) -> list[dict]:
     """지금 GitHub 에 있는 릴리스와 자산별 내려받은 횟수.
 
-    판을 하나만 남기는 저장소라 한 쪽(100개)이면 넉넉하다.
+    버전을 하나만 남기는 저장소라 한 쪽(100개)이면 넉넉하다.
     """
     raw = _gh(["api", f"repos/{repo}/releases?per_page=100"])
     out = []
@@ -100,7 +100,7 @@ def total(slot: dict) -> int:
 def report(data: dict, live_tags: set[str]) -> None:
     rels = data["releases"]
     if not rels:
-        print("적어 둔 판이 없습니다.")
+        print("적어 둔 버전이 없습니다.")
         return
 
     order = sorted(rels.items(), key=lambda kv: kv[1].get("published") or "", reverse=True)
@@ -113,11 +113,11 @@ def report(data: dict, live_tags: set[str]) -> None:
         for name, cnt in sorted(slot.get("assets", {}).items()):
             print(f"    {name}  {cnt}")
     print()
-    print(f"전체 {sum(total(s) for s in rels.values())}회 · 판 {len(rels)}개")
+    print(f"전체 {sum(total(s) for s in rels.values())}회 · 버전 {len(rels)}개")
 
 
 def prune(repo: str, data: dict, live: list[dict], ask: bool) -> None:
-    """최신 판만 남기고 옛 릴리스를 지운다. 태그는 남긴다."""
+    """최신 버전만 남기고 옛 릴리스를 지운다. 태그는 남긴다."""
     if len(live) <= 1:
         print("지울 옛 릴리스가 없습니다.")
         return
@@ -125,9 +125,9 @@ def prune(repo: str, data: dict, live: list[dict], ask: bool) -> None:
     newest = max(live, key=lambda r: r["published"] or "")
     old = [r for r in live if r["tag"] != newest["tag"]]
 
-    print(f"남길 판: {newest['tag']}")
+    print(f"남길 버전: {newest['tag']}")
     # 적어 둔 숫자로 말한다 — 지금 조회한 값이 아니라 그게 남을 값이다.
-    print("지울 판: " + ", ".join(f"{r['tag']}({total(data['releases'][r['tag']])}회)" for r in old))
+    print("지울 버전: " + ", ".join(f"{r['tag']}({total(data['releases'][r['tag']])}회)" for r in old))
     if ask:
         if input("지울까요? [y/N] ").strip().lower() not in ("y", "yes"):
             print("그만둡니다. 숫자는 이미 적어 뒀습니다.")

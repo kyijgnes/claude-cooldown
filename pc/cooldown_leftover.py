@@ -4,7 +4,7 @@ r"""
 
 **왜 있나.** 2026-09-23 02:14 에 클로드 자체 업데이터가 미뤄 둔 등록을
 `ForceApplicationShutdownOption` 으로 적용했다(2.2553.1.0 → 2.2553.13.0). 등록은 4초 만에 끝났는데
-**새 판이 한 번도 안 켜졌다** — 업데이터가 곧바로 다시 켠 것(02:14:33)부터 사람이 아침에 누른 것
+**새 버전이 한 번도 안 켜졌다** — 업데이터가 곧바로 다시 켠 것(02:14:33)부터 사람이 아침에 누른 것
 (05:17~05:22, 일곱 번)까지 전부 `이 파일을 다른 응용 프로그램에서 사용 중입니다` 로 막혔고,
 **윈도우를 다시 시작하고서야** 켜졌다.
 
@@ -17,7 +17,7 @@ r"""
 **클로드 코드 세션과 세션이 띄운 셸·스크립트·개발 서버도 전부 그 job 에 든다**(세션 셸에서
 `cooldown_job.job_pids()` 로 실측: 패키지 Claude.exe 14개 + CLI·bash·conhost 16개가 한 목록).
 강제 종료는 **패키지 ID 가 있는 것(Claude.exe)만** 죽이고, ID 가 없는 세션 자손은 남을 수 있다.
-그것이 하나라도 살아 있으면 옛 컨테이너(job)가 안 닫혀 **새 판 컨테이너를 못 만든다.**
+그것이 하나라도 살아 있으면 옛 컨테이너(job)가 안 닫혀 **새 버전 컨테이너를 못 만든다.**
 재부팅하면 풀리는 것도 이것과 맞는다(남은 것이 다 죽으니까).
 
 - 패키지 서비스(`cowork-svc.exe`)는 범인이 아니다 — SYSTEM 쪽 제 컨테이너라, 막혀 있던 05:17 에도
@@ -29,7 +29,7 @@ r"""
 **언제 치우나 — 둘 중 하나일 때만.** 사람이 일부러 클로드를 닫고 빌드를 돌려 두었을 수도 있으니
 앱이 사라졌다는 것만으로는 안 치운다.
 
-1. **업데이트로 닫혔다** — 지금 등록된 판이 사라진 앱의 판과 다르다. 새 판은 어차피 새로 켜야 하고,
+1. **업데이트로 닫혔다** — 지금 등록된 버전이 사라진 앱의 버전과 다르다. 새 버전은 어차피 새로 켜야 하고,
    남은 식구가 있는 한 켜지지 않는다.
 2. **켜려다 막혔다** — 앱이 사라진 뒤에 208·0x80070020 이 찍혔다(업데이터든 사람이든).
 
@@ -166,7 +166,7 @@ def _parent(p: Proc, procs: dict[int, Proc]) -> Proc | None:
 
 
 def desktop_version(procs: dict[int, Proc]) -> str:
-    """떠 있는 데스크톱 앱의 판. 안 떠 있으면 빈 문자열."""
+    """떠 있는 데스크톱 앱의 버전. 안 떠 있으면 빈 문자열."""
     for p in procs.values():
         if p.desktop:
             m = _VER.search(p.path)
@@ -332,10 +332,10 @@ class Watch:
     def __init__(self, me: int | None = None):
         self.me = me or os.getpid()
         self.remembered: dict[int, tuple[int, str]] = {}
-        self.ver = ""  # 마지막으로 본 데스크톱 판
+        self.ver = ""  # 마지막으로 본 데스크톱 버전
         self.gone_at: float | None = None  # 데스크톱이 사라진 것을 처음 본 때(epoch)
         self.done = False  # 이번에 사라진 것은 이미 다뤘나
-        self._installed = ""  # 사라진 뒤 읽은 등록 판(한 번 읽으면 그대로 쓴다)
+        self._installed = ""  # 사라진 뒤 읽은 등록 버전(한 번 읽으면 그대로 쓴다)
         self._asked_at = 0.0  # 실행이 막혔는지 마지막으로 물어본 때(epoch)
 
     def step(self) -> Result | None:
@@ -391,7 +391,7 @@ if __name__ == "__main__":
     ps = snapshot() or {}
     me = os.getpid()
     fam = family(ps, me)
-    print("데스크톱 판:", desktop_version(ps) or "안 떠 있음")
+    print("데스크톱 버전:", desktop_version(ps) or "안 떠 있음")
     print("식구:", len(fam), "개")
     names: dict[str, int] = {}
     for _c, n in fam.values():

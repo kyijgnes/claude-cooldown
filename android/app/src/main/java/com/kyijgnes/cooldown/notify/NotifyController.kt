@@ -31,7 +31,7 @@ object NotifyController {
     private const val CHANNEL = "cooldown"
     private const val ID = 1
 
-    /** 옛 판에서 잠깐 썼던 '상태바 없이' 채널 — 지우고 다닌다(안 지우면 설정에 남는다). */
+    /** 옛 버전에서 잠깐 썼던 '상태바 없이' 채널 — 지우고 다닌다(안 지우면 설정에 남는다). */
     private const val CHANNEL_DEAD = "cooldown_quiet"
     private const val ID_DEAD = 2
 

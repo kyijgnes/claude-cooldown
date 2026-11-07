@@ -28,7 +28,7 @@ import cooldown_env
 PUB_ID = "pzs8sxrjxfjjc"  # 게시자 꼬리표. 패키지 이름·가족 이름·폴더 이름에 다 들어간다
 APP_LINK = rf"shell:AppsFolder\Claude_{PUB_ID}!Claude"
 PKG_FAMILY = f"Claude_{PUB_ID}"  # 등록할 때 쓰는 가족 이름
-PKG_ROOT = r"C:\Program Files\WindowsApps"  # 받아 둔 판이 앉아 있는 곳
+PKG_ROOT = r"C:\Program Files\WindowsApps"  # 받아 둔 버전이 앉아 있는 곳
 IMAGE_NAME = "Claude.exe"
 # ★★ **이름으로 죽이지 않는다.** 클로드 코드 CLI 도 실행 파일 이름이 `claude.exe` 이고
 #   `taskkill /IM` 은 대소문자를 안 가린다 — `taskkill /F /T /IM Claude.exe` 는
@@ -48,7 +48,7 @@ class Pending:
     current: str  # 지금 돌고 있는 버전
     target: str  # 등록을 기다리는 버전
     since: datetime | None  # 내려받은 시각 (모르면 None)
-    # 윈도우가 실제로 '등록을 미뤄 뒀나'(이벤트 658). 거짓이면 업데이터가 새 판을
+    # 윈도우가 실제로 '등록을 미뤄 뒀나'(이벤트 658). 거짓이면 업데이터가 새 버전을
     # **봤다는 것뿐**(`updaterLastSeenVersion`)이라, 껐다 켜도 끝날 것이 없을 수 있다.
     # 자동 적용은 참일 때만 한다 — 아래 '자동으로 적용해도 되는가' 참고.
     staged: bool = False
@@ -134,10 +134,10 @@ def _ver(s: str) -> tuple[int, ...]:
 #   seen  앱 업데이터가 마지막으로 본 버전 (이벤트 로그가 막혔을 때의 보조 신호)
 _PROBE = r"""
 $ErrorActionPreference = 'SilentlyContinue'
-# ★ 같은 앱이 여러 판 등록돼 있을 수 있다. 그때 Get-AppxPackage 는 여러 줄을 주고,
+# ★ 같은 앱이 여러 버전이 등록돼 있을 수 있다. 그때 Get-AppxPackage 는 여러 줄을 주고,
 #   그걸 문자열로 이어 붙이면 "1.26832.0.0 1.30096.1.0" 이 되어 _ver() 이 앞의(=옛)
-#   판으로 읽는다 — 새 판이 이미 등록됐는데도 '대기 중' 이 영영 안 풀린다.
-#   **가장 높은 판**을 지금 판으로 본다.
+#   버전으로 읽는다 — 새 버전이 이미 등록됐는데도 '대기 중' 이 영영 안 풀린다.
+#   **가장 높은 버전**을 지금 버전으로 본다.
 $cur = (Get-AppxPackage -Name Claude | Sort-Object { [version]$_.Version } |
         Select-Object -Last 1).Version
 $vers = @(); $when = ''
@@ -189,7 +189,7 @@ def check() -> Pending | None:
         return best
 
     # 두 신호를 **가른다**. 이벤트 658 = 윈도우가 등록을 실제로 미뤄 둔 것(껐다 켜면
-    # 끝난다), `updaterLastSeenVersion` = 업데이터가 새 판을 봤다는 것뿐(아직 안
+    # 끝난다), `updaterLastSeenVersion` = 업데이터가 새 버전을 봤다는 것뿐(아직 안
     # 내려받았을 수 있어 껐다 켜도 끝날 것이 없다).
     staged_target = _highest(cands)
     seen_target = _highest([data.get("seen") or ""])
@@ -276,7 +276,7 @@ def user_idle_min() -> float:
 # 돌린 스크립트는 도는 동안 기록을 안 쓰므로, 45분을 넘기면 '조용함' 으로 보여 그 위에
 # 업데이트를 얹게 된다(2026-09-20 에 사용자가 짚은 자리다). 그래서 **프로세스를 직접 본다.**
 #
-# 클로드 코드 세션은 `...\Claude\claude-code\<판>\claude.exe` 로 돈다. 그 아래에 달린
+# 클로드 코드 세션은 `...\Claude\claude-code\<버전>\claude.exe` 로 돈다. 그 아래에 달린
 # 자손 가운데 지금 **일을 하고 있는 것**이 있으면 돌고 있는 것이다.
 #
 # ★★ **자동 적용을 막는 자리에서는 있다/없다로 세면 안 된다**(`busy_only=True`).
@@ -292,7 +292,7 @@ def user_idle_min() -> float:
 # ★ `conhost.exe` 는 세션마다 하나씩 딸려 오는 콘솔 창이라 뺀다.
 # ★ 세션이 띄운 **클로드 CLI 자신**(핑 `claude -p` · 원격 대기 `claude rc`)도 뺀다 —
 #   그건 위젯이 띄운 것이라 죽여도 잃을 것이 없고, 세면 늘 '작업 중' 이 된다.
-# ★ **위젯 제 자손도 뺀다**(`$self`). 위젯이 세션에서 뜬 판이면 제 파워셸을 세어
+# ★ **위젯 제 자손도 뺀다**(`$self`). 위젯이 세션에서 뜬 것이면 제 파워셸을 세어
 #   저를 붙잡고 영영 물러나게 된다.
 # ★ 데스크톱 세션 아래 npm 클로드 CLI(`…\@anthropic-ai\claude-code\…\claude.exe
 #   --print --sdk-url`)도 세지 않는다. 그 자체가 세션이라 '55시간째 작업' 으로 잡혔다
@@ -472,7 +472,7 @@ def _alive() -> int:
 # 빠져나가는 길은 하나뿐이다 — **다 죽은 그 틈에 등록을 우리가 부른다.**
 # 관리자 권한은 필요 없다(실측). 되돌리지 말 것.
 #
-# ★★★ **그리고 `-ForceApplicationShutdown` 을 꼭 붙인다.** 2026-08-18 판(1.32352.1)부터
+# ★★★ **그리고 `-ForceApplicationShutdown` 을 꼭 붙인다.** 2026-08-18 버전(1.32352.1)부터
 # 클로드 패키지에 **SYSTEM 서비스 `CoworkVMService`(cowork-svc.exe, 자동 시작)** 가 들어
 # 있다. 앱을 다 죽여도 이게 남아 있어, 옵션 없이 부른 등록은 **매번** 이벤트 9641
 # `활성 서비스 Claude_pzs8sxrjxfjjc!Claude(으)로 인해 배포가 중단됩니다` → 419
@@ -491,7 +491,7 @@ _HRESULT = re.compile(r"0x[0-9A-Fa-f]{8}")
 _WHY = {
     "0x80073D02": "클로드 앱이나 서비스가 아직 떠 있습니다",
     "0x80073CF9": "등록에 실패했습니다",
-    "0x80073CFB": "이미 같은 판이 등록돼 있습니다",
+    "0x80073CFB": "이미 같은 버전이 등록돼 있습니다",
 }
 
 
@@ -503,11 +503,11 @@ _VERLIKE = re.compile(r"^\d+(\.\d+)+$")
 
 
 def installed_version() -> str:
-    """지금 등록돼 있는 판. **못 읽었으면 빈 문자열**(= 모른다).
+    """지금 등록돼 있는 버전. **못 읽었으면 빈 문자열**(= 모른다).
 
     ★ `check()` 를 성공 판정에 쓰면 안 된다 — 그건 '대기 없음' 과 '못 물어봤음' 이
     똑같이 `None` 이라, 파워셸이 한 번 튕긴 밤에 **등록이 깨졌는데 '업데이트 완료'** 라고
-    말하게 된다. 여기서는 **판 번호를 눈으로 읽었을 때만** 그 값을 준다.
+    말하게 된다. 여기서는 **버전 번호를 눈으로 읽었을 때만** 그 값을 준다.
     """
     for line in _ps(_CUR_PS, timeout=25).splitlines():
         line = line.strip()
@@ -517,11 +517,11 @@ def installed_version() -> str:
 
 
 def register(target: str = "") -> tuple[bool, str]:
-    """받아 둔 판을 **지금** 등록한다. 프로세스가 전부 빠진 뒤에 부를 것.
+    """받아 둔 버전을 **지금** 등록한다. 프로세스가 전부 빠진 뒤에 부를 것.
 
-    두 길을 차례로 해 본다. 먼저 **판 번호로 폴더를 짚어** 등록하고(윈도우가 스스로 할
+    두 길을 차례로 해 본다. 먼저 **버전 번호로 폴더를 짚어** 등록하고(윈도우가 스스로 할
     때와 같은 길이다 — 이벤트 854 에 그 `AppxManifest.xml` 이 찍힌다), 폴더가 없거나
-    거절당하면 **가족 이름**으로 받아 둔 판을 찾아 등록한다.
+    거절당하면 **가족 이름**으로 받아 둔 버전을 찾아 등록한다.
 
     둘 다 `-ForceApplicationShutdown` 을 붙인다 — 남은 패키지 서비스는 윈도우가 멈춘다
     (위 ★★★). 폴더 길을 먼저 두는 까닭이 하나 더 있다: 이벤트 603 의 주 매개 변수가
@@ -557,12 +557,12 @@ def apply(relaunch: bool = True, target: str = "") -> tuple[bool, str]:
     셋을 순서대로 한다: 데스크톱 앱만 죽이기 → `register()` → 다시 켜기.
     돌아오는 문구는 사용자에게 그대로 보여 줄 수 있는 한 줄.
 
-    ★ **끝났을 때만 True** 다. 판이 안 바뀌었으면 False — 부르는 쪽이 그걸 보고
-    같은 판을 몇 번이고 되풀이하지 않는다(안 그러면 5분마다 클로드를 죽인다.
+    ★ **끝났을 때만 True** 다. 버전이 안 바뀌었으면 False — 부르는 쪽이 그걸 보고
+    같은 버전을 몇 번이고 되풀이하지 않는다(안 그러면 5분마다 클로드를 죽인다.
     2026-08-14 새벽에 밤새 그랬다).
 
-    ★★ **어느 판을 올릴지는 부르는 쪽이 준다.** 여기서 다시 물어보게 두면, 그 물음
-    한 번이 헛돌았을 때(`check()` 는 **못 물어봤을 때도 None** 이다) 올릴 판을 모르는
+    ★★ **어느 버전을 올릴지는 부르는 쪽이 준다.** 여기서 다시 물어보게 두면, 그 물음
+    한 번이 헛돌았을 때(`check()` 는 **못 물어봤을 때도 None** 이다) 올릴 버전을 모르는
     채로 **죽이기만 하고 등록은 건너뛰고서 '다 됐다'** 고 말하게 된다. 모르면 아무것도
     하지 않는다 — 남의 앱을 죽이는 일에 '아마' 는 없다.
     """
@@ -586,8 +586,8 @@ def apply(relaunch: bool = True, target: str = "") -> tuple[bool, str]:
     _ok, why = register(target)
 
     # 켜기 **전에** 본다 — 앱이 뜨면 다시 물고 있어 판정이 흐려진다.
-    # ★★ **끝났다는 말은 판 번호를 읽었을 때만 한다.** 등록 명령이 'OK' 를 줘도 그것이
-    #   곧 새 판은 아니고(`-RegisterByFamilyName` 은 같은 판을 다시 등록해도 OK 다),
+    # ★★ **끝났다는 말은 버전 번호를 읽었을 때만 한다.** 등록 명령이 'OK' 를 줘도 그것이
+    #   곧 새 버전은 아니고(`-RegisterByFamilyName` 은 같은 버전을 다시 등록해도 OK 다),
     #   `check()` 의 None 은 '대기 없음' 과 '못 물어봤음' 을 가리지 못한다. 못 읽었으면
     #   **안 끝난 것으로 친다** — 이쪽으로 틀리면 30분 뒤에 한 번 더 해 볼 뿐이지만,
     #   반대로 틀리면 깨진 밤에 '업데이트 완료' 라고 말하고 손을 놓는다.
@@ -599,7 +599,7 @@ def apply(relaunch: bool = True, target: str = "") -> tuple[bool, str]:
 
     if done:
         return True, f"업데이트 완료 — {target}"
-    return False, f"{target} 등록이 안 됐습니다 — {why or '판이 안 바뀌었습니다'}"
+    return False, f"{target} 등록이 안 됐습니다 — {why or '버전이 안 바뀌었습니다'}"
 
 
 # ---------------------------------------------------------------- 단독 확인
@@ -611,7 +611,7 @@ if __name__ == "__main__":
         print("대기 중인 업데이트 없음")
     else:
         print(f"지금 {p.current} → 대기 {p.target}")
-        print("등록 지연됨(이벤트 658):", "예" if p.staged else "아니오 (업데이터가 본 판)")
+        print("등록 지연됨(이벤트 658):", "예" if p.staged else "아니오 (업데이터가 본 버전)")
         print("내려받은 시각:", f"{p.since:%m-%d %H:%M}" if p.since else "모름")
     ok, why = safe_now()
     print("지금 껐다 켜도 되나:", "예" if ok else f"아니오 ({why})")

@@ -57,7 +57,7 @@ from cooldown_core import (  # noqa: E402
 )
 
 import cooldown_api  # noqa: E402  API 키로 부른 것의 비용(기록이 있는 PC 만)
-import cooldown_cli  # noqa: E402  클로드 코드(npm) 새 판이 나오면 바로 받기
+import cooldown_cli  # noqa: E402  클로드 코드(npm) 새 버전이 나오면 바로 받기
 import cooldown_job  # noqa: E402  세션에서 띄워져도 클로드 데스크톱과 같이 죽지 않게
 import cooldown_login  # noqa: E402
 import cooldown_ping  # noqa: E402
@@ -162,7 +162,7 @@ RETRY_FIRST = 20  # 연결이 끊겼을 때 첫 재시도까지 (초)
 # [업데이트 대기] 클로드 업데이트가 밀려 있는지 보는 간격. 남의 서버가 아니라 내 PC를
 # 보는 것이라 자주 해도 무해하지만, 한 번에 0.6초쯤 걸리므로 5분이면 충분하다.
 UPDATE_EVERY = 300
-# [업데이트 대기] 자동 적용을 판마다 몇 번까지 · 실패한 뒤 얼마나 띄우고 다시 할지.
+# [업데이트 대기] 자동 적용을 버전마다 몇 번까지 · 실패한 뒤 얼마나 띄우고 다시 할지.
 # **되풀이를 막는 빗장이자, 한 번 어긋났다고 하루를 버리지 않게 하는 여유다.**
 AUTO_TRIES = 3
 AUTO_RETRY_GAP = 1800  # 초 (30분)
@@ -198,11 +198,11 @@ REMOTE_GIVEUP = 3  # 연달아 이만큼 못 붙으면 스스로 끈다 (안 될
 # 원격 대기를 갈아 끼울 때가 됐는지(`Remote.stale`) 보는 간격 (초). 갈아 끼우면 그 아래
 # 세션이 다 죽으므로 조용할 때만 한다 — 그 판정이 몇 초 걸려 30초마다 할 일은 아니다.
 RC_REFRESH_EVERY = 300
-# 클로드 코드(npm) 새 판을 묻는 간격 (초). 새 모델이 새 판과 같이 나오므로 반나절씩
+# 클로드 코드(npm) 새 버전을 묻는 간격 (초). 새 모델이 새 버전과 같이 나오므로 반나절씩
 # 늦지 않게 — npm 에 묻는 것은 작은 JSON 하나라 30분이면 부담이 없다.
 CLI_EVERY = 1800
 CLI_FIRST = 90  # 켜고 나서 처음 묻기까지 (초). 조회·원격 대기가 먼저 자리 잡게.
-CLI_TRIES = 3  # 한 판을 몇 번까지 깔아 볼지. 안 되는 것을 30분마다 영영 되풀이하지 않는다.
+CLI_TRIES = 3  # 한 버전을 몇 번까지 깔아 볼지. 안 되는 것을 30분마다 영영 되풀이하지 않는다.
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
 STATS_TABS = ("일별", "주별", "달별", "전체")  # 사용량 통계에서 볼 수 있는 기간
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
@@ -346,9 +346,9 @@ def launch_command() -> tuple[str, str, str]:
     """(실행 파일, 인자, 작업 폴더) — 지금 이 프로그램을 다시 띄우는 방법.
 
     exe 로 묶으면 파이썬도 스크립트도 없다. 그때는 exe 자신이 곧 실행 파일이다.
-    (exe 는 판마다 제 폴더 `dist/클로드 쿨다운 v0.24/` 에 든 onedir 이라 이름이 늘 같고,
-     새 판을 한 번 띄우면 `repair_autostart` 가 바로가기를 새 폴더로 옮겨 앉힌다.
-     옛 '판 번호 없는 쌍둥이 exe'(`stable_twin`)는 onefile 시절 것이라 2026-09-08 에 뺐다.)
+    (exe 는 버전마다 제 폴더 `dist/클로드 쿨다운 v0.24/` 에 든 onedir 이라 이름이 늘 같고,
+     새 버전을 한 번 띄우면 `repair_autostart` 가 바로가기를 새 폴더로 옮겨 앉힌다.
+     옛 '버전 번호 없는 쌍둥이 exe'(`stable_twin`)는 onefile 시절 것이라 2026-09-08 에 뺐다.)
     """
     if getattr(sys, "frozen", False):  # PyInstaller 로 묶인 상태
         exe = os.path.abspath(sys.executable)
@@ -384,7 +384,7 @@ def autostart_points_here() -> bool | None:
 def repair_autostart() -> None:
     """자동 실행 바로가기가 고장났으면 지금 것으로 고쳐 쓴다.
 
-    폴더를 옮기거나 판을 올리면 바로가기가 **없어진 파일**을 가리키게 되고,
+    폴더를 옮기거나 버전을 올리면 바로가기가 **없어진 파일**을 가리키게 되고,
     재부팅해도 아무 일이 일어나지 않는다 — 오류도 안 뜬다. 켜 둔 사람은
     고장난 줄도 모른다.
 
@@ -748,9 +748,9 @@ class App:
         #   Tk 는 스레드 안전하지 않아 조용히 씹히거나 죽는다(실제로 씹혔다).
         self.update_done: queue.Queue = queue.Queue()
         self._update_pending: cooldown_update.Pending | None = None
-        self._update_warned = ""  # 알림을 이미 띄운 대기 판 (판마다 한 번만)
+        self._update_warned = ""  # 알림을 이미 띄운 대기 버전 (버전마다 한 번만)
         self._update_busy = False
-        # ★ 판마다 **몇 번 해 봤나 · 마지막으로 언제 해 봤나**. 적용은 클로드를 죽이는
+        # ★ 버전마다 **몇 번 해 봤나 · 마지막으로 언제 해 봤나**. 적용은 클로드를 죽이는
         #   일이라 5분마다 되풀이하면 밤새 앱이 사라진다(2026-08-14). 그렇다고 한 번에
         #   손을 떼면 잠깐 어긋난 것 하나로 **하루 종일 안 올라간다**(2026-08-19 에
         #   그랬다 — 09:28 에 한 번 실패하고 그날은 끝이었다). 그래서 사이를 넉넉히
@@ -837,15 +837,15 @@ class App:
         self._remote_busy = False
         self._remote_poll_at = 0.0  # 마지막 물어본 때 (monotonic)
         self._remote_said = ""  # 릴레이에 마지막으로 적어 둔 상태 (같으면 다시 안 적는다)
-        # 원격 대기 갈아 끼우기 — 옛 판 위젯이 띄운 것(오염된 환경)·클로드 코드가 올라간 것
+        # 원격 대기 갈아 끼우기 — 옛 버전 위젯이 띄운 것(오염된 환경)·클로드 코드가 올라간 것
         self.rc_refresh_out: queue.Queue = queue.Queue()
         self._rc_refresh_busy = False
         self._rc_refresh_at = 0.0  # 마지막으로 본 때 (monotonic)
         self._rc_refresh_said = ""  # 로그에 '미룸' 을 적어 둔 까닭 (같은 까닭은 한 번만 적는다)
 
-        # 클로드 코드(npm) 새 판 받기 — 결과만 큐로 받는다(까는 데 몇 분 걸린다)
+        # 클로드 코드(npm) 새 버전 받기 — 결과만 큐로 받는다(까는 데 몇 분 걸린다)
         self.cli_out: queue.Queue = queue.Queue()
-        self._cli_tries: dict[str, int] = {}  # 판마다 깔아 본 횟수 (감시 스레드만 만진다)
+        self._cli_tries: dict[str, int] = {}  # 버전마다 깔아 본 횟수 (감시 스레드만 만진다)
 
         self.root = tk.Tk()
         # 숨긴 채로 만들고 run() 에서 편다. 시작 프로그램·바로가기로 띄우면 부모가
@@ -881,7 +881,7 @@ class App:
         threading.Thread(target=self._jobs_watch, daemon=True).start()
         # [남은 식구] 치울 때는 수십 초를 기다리므로 제 스레드에서 돈다
         threading.Thread(target=self._leftover_watch, daemon=True).start()
-        # 클로드 코드 새 판 받기 — 까는 데 몇 분 걸리므로 제 스레드에서 돈다
+        # 클로드 코드 새 버전 받기 — 까는 데 몇 분 걸리므로 제 스레드에서 돈다
         threading.Thread(target=self._cli_watch, daemon=True).start()
 
         self.root.after(200, self._pump)
@@ -1631,7 +1631,7 @@ class App:
                 break
             self._on_rc_refresh(*got)
 
-        # 클로드 코드 새 판을 깐 결과
+        # 클로드 코드 새 버전을 깐 결과
         while True:
             try:
                 got = self.cli_out.get_nowait()
@@ -1822,9 +1822,9 @@ class App:
         if pending is None:
             self._update_warned = ""
         elif self._update_warned != pending.target:
-            # ★★ **판마다 딱 한 번**이다. 예전엔 적용이 끝날 때마다 이 표시를 지워서,
+            # ★★ **버전마다 딱 한 번**이다. 예전엔 적용이 끝날 때마다 이 표시를 지워서,
             #   적용이 안 먹히면 5분마다 같은 알림이 다시 떴다 — 하룻밤에 100통이
-            #   쌓였다(2026-08-14). 새 판이 나오기 전에는 다시 알리지 않는다.
+            #   쌓였다(2026-08-14). 새 버전이 나오기 전에는 다시 알리지 않는다.
             # 자동으로 갈 수 있는 것만 자동이라고 말한다 — 자동 적용은 윈도우가 실제로
             # 등록을 미뤄 뒀을 때(`staged`)만 돈다(`_auto_update_try`).
             auto_will = bool(self.state.get("auto_update")) and pending.staged
@@ -1852,7 +1852,7 @@ class App:
 
         ★★ **되풀이하지 않는다.** 적용은 클로드를 죽이는 일이라, 안 끝난 것을 5분마다
         다시 하면 **밤새 클로드가 5분마다 사라진다**(2026-08-14 03:53~13:09 에 실제로
-        그랬다 — 원격 대기까지 같이 죽었다). 그래서 판마다 `AUTO_TRIES`(3번)까지,
+        그랬다 — 원격 대기까지 같이 죽었다). 그래서 버전마다 `AUTO_TRIES`(3번)까지,
         실패하면 `AUTO_RETRY_GAP`(30분) 띄우고 다시 한다. 그 뒤로는 손 떼고 사람이
         메뉴에서 부르기를 기다린다.
         """
@@ -1864,7 +1864,7 @@ class App:
         if last and time.time() - last < AUTO_RETRY_GAP:
             return
         # ★ 윈도우가 실제로 등록을 미뤄 뒀을 때만 자동으로 한다(이벤트 658).
-        #   업데이터가 새 판을 '봤다' 는 것뿐이면 껐다 켜도 끝낼 것이 없다.
+        #   업데이터가 새 버전을 '봤다' 는 것뿐이면 껐다 켜도 끝낼 것이 없다.
         if not pending.staged:
             return
         ok, _why = cooldown_update.safe_now()
@@ -1978,7 +1978,7 @@ class App:
 
     # ---------------------------------------------------- [오래 도는 작업]
     # 세션이 백그라운드로 돌려 놓은 것(긴 빌드·스크립트·개발 서버)은 **클로드 데스크톱과
-    # 한 묶음(job)** 이라, 앱이 강제로 업데이트될 때 통째로 죽는다. 그러고 나면 옛 판을
+    # 한 묶음(job)** 이라, 앱이 강제로 업데이트될 때 통째로 죽는다. 그러고 나면 옛 버전을
     # 붙잡은 프로세스가 남아 다음 실행이 `이 파일을 다른 응용 프로그램에서 사용 중입니다`
     # 로 막히기도 한다. 오래 떠 있을수록 그 창에 걸릴 확률이 올라가므로, **잊고 켜 둔 것을
     # 사람에게 알려 준다.** 자동 적용이 물러나는 까닭도 같은 값에서 나온다.
@@ -2046,7 +2046,7 @@ class App:
 
     # ---------------------------------------------------- [남은 식구]
     # 강제 업데이트는 클로드 본체만 죽이고 세션이 띄운 셸·스크립트는 남길 수 있다. 그것이
-    # 옛 앱 컨테이너(job)를 붙잡아 새 판이 `이 파일을 다른 응용 프로그램에서 사용 중입니다`
+    # 옛 앱 컨테이너(job)를 붙잡아 새 버전이 `이 파일을 다른 응용 프로그램에서 사용 중입니다`
     # 로 안 켜진다(2026-09-23 02:14~05:22, 재부팅으로만 풀림). 판정·치우기는
     # `cooldown_leftover` 에만 있다. 클로드가 고쳐지면 이 블록째로 지운다.
 
@@ -2085,16 +2085,16 @@ class App:
 
     # ------------------------------------------------ [남은 식구] 끝
 
-    # --------------------------------------------- 클로드 코드(npm) 새 판 받기
-    # 새 모델은 클로드 코드 새 판과 같이 나온다. 원격 대기·그 아래 세션·핑이 쓰는 npm 전역
+    # --------------------------------------------- 클로드 코드(npm) 새 버전 받기
+    # 새 모델은 클로드 코드 새 버전과 같이 나온다. 원격 대기·그 아래 세션·핑이 쓰는 npm 전역
     # 클로드 코드는 스스로 안 올라가서(대화형으로 켤 때만 올라간다), 2026-09-23 Opus 5.5 를
     # 반나절 넘게 못 썼다. 판정·설치는 `cooldown_cli` 에만 있다.
 
     def _cli_watch(self) -> None:
-        """CLI_EVERY 마다 npm 에 새 판을 묻고, 있으면 바로 깐다. 결과만 큐로 넘긴다.
+        """CLI_EVERY 마다 npm 에 새 버전을 묻고, 있으면 바로 깐다. 결과만 큐로 넘긴다.
 
         ★ 까는 것은 돌던 세션을 안 죽인다(`cooldown_cli` 맨 위) — 그래서 조용할 때를
-          기다리지 않는다. 새로 여는 세션부터 새 판이다.
+          기다리지 않는다. 새로 여는 세션부터 새 버전이다.
         """
         time.sleep(CLI_FIRST)
         said = None  # 손대지 않는 까닭 — 바뀔 때만 로그에 적는다
@@ -2102,7 +2102,7 @@ class App:
             try:
                 c = cooldown_cli.check()
                 if c.skip != said and c.skip not in ("", "npm 에 못 물어봄"):
-                    applog(f"클로드 코드 새 판 받기 안 함 — {c.skip}")
+                    applog(f"클로드 코드 새 버전 받기 안 함 — {c.skip}")
                 said = c.skip
                 if c.behind:
                     n = self._cli_tries.get(c.latest, 0)
@@ -2111,29 +2111,29 @@ class App:
                         ok, detail = cooldown_cli.install(c.latest)
                         self.cli_out.put((ok, c.current, c.latest, detail, n + 1))
                         if ok:
-                            # 전에 옆으로 치워 둔 옛 판 폴더 중 이제 놓인 것을 지운다
+                            # 전에 옆으로 치워 둔 옛 버전 폴더 중 이제 놓인 것을 지운다
                             gone = cooldown_cli.sweep()
                             if gone:
-                                applog(f"클로드 코드 옛 판 폴더 지움 — {gone}개")
+                                applog(f"클로드 코드 옛 버전 폴더 지움 — {gone}개")
             except Exception as e:  # noqa: BLE001  못 했으면 다음 차례에 다시
-                applog(f"클로드 코드 새 판 받기 오류 — {e}")
+                applog(f"클로드 코드 새 버전 받기 오류 — {e}")
             time.sleep(CLI_EVERY)
 
     def _on_cli(self, ok: bool, was: str, new: str, detail: str, tries: int) -> None:
-        applog(f"클로드 코드 새 판 {'받음' if ok else '못 받음'} — {was} → {new} — {detail}")
+        applog(f"클로드 코드 새 버전 {'받음' if ok else '못 받음'} — {was} → {new} — {detail}")
         if ok:
             # ★ 성공만 알린다(업데이트 자동 적용과 같은 결). 실패는 30분 뒤 다시 하고,
             #   `CLI_TRIES` 번 다 안 되면 로그에만 남는다.
             # ★ 원격 대기는 갈아 끼우지 않는다 — 세션을 경로로 띄우므로 새로 여는 세션은
-            #   이미 새 판이다(`Remote.stale` 설명). 갈아 끼우면 열어 둔 세션만 죽는다.
-            self._tray_say(f"클로드 코드 {new} 설치됨\n새로 여는 세션부터 새 판")
+            #   이미 새 버전이다(`Remote.stale` 설명). 갈아 끼우면 열어 둔 세션만 죽는다.
+            self._tray_say(f"클로드 코드 {new} 설치됨\n새로 여는 세션부터 새 버전")
         elif tries >= CLI_TRIES:
-            applog(f"클로드 코드 {new} 받기 그만둠 (다음 판을 기다림)")
+            applog(f"클로드 코드 {new} 받기 그만둠 (다음 버전을 기다림)")
 
     # ------------------------------------------- 윈도우 업데이트 재시작 대기
     # 클로드 앱 업데이트(위)는 클로드만 죽이지만, 이쪽은 **PC 가 통째로** 꺼진다.
     # 2026-09-09 12:29 에 그렇게 당했다 — 활성 시간(18~12) 이 끝나자마자 윈도우가
-    # 오전에 깔아 둔 세 판을 적용하느라 연달아 세 번 재시작했고, 돌던 세션이 날아갔다.
+    # 오전에 깔아 둔 업데이트 셋을 적용하느라 연달아 세 번 재시작했고, 돌던 세션이 날아갔다.
     # 판정은 cooldown_reboot 에만 있다. 여기는 언제 알릴지만 정한다.
 
     def _reboot_tick(self) -> None:
@@ -2778,7 +2778,7 @@ class App:
     def _rc_refresh_check(self) -> None:
         """이어받은 원격 대기를 갈아 끼울 때가 됐으면, 조용한지 재 보게 한다.
 
-        ★★ **이어받기만 하면 원격 대기는 며칠이고 산다.** 옛 판 위젯이 띄운 것이면 그
+        ★★ **이어받기만 하면 원격 대기는 며칠이고 산다.** 옛 버전 위젯이 띄운 것이면 그
           환경(`TCL_LIBRARY` 등)이 폰에서 여는 세션마다 내려간다(2026-09-23 어드민 빌드가
           멈춘 뿌리). 그래서 까닭이 있으면(`Remote.stale`) 새로 띄운다.
         ★ 가지째 끄므로 **그 아래 세션도 같이 죽는다** — 업데이트 자동 적용과 같은 잣대로
@@ -2844,7 +2844,7 @@ class App:
             try:
                 n = cooldown_cli.sweep()
                 if n:
-                    applog(f"클로드 코드 옛 판 폴더 지움 — {n}개")
+                    applog(f"클로드 코드 옛 버전 폴더 지움 — {n}개")
             except Exception:  # noqa: BLE001
                 pass
 

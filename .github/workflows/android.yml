@@ -111,8 +111,8 @@ jobs:
         run: python build_exe.py
         working-directory: pc
 
-      # 판 번호는 gradle 의 versionName 을 따르므로 태그와 어긋날 수 있다 — 여기서 잡는다.
-      - name: 판 번호가 태그와 같은지
+      # 버전 번호는 gradle 의 versionName 을 따르므로 태그와 어긋날 수 있다 — 여기서 잡는다.
+      - name: 버전 번호가 태그와 같은지
         shell: bash
         run: |
           want="pc/dist/claude-cooldown-${GITHUB_REF_NAME}.zip"
