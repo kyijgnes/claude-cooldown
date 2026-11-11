@@ -9,7 +9,7 @@
     ┃ ▪▪▪▪▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫     │ ▪▪▪▪▪▪▪▪▪▪▪▫▫▫▫┃▫▫▫▫▫     │
 
 주간 게이지의 ┃ 는 '지금쯤' 눈금 — 주간 창이 흐른 만큼의 자리다. 채운 색이 눈금을
-앞질렀으면 그만큼 빨리 쓰는 중. 숫자·판정은 우클릭 > 이번 주 사용 속도 에서 본다.
+앞질렀으면 그만큼 빨리 쓰는 중. 숫자·판정은 메인 화면 > 이번 주 사용 속도 에서 본다.
 
 오른쪽 끝 두 가지:
 - **번갈아 칸** — 한 줄뿐인데 보여 줄 것이 여럿이라 하나씩 바꿔 띄운다(모델별 한도 ·
@@ -552,7 +552,7 @@ class SlimSkin(Skin):
         self._paint(P.bg, tone(worst(usage)))
         p = pace(usage)
         # 좁은 바는 남은 시간을 안 적는다 — 게이지의 '지금쯤' 눈금(┃)이 그 자리를 맡고,
-        # 숫자로 보려면 우클릭 > 이번 주 사용 속도 가 있다.
+        # 숫자로 보려면 메인 화면 > 이번 주 사용 속도 가 있다.
         five_left = "" if self.compact else usage.five.left
         week_left = "" if self.compact else usage.week.left
         self.five.set(usage.five.pct, five_left, five_due(usage))

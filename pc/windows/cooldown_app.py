@@ -6,10 +6,10 @@ pip install -r ../requirements.txt
 실행:  pythonw cooldown_app.py      (검은 콘솔 창 없이)
 확인:  python  ../cooldown_core.py  (응답 원본 JSON)
 
-- 시작표시줄 아이콘을 누르면 위젯이 맨 앞으로 나온다.
-- 위젯은 드래그로 옮기고, 위치는 저장된다. 우클릭으로 메뉴.
-- 우클릭 > 디자인 에서 모양을 바꾼다 (skins/ 폴더).
-- 우클릭 > 앱 설정 > 윈도우 켤 때 자동 실행 을 켜면 시작 프로그램에 등록된다.
+- 작업표시줄 트레이 아이콘을 누르면 메인 화면이 뜬다.
+- 위젯은 드래그로 옮기고, 위치는 저장된다. 클로디 밖을 누르면 메인 화면(cooldown_main.py), 우클릭은 꼭 필요한 메뉴만.
+- 메인 화면 > 위젯 모양 에서 모양을 바꾼다 (skins/ 폴더).
+- 메인 화면 > 앱 설정 > 윈도우 켤 때 자동 실행 을 켜면 시작 프로그램에 등록된다.
 """
 
 from __future__ import annotations
@@ -71,6 +71,7 @@ import cooldown_newver  # noqa: E402  쿨다운 자기 새 버전 알림
 import cooldown_dino  # noqa: E402  클로디를 아주 오래 꾹 누르면 뜨는 공룡 점프
 import skins  # noqa: E402
 from cooldown_dino_view import DinoBoard  # noqa: E402
+from cooldown_main import MainScreen  # noqa: E402  메인 화면(사용량 세부 + 모든 설정)
 from skins.base import (  # noqa: E402
     KR,
     MARK_W,
@@ -210,10 +211,11 @@ THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto
 THEMES = (("auto", "윈도우 설정 따라가기"), ("light", "늘 밝게"), ("dark", "늘 어둡게"))
 
 class Label:
-    """메뉴 이름 한 곳. 위젯 우클릭 메뉴와 트레이 메뉴가 **같이** 쓴다(11-11 통일).
+    """메뉴·메인 화면 이름 한 곳. 위젯 우클릭 메뉴·트레이 메뉴·메인 화면(`cooldown_main`)이
+    **같이** 쓴다(11-11 통일, 11-12 메인 화면).
     이름은 하는 일로 짓고 괄호로 풀어 쓰지 않는다(폴더 규칙). 값은 괄호에 보여 줘도 된다."""
 
-    FRONT = "위젯 보이기"
+    MAIN = "메인 화면 열기"
     UPDATE = "클로드 새 버전으로 다시 켜기"
     NEWVER = "쿨다운 새 버전 받기"
     RELOGIN = "클로드 다시 로그인"
@@ -224,7 +226,7 @@ class Label:
     LOOK = "위젯 모양"
     THEME = "밝게·어둡게"
     TOPMOST = "다른 창 위에 늘 띄우기"
-    PING = "5시간 한도 미리 시작"
+    PING = "클로드 모닝 스타터"
     PING_ON = "정한 시각에 자동으로 시작"
     PING_NOW = "지금 시작"
     PING_TIMES = "시작 시각 정하기…"
@@ -840,6 +842,10 @@ class App:
         self._topmost_now: bool | None = None
         self._behind = False    # 전체화면 앞에서 물러나 있는 중인가
         self._panels: list[tk.Toplevel] = []  # 열려 있는 팝업들 (한 번에 하나만 둔다)
+        # 메인 화면(사용량 세부 + 모든 설정) — 팝업과 따로 센다. 팝업(시각 정하기·폰 연결)을
+        # 메인 화면 위에 열어도 메인 화면은 안 닫힌다(`_close_panels` 는 팝업만 닫는다).
+        self.main = MainScreen(self, sys.modules[__name__])
+        self._autostart_locked = False  # 시작 폴더에 못 쓰는 PC — 메인 화면이 스위치를 잠근다
         self._stats_period = STATS_TABS[0]  # 사용량 통계에서 마지막에 보던 기간
 
         # 자동 핑(모닝 스타터) 상태 — _build_menu 가 참조하므로 그 전에 잡아 둔다
@@ -1063,132 +1069,24 @@ class App:
             self.root, bool(self.state.get("auto_update"))
         )
 
-        # 메인 메뉴는 **갈래(하위 메뉴)로만** 이룬다 — 하나의 앱이지만 기능은 직관적으로 분리.
-        # 낱개는 맨 아래 종료와, 작업표시줄 바일 때만 그 바로 위에 서는 `작업표시줄에 고정` 뿐.
-        #   · 사용량: 지금 이 창의 속도 · 쌓인 날들의 통계 (읽는 쪽)
-        #   · 디자인: 스킨 넷을 곧바로 + 밝기·항상 위 (옛 이름 '쿨다운 (사용량 표시)')
-        #   · 클로드 모닝 스타터: 5시간 창을 앵커 시각에 맞춰 여는 기능
-        #   · 모바일: 릴레이 전송·페어링
-        #   · 앱 설정: 로그인·자동 적용·자동 실행 (앱 전체에 걸리는 것)
-        # 맨 아래 종료만 메인에 둔다.
-        # ★ **갈래 이름에 괄호를 달지 않는다.** '쿨다운 (사용량 표시)' 처럼 이름이 안 통해서
-        #   괄호로 풀어 줘야 한다면, 괄호를 붙일 게 아니라 **이름을 하는 일로 바꾼다**
-        #   (폴더 전체 규칙: 설명이 필요하면 화면을 고친다).
+        # 우클릭 메뉴는 **꼭 필요한 것만**(2026-11-12 지시). 사용량 세부와 모든 설정은
+        # 메인 화면(`open_main`, `cooldown_main.py`) 한 곳에 있다. 메뉴에 남는 것:
+        #   (그럴 때만) 클로드 새 버전으로 다시 켜기 · 클로드 다시 로그인 · 쿨다운 새 버전 받기
+        #   메인 화면 열기 · 다른 창 위에 늘 띄우기 · (바일 때만) 작업표시줄에 고정 · 종료
+        # 맨 위 그럴 때만 서는 줄은 `_sync_top_items`, 고정은 `_sync_dock_item` 이 넣고 뺀다.
         self.menu = tk.Menu(self.root, tearoff=0)
-
-        # ---- 사용량 ----
-        # 같은 물음('얼마나 썼나')에 답이 둘이라 한 갈래로 묶는다 —
-        # 속도는 **지금 이 창**을, 통계는 **쌓인 날들**을 본다.
-        used = tk.Menu(self.menu, tearoff=0)
-        # 게이지의 '적정선' 눈금이 무슨 뜻인지, 숫자와 판정까지 여기서 다 본다.
-        used.add_command(label=Label.PACE, command=self.open_pace)
-        # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
-        used.add_command(label=Label.STATS, command=self.open_stats)
-        # 구독 한도와 따로, API 키로 부른 것의 돈 — 그런 기록이 있는 PC 에서만 보인다
-        if cooldown_api.available():
-            used.add_command(label=Label.API, command=self.open_api)
-        self.menu.add_cascade(label=Label.USAGE, menu=used)
+        self.menu.add_command(label=Label.MAIN, command=self.open_main)
         self.menu.add_separator()
-
-        # ---- 디자인 ----
-        # '지금 새로고침' 항목은 뺀다 — 위젯을 클릭하면 새로고침되고 스피너가 돈다.
-        # ★ 스킨은 **이 갈래에 곧바로** 놓는다 — 안에 또 `디자인` 갈래를 두면
-        #   `디자인 > 디자인 > 카드형` 이 되어 한 단계가 헛돈다.
-        cool = tk.Menu(self.menu, tearoff=0)
-
-        for cls in skins.SKINS:
-            cool.add_radiobutton(
-                label=cls.name,
-                value=cls.key,
-                variable=self.var_skin,
-                command=lambda k=cls.key: self.switch_skin(k),
-            )
-        cool.add_separator()
-
-        theme = tk.Menu(cool, tearoff=0)
-        for key, label in THEMES:
-            theme.add_radiobutton(
-                label=label,
-                value=key,
-                variable=self.var_theme,
-                command=lambda k=key: self.switch_theme(k),
-            )
-        cool.add_cascade(label=Label.THEME, menu=theme)
-
-        # 여기서 '작업표시줄 슬림 바' 를 고르면 바로 작업표시줄에 붙고, 끌어 옮기면 그 자리에
-        # 남는다. 고정을 켜고 끄는 것은 이 갈래가 아니라 메뉴 맨 아래(`_sync_dock_item`).
-        cool.add_checkbutton(
+        self.menu.add_checkbutton(
             label=Label.TOPMOST, variable=self.var_topmost, command=self.toggle_topmost
         )
-        self.menu_cool = cool
-        self.menu.add_cascade(label=Label.LOOK, menu=cool)
-
-        # ---- 클로드 모닝 스타터 ----
-        # '핑' 같은 개발자 용어를 쓰지 않는다. 항목 이름이 곧 하는 일이 되게 한다.
-        # 값(다음 시각·마지막 결과)은 메뉴에 나열하지 않는다 — 설정·기록 창에서 본다.
-        ping = tk.Menu(self.menu, tearoff=0)
-        ping.add_checkbutton(
-            label=Label.PING_ON,
-            variable=self.var_ping,
-            command=self.toggle_ping,
-        )
-        ping.add_separator()
-        ping.add_command(label=Label.PING_NOW, command=self.send_ping_now)
-        ping.add_command(label=Label.PING_TIMES, command=self.open_ping_times)
-        ping.add_command(label=Label.PING_LOG, command=self.open_ping_log)
-        self.menu.add_cascade(label=Label.PING, menu=ping)
-
-        # ---- 모바일 ----
-        # 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다. 폰 앱이 그걸 읽는다.
-        phone = tk.Menu(self.menu, tearoff=0)
-        phone.add_checkbutton(
-            label=Label.PUSH, variable=self.var_push, command=self.toggle_push
-        )
-        phone.add_separator()
-        phone.add_command(label=Label.PAIR, command=self.open_phone_link)
-        self.menu.add_cascade(label=Label.PHONE, menu=phone)
-
-        # ---- 클로드 코드 원격 ----
-        # 폰이나 claude.ai/code 에서 **이 PC 에 새 세션을 열려면** `claude rc` 가
-        # 상주해 있어야 한다. 그러자고 검은 창을 켜 둘 까닭이 없어 위젯이 들고 있는다.
-        # 값(폴더·마지막 실패)은 메뉴에 나열하지 않는다 — 폴더 창과 알림에서 본다.
-        rc = tk.Menu(self.menu, tearoff=0)
-        rc.add_checkbutton(
-            label=Label.REMOTE_ON,
-            variable=self.var_remote,
-            command=self.toggle_remote,
-        )
-        rc.add_separator()
-        rc.add_command(label=Label.REMOTE_DIR, command=self.open_remote_folder)
-        self.menu.add_cascade(label=Label.REMOTE, menu=rc)
-
-        # ---- 앱 설정 ----
-        # 앱 전체에 걸리는 것들 — 위젯 모양(쿨다운)이 아니라 '이 프로그램이 어떻게 도는가'.
-        conf = tk.Menu(self.menu, tearoff=0)
-        # 위젯이 사용량을 읽을 수 있는지 · 막혔으면 여기서 잇는다
-        conf.add_command(label=Label.LOGIN, command=self.open_login)
-        conf.add_separator()
-        # [업데이트 대기] 이름은 **언제 도는지**까지만 — 몇 분인지는 안 적는다.
-        # 옛 이름은 `작업 없고 자리 비면 … (45분·20분)` 이었는데 메뉴 한 줄이 너무 길었다.
-        conf.add_checkbutton(
-            label=Label.AUTO_UPDATE,
-            variable=self.var_auto_update,
-            command=self.toggle_auto_update,
-        )
-        conf.add_checkbutton(
-            label=Label.AUTOSTART,
-            variable=self.var_autostart,
-            command=self.toggle_autostart,
-        )
-        self.menu_conf = conf
-        self.menu.add_cascade(label=Label.CONF, menu=conf)
-
         self.menu.add_separator()
         self.menu.add_command(label=Label.QUIT, command=self.quit)
 
     def _build_tray(self) -> pystray.Icon:
         """트레이 메뉴 = 위젯 우클릭 메뉴와 **같은 차례·같은 이름**(11-11 지시: 통일).
-        다른 것은 맨 위 `위젯 앞으로`(아이콘을 누르면 도는 기본 항목) 하나뿐이다.
+        아이콘을 누르면 도는 기본 항목은 `메인 화면 열기`(11-12). 차례만 다르다:
+        트레이는 메인 화면이 맨 위, 위젯 메뉴는 그럴 때만 서는 줄이 맨 위.
 
         ★ 여기 lambda 는 **트레이 스레드**에서 돈다. Tk 를 직접 부르지 말고 전부
           `self.commands` 로 넘긴다(`_tk`). 체크 표시도 Tk 변수가 아니라 저장 값을 읽는다.
@@ -1197,33 +1095,14 @@ class App:
         M, I = pystray.Menu, pystray.MenuItem
         tk_ = self._tk
 
-        skin_items = [
-            I(
-                cls.name,
-                tk_(lambda k=cls.key: self.switch_skin(k)),
-                checked=lambda item, k=cls.key: self.skin.key == k,
-                radio=True,
-            )
-            for cls in skins.SKINS
-        ]
-        theme_items = [
-            I(
-                label,
-                tk_(lambda k=key: self.switch_theme(k)),
-                checked=lambda item, k=key: self.state["theme"] == k,
-                radio=True,
-            )
-            for key, label in THEMES
-        ]
-
         return _Tray(
             "claude_cooldown",
             draw_icon(None),
             "클로드 쿨다운 — 불러오는 중",
             menu=M(
                 # default=True — 아이콘을 클릭(더블클릭 포함)하면 이게 실행된다
-                I(Label.FRONT, tk_(self.bring_to_front), default=True),
-                # [업데이트 대기]·다시 로그인: 그럴 때만 나타난다. 위젯 메뉴도 맨 위에 같은 둘.
+                I(Label.MAIN, tk_(self.open_main), default=True),
+                # [업데이트 대기]·다시 로그인·새 버전: 그럴 때만 나타난다. 위젯 메뉴도 같은 셋.
                 I(
                     lambda item: self._update_menu_label(),
                     tk_(self.apply_update),
@@ -1240,69 +1119,11 @@ class App:
                     visible=lambda item: bool(self._new_version),
                 ),
                 M.SEPARATOR,
-                I(Label.USAGE, M(
-                    I(Label.PACE, tk_(self.open_pace)),
-                    I(Label.STATS, tk_(self.open_stats)),
-                    I(
-                        Label.API,
-                        tk_(self.open_api),
-                        visible=lambda item: cooldown_api.available(),
-                    ),
-                )),
-                M.SEPARATOR,
-                I(Label.LOOK, M(
-                    *skin_items,
-                    M.SEPARATOR,
-                    I(Label.THEME, M(*theme_items)),
-                    I(
-                        Label.TOPMOST,
-                        tk_(self.toggle_topmost),
-                        checked=lambda item: bool(self.state["topmost"]),
-                    ),
-                )),
-                I(Label.PING, M(
-                    I(
-                        Label.PING_ON,
-                        tk_(self.toggle_ping),
-                        checked=lambda item: bool(self.ping_cfg.get("enabled")),
-                    ),
-                    M.SEPARATOR,
-                    I(Label.PING_NOW, tk_(self.send_ping_now)),
-                    I(Label.PING_TIMES, tk_(self.open_ping_times)),
-                    I(Label.PING_LOG, tk_(self.open_ping_log)),
-                )),
-                I(Label.PHONE, M(
-                    I(
-                        Label.PUSH,
-                        tk_(self.toggle_push),
-                        checked=lambda item: bool(self.push_cfg.get("enabled")),
-                    ),
-                    M.SEPARATOR,
-                    I(Label.PAIR, tk_(self.open_phone_link)),
-                )),
-                I(Label.REMOTE, M(
-                    I(
-                        Label.REMOTE_ON,
-                        tk_(self.toggle_remote),
-                        checked=lambda item: bool(self.remote_cfg.get("enabled")),
-                    ),
-                    M.SEPARATOR,
-                    I(Label.REMOTE_DIR, tk_(self.open_remote_folder)),
-                )),
-                I(Label.CONF, M(
-                    I(Label.LOGIN, tk_(self.open_login)),
-                    M.SEPARATOR,
-                    I(
-                        Label.AUTO_UPDATE,
-                        tk_(self.toggle_auto_update),
-                        checked=lambda item: bool(self.state.get("auto_update")),
-                    ),
-                    I(
-                        Label.AUTOSTART,
-                        tk_(self.toggle_autostart),
-                        checked=lambda item: autostart_enabled(),
-                    ),
-                )),
+                I(
+                    Label.TOPMOST,
+                    tk_(self.toggle_topmost),
+                    checked=lambda item: bool(self.state["topmost"]),
+                ),
                 M.SEPARATOR,
                 # 위젯 메뉴처럼 작업표시줄 바일 때만 `종료` 바로 위에 선다
                 I(
@@ -1392,23 +1213,22 @@ class App:
         if moved < threshold:
             if docked:
                 self._reassert_dock()  # 밀린 만큼 작업표시줄 자리로 다시 붙인다
-            # ★ **마스코트를 두드린 것은 새로고침이 아니다.** 박자 놀이로 수십 번을
-            #   누르는데 그때마다 조회를 부르면(15초에 한 번씩이라도) 문서화도 안 된
-            #   엔드포인트를 괜히 두드리게 된다. 마스코트 밖을 누르면 그대로 새로고침.
+            # ★ 클릭 두 가지(2026-11-12 지시):
+            #   · **클로디를 누름**(`absorbed`) = 놀이 + 새로고침. 박자 놀이로 수십 번을 눌러도
+            #     조회는 `refresh_now` 의 수동 하한(`MANUAL_FLOOR` 15초)에 한 번뿐이고, 나머지는
+            #     스피너만 돈다. 로그인이 막혀 있으면 새로고침은 헛일이라 놀이만 한다.
+            #   · **클로디 밖을 누름** = 메인 화면. 로그인이 막혀 있으면 메인 화면 맨 위에
+            #     로그인 잇기 띠가 선다(`cooldown_main`). 클로디가 없는 스킨은 어디를 눌러도
+            #     메인 화면이고, 새로고침은 메인 화면 `사용량` 탭의 [새로고침] 단추로 한다.
             try:
                 played = self.skin.absorbed()
             except Exception:  # noqa: BLE001
                 played = False
             if played:
+                if not (isinstance(self.last_error, LoginRequired) or self._login_gone()):
+                    self.refresh_now()
                 return
-            # ★ 로그인이 막혀 있으면 새로고침은 어차피 헛일이다 (토큰이 낡은 걸
-            #   이미 안다) — 그 클릭을 **고칠 수 있는 곳**으로 보낸다. 그래서
-            #   위젯이 '눌러서 로그인 잇기' 라고 적어 둘 수 있다.
-            #   값은 멀쩡한데 로그인이 끝나 `로그인 필요` 가 떠 있을 때도 같다.
-            if isinstance(self.last_error, LoginRequired) or self._login_gone():
-                self.open_login()
-            else:
-                self.refresh_now()
+            self.open_main()
             return
 
         # 확실히 끌어 옮겼다 — 자유 위치로 떼어 낸다. (다시 붙이려면 우클릭 > 작업표시줄에 고정)
@@ -1471,11 +1291,12 @@ class App:
         applog(f"작업표시줄 고정 → {want}")
 
     def _sync_top_items(self) -> None:
-        """트레이 메뉴와 같이, 그럴 때만 메뉴 맨 위에 서는 둘:
-        `Label.UPDATE` · `Label.RELOGIN`."""
+        """트레이 메뉴와 같이, 그럴 때만 `메인 화면 열기` 바로 아래에 서는 셋:
+        `Label.UPDATE` · `Label.RELOGIN` · `Label.NEWVER`."""
+        at = 2  # 0 = 메인 화면 열기, 1 = 구분선
         n = getattr(self, "_top_n", 0)
         if n:
-            self.menu.delete(0, n - 1)
+            self.menu.delete(at, at + n - 1)
         items = []
         if self._update_pending is not None:
             items.append((self._update_menu_label(), self.apply_update))
@@ -1484,23 +1305,16 @@ class App:
         if self._new_version:
             items.append((f"{Label.NEWVER} ({self._new_version})", self.open_release))
         for i, (label, fn) in enumerate(items):
-            self.menu.insert_command(i, label=label, command=fn)
+            self.menu.insert_command(at + i, label=label, command=fn)
         if items:
-            self.menu.insert_separator(len(items))
+            self.menu.insert_separator(at + len(items))
         self._top_n = len(items) + (1 if items else 0)
 
     def _popup(self, e):
         self._sync_top_items()
         self._sync_dock_item()
+        # 트레이·메인 화면에서 바꿨을 수 있다 — 위젯 메뉴 체크도 저장 값에 맞춘다
         self.var_topmost.set(bool(self.state["topmost"]))
-        self.var_autostart.set(autostart_enabled())
-        self.var_skin.set(self.skin.key)
-        self.var_theme.set(self.state["theme"])
-        self.var_ping.set(bool(self.ping_cfg.get("enabled")))
-        # 트레이에서 바꿨을 수 있다 — 위젯 메뉴 체크도 저장 값에 맞춘다
-        self.var_push.set(bool(self.push_cfg.get("enabled")))
-        self.var_remote.set(bool(self.remote_cfg.get("enabled")))
-        self.var_auto_update.set(bool(self.state.get("auto_update")))
         # 메뉴가 떠 있는 동안에는 위젯을 위로 올리지 않는다 (올리면 메뉴를 덮는다)
         self._menu_open = True
         try:
@@ -1509,6 +1323,11 @@ class App:
             self._menu_open = False
 
     # -------------------------------------------------- 동작
+    def open_main(self, tab: str | None = None) -> None:
+        """메인 화면 — 위젯에서 클로디 밖을 누르거나, 우클릭·트레이 `메인 화면 열기`."""
+        self._close_panels()
+        self.main.open(tab)
+
     def refresh_now(self):
         # 연타해도 최소 간격은 지킨다 (수동 경로로 rate limit 규칙을 우회하지 않게)
         now = time.monotonic()
@@ -1644,7 +1463,7 @@ class App:
         if got != want:
             # 시작 폴더에 못 쓰는 환경(정책·보안 솔루션)이다. 체크가 도로 풀려서
             # 눌러도 아무 일이 없는 것처럼 보이므로, 아예 잠가 이유를 드러낸다.
-            self.menu_conf.entryconfig(Label.AUTOSTART, state="disabled")
+            self._autostart_locked = True  # 메인 화면이 이 스위치를 잠근다
         try:
             self.tray.update_menu()  # 트레이 쪽 체크는 스스로 갱신되지 않는다
         except Exception:  # noqa: BLE001
@@ -1758,9 +1577,9 @@ class App:
                 "quit": self.quit,
                 "front": self.bring_to_front,
                 "toggle_autostart": self.toggle_autostart,
-                "pace": self.open_pace,
-                "stats": self.open_stats,
-                "api": self.open_api,
+                "pace": lambda: self.open_main("pace"),
+                "stats": lambda: self.open_main("stats"),
+                "api": lambda: self.open_main("api"),
                 "login": self.open_login,
                 "relogin": self.relogin,
                 "apply_update": self.apply_update,  # [업데이트 대기]
@@ -3515,187 +3334,148 @@ class App:
         save_state(self.state)
 
     # -------------------------------------------------- 이번 주 사용 속도
-    def open_pace(self):
-        """주간 한도를 '지금쯤 얼마나 썼어야 하나' 와 견줘 보여 준다.
+    def _pace_body(self, wrap: tk.Misc, inner: int) -> None:
+        """주간 한도를 '지금쯤 얼마나 썼어야 하나' 와 대조해 보여 준다(메인 화면 `사용 속도`).
 
-        주간 창은 달력 주가 아니라 초기화 시각에서 7일 뺀 순간부터다 — 창이 흐른
+        주간 창은 달력 주가 아니라 초기화 시각에서 7일 뺀 순간부터다. 창이 흐른
         만큼이 곧 알맞은 사용률이고, 게이지의 눈금이 그 자리다.
         """
-        W = 300
-        try:
-            top, body = self._open_panel("이번 주 사용 속도")
-            wrap = tk.Frame(body, bg=P.bg)
-            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
-            inner = W - PANEL_PAD * 2
-
-            p = pace(self.last_usage) if self.last_usage is not None else None
-            if p is None:
-                tk.Label(
-                    wrap,
-                    text="주간 한도 값을 아직 못 받았어요.",
-                    bg=P.bg,
-                    fg=P.faint,
-                    font=(KR, 9),
-                ).pack(anchor="w", pady=16)
-                self._finalize_panel(top, W)
-                return
-
+        p = pace(self.last_usage) if self.last_usage is not None else None
+        if p is None:
             tk.Label(
-                wrap, text=p.verdict, bg=P.bg, fg=pace_color(p.level),
-                font=(KR, 16, "bold"),
-            ).pack(anchor="w")
+                wrap, text="주간 한도 값을 아직 못 받았어요.",
+                bg=P.bg, fg=P.faint, font=(KR, 9),
+            ).pack(anchor="w", pady=16)
+            return
 
-            # 판정을 한 줄로 풀어 준다 — 적정선(고르게 쓸 때)보다 얼마나 앞섰나/뒤졌나.
-            tk.Label(
-                wrap, text=self._gap_sentence(p), bg=P.bg, fg=P.sub, font=(KR, 10),
-            ).pack(anchor="w", pady=(3, 0))
+        tk.Label(
+            wrap, text=p.verdict, bg=P.bg, fg=pace_color(p.level),
+            font=(KR, 16, "bold"),
+        ).pack(anchor="w")
 
-            # 채운 색 = 지금까지 쓴 양, 눈금 = 적정선. 색이 눈금을 앞질렀으면 빨리 쓰는 중.
-            bar = tk.Canvas(
-                wrap, width=inner, height=10, bg=P.bg, highlightthickness=0, bd=0
+        # 판정을 한 줄로 풀어 준다 — 적정선(고르게 쓸 때)보다 얼마나 앞섰나/뒤졌나.
+        tk.Label(
+            wrap, text=self._gap_sentence(p), bg=P.bg, fg=P.sub, font=(KR, 10),
+        ).pack(anchor="w", pady=(3, 0))
+
+        # 채운 색 = 지금까지 쓴 양, 눈금 = 적정선. 색이 눈금을 앞질렀으면 빨리 쓰는 중.
+        bar = tk.Canvas(
+            wrap, width=inner, height=10, bg=P.bg, highlightthickness=0, bd=0
+        )
+        bar.pack(fill="x", pady=(12, 12))
+        bar.create_rectangle(0, 0, inner, 10, fill=P.track, width=0)
+        bar.create_rectangle(0, 0, inner * p.used / 100, 10, fill=tone(p.used), width=0)
+        x = mark_x(p.due, inner)
+        bar.create_rectangle(x, 0, x + MARK_W, 10, fill=P.title, width=0)
+
+        self._pair(wrap, "지금까지 사용", f"{p.used:.0f}%", tone(p.used))
+        # 괄호로 `(고르게 쓸 때)` 를 달지 않는다 — 바로 위 `_gap_sentence` 가
+        # `고르게 쓸 때보다 N%p 덜 썼어요` 로 이미 말했다. 이름은 어디서나 `적정선`.
+        self._pair(wrap, "적정선", f"{p.due:.0f}%", P.sub)
+
+        tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(10, 8))
+
+        # 이대로 계속 쓰면 초기화 시점에 몇 %가 되는가 (지금 속도를 창 끝까지 늘린 값).
+        if p.projected is not None:
+            self._pair(
+                wrap, "이대로 계속 쓰면",
+                f"초기화 때 {min(999, p.projected):.0f}%",
+                pace_color(p.level),
             )
-            bar.pack(fill="x", pady=(12, 12))
-            bar.create_rectangle(0, 0, inner, 10, fill=P.track, width=0)
-            bar.create_rectangle(0, 0, inner * p.used / 100, 10, fill=tone(p.used), width=0)
-            x = mark_x(p.due, inner)
-            bar.create_rectangle(x, 0, x + MARK_W, 10, fill=P.title, width=0)
-
-            self._pair(wrap, "지금까지 사용", f"{p.used:.0f}%", tone(p.used))
-            # 괄호로 `(고르게 쓸 때)` 를 달지 않는다 — 바로 위 `_gap_sentence` 가
-            # `고르게 쓸 때보다 N%p 덜 썼어요` 로 이미 말했다. 이름은 어디서나 `적정선`.
-            self._pair(wrap, "적정선", f"{p.due:.0f}%", P.sub)
-
-            tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(10, 8))
-
-            # 이대로 계속 쓰면 초기화 시점에 몇 %가 되는가 (지금 속도를 창 끝까지 늘린 값).
-            if p.projected is not None:
-                self._pair(
-                    wrap, "이대로 계속 쓰면",
-                    f"초기화 때 {min(999, p.projected):.0f}%",
-                    pace_color(p.level),
-                )
-            # 초기화까지 남은 예산을 남은 날로 나눈 값 — 하루에 이만큼씩 쓰면 딱 맞는다.
-            per = p.per_day
-            if per is not None:
-                self._pair(wrap, "하루 이만큼까지 OK", f"{per:.0f}%", P.sub)
-            else:
-                self._pair(wrap, "남은 양", f"{max(0.0, 100 - p.used):.0f}%", P.sub)
-            if p.runout is not None:
-                self._pair(wrap, "이대로면 다 쓰는 때", self._when_text(p.runout), P.red)
-            reset = self.last_usage.week.resets_at
-            if reset is not None:
-                self._pair(wrap, "초기화", self._when_text(reset), P.sub)
-
-            self._finalize_panel(top, W)
-        except Exception:  # noqa: BLE001
-            pass
+        # 초기화까지 남은 예산을 남은 날로 나눈 값 — 하루에 이만큼씩 쓰면 딱 맞는다.
+        per = p.per_day
+        if per is not None:
+            self._pair(wrap, "하루 이만큼까지 OK", f"{per:.0f}%", P.sub)
+        else:
+            self._pair(wrap, "남은 양", f"{max(0.0, 100 - p.used):.0f}%", P.sub)
+        if p.runout is not None:
+            self._pair(wrap, "이대로면 다 쓰는 때", self._when_text(p.runout), P.red)
+        reset = self.last_usage.week.resets_at
+        if reset is not None:
+            self._pair(wrap, "초기화", self._when_text(reset), P.sub)
 
     # -------------------------------------------------- 사용량 통계
-    def open_stats(self):
-        """쌓아 둔 기록에서 '언제 얼마나 썼나' 를 셈해 보여 준다.
+    def _stats_body(self, wrap: tk.Misc, inner: int, refit) -> None:
+        """쌓아 둔 기록에서 '언제 얼마나 썼나' 를 셈해 보여 준다(메인 화면 `지난 기록`).
 
-        사용량 단위는 **주간 한도 %p** — 5시간 퍼센트는 5시간마다 0으로 돌아가
+        사용량 단위는 **주간 한도 %p**: 5시간 퍼센트는 5시간마다 0으로 돌아가
         더할 수가 없고, 주간 퍼센트가 오른 만큼이 곧 그 사이에 쓴 양이다.
         셈은 전부 `cooldown_stats` 가 하고, 여기서는 그리기만 한다.
 
         위쪽 기간 줄(일별·주별·달별·전체)로 갈아 가며 본다. 마지막에 보던 기간은
-        `self._stats_period` 에 남아 다음에 열 때 그대로 열린다.
+        `self._stats_period` 에 남아 다음에 열 때 그대로 열린다. 갈아 낀 뒤 `refit()`.
         """
-        W = 344
-        try:
-            rep = cooldown_stats.analyze(cooldown_stats.read_samples())
-            top, body = self._open_panel("지난 사용 기록")
-            wrap = tk.Frame(body, bg=P.bg)
-            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
-            inner = W - PANEL_PAD * 2
-
-            if rep.samples < 2:
-                tk.Label(
-                    wrap, text="쌓인 기록 없음", bg=P.bg, fg=P.title, font=(KR, 12, "bold")
-                ).pack(anchor="w", pady=(6, 2))
-                tk.Label(
-                    wrap, text="위젯이 떠 있는 동안 5분마다 쌓임",
-                    bg=P.bg, fg=P.faint, font=(KR, 9),
-                ).pack(anchor="w", pady=(0, 10))
-                self._finalize_panel(top, W)
-                return
-
-            # ★ 여기 한 줄이 화면 전체의 단위를 말한다 — 없으면 '오늘 7%' 가 무엇의
-            #   7% 인지 알 길이 없다(쓰는 사람이 실제로 물었다, 2026-08-20).
-            head = f"기록 {rep.span_days:.0f}일"
-            if rep.first is not None:
-                head += f" ({rep.first:%m/%d} 부터)"
-            head += " · 모든 % 는 주간 한도 기준"
+        rep = cooldown_stats.analyze(cooldown_stats.read_samples())
+        if rep.samples < 2:
             tk.Label(
-                wrap, text=head, bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
-            ).pack(fill="x", pady=(0, 8))
+                wrap, text="쌓인 기록 없음", bg=P.bg, fg=P.title, font=(KR, 12, "bold")
+            ).pack(anchor="w", pady=(6, 2))
+            tk.Label(
+                wrap, text="위젯이 떠 있는 동안 5분마다 쌓임",
+                bg=P.bg, fg=P.faint, font=(KR, 9),
+            ).pack(anchor="w", pady=(0, 10))
+            return
 
-            bar = tk.Frame(wrap, bg=P.bg)
-            bar.pack(fill="x", pady=(0, 10))
-            content = tk.Frame(wrap, bg=P.bg)
-            content.pack(fill="both", expand=True)
-            self._build_stats_tabs(bar, top, content, rep, inner, W)
+        # ★ 여기 한 줄이 화면 전체의 단위를 말한다 — 없으면 '오늘 7%' 가 무엇의
+        #   7% 인지 알 길이 없다(쓰는 사람이 실제로 물었다, 2026-08-20).
+        head = f"기록 {rep.span_days:.0f}일"
+        if rep.first is not None:
+            head += f" ({rep.first:%m/%d} 부터)"
+        head += " · 모든 % 는 주간 한도 기준"
+        tk.Label(
+            wrap, text=head, bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
+        ).pack(fill="x", pady=(0, 8))
 
-            self._finalize_panel(top, W)
-        except Exception:  # noqa: BLE001
-            pass
+        bar = tk.Frame(wrap, bg=P.bg)
+        bar.pack(fill="x", pady=(0, 10))
+        content = tk.Frame(wrap, bg=P.bg)
+        content.pack(fill="both", expand=True)
+        self._build_stats_tabs(bar, content, rep, inner, refit)
 
     # -------------------------------------------------- API 사용량
-    def open_api(self):
-        """API 키로 부른 것이 얼마 들었나 — 구독 한도(위 통계)와는 따로 내는 돈이다.
+    def _api_body(self, wrap: tk.Misc, inner: int) -> None:
+        """API 키로 부른 것이 얼마 들었나(메인 화면 `API 사용 요금`). 구독 한도와는 따로 내는 돈이다.
 
         재료는 API 를 부르는 프로그램이 남긴 기록(`cooldown_api.sources`). 셈은 전부
         `cooldown_api.analyze` 가 하고, 여기서는 그리기만 한다.
         """
-        W = 344
-        try:
-            rep = cooldown_api.analyze(cooldown_api.read_rows())
-            usd = cooldown_api.usd_text
-            top, body = self._open_panel("API 사용 요금")
-            wrap = tk.Frame(body, bg=P.bg)
-            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
-            inner = W - PANEL_PAD * 2
-
-            if not rep.rows:
-                tk.Label(
-                    wrap, text="쌓인 기록 없음", bg=P.bg, fg=P.title, font=(KR, 12, "bold")
-                ).pack(anchor="w", pady=(6, 10))
-                self._finalize_panel(top, W)
-                return
-
-            # 맨 위 한 줄이 단위를 말한다(사용량 통계와 같은 결)
-            span = (datetime.now().date() - rep.first.date()).days + 1
+        rep = cooldown_api.analyze(cooldown_api.read_rows())
+        usd = cooldown_api.usd_text
+        if not rep.rows:
             tk.Label(
-                wrap, text=f"기록 {span}일 ({rep.first:%m/%d} 부터) · 응답 토큰으로 센 달러",
-                bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
-            ).pack(fill="x", pady=(0, 8))
+                wrap, text="쌓인 기록 없음", bg=P.bg, fg=P.title, font=(KR, 12, "bold")
+            ).pack(anchor="w", pady=(6, 10))
+            return
 
-            now = datetime.now()
-            self._section(wrap, "이번 달", f"{now.month}월 · {rep.month_count}건")
-            self._pair(wrap, "쓴 돈", usd(rep.month_usd), P.title)
-            self._pair(wrap, "오늘", f"{usd(rep.today_usd)} · {rep.today_count}건", P.sub)
-            if rep.forecast is not None:
-                self._pair(wrap, "이 속도면 달말에", usd(rep.forecast), P.sub)
-            if rep.last_month_usd > 0:
-                self._pair(wrap, "지난 달", usd(rep.last_month_usd), P.sub)
+        # 맨 위 한 줄이 단위를 말한다(사용량 통계와 같은 결)
+        span = (datetime.now().date() - rep.first.date()).days + 1
+        tk.Label(
+            wrap, text=f"기록 {span}일 ({rep.first:%m/%d} 부터) · 응답 토큰으로 센 달러",
+            bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
+        ).pack(fill="x", pady=(0, 8))
 
+        now = datetime.now()
+        self._section(wrap, "이번 달", f"{now.month}월 · {rep.month_count}건")
+        self._pair(wrap, "쓴 돈", usd(rep.month_usd), P.title)
+        self._pair(wrap, "오늘", f"{usd(rep.today_usd)} · {rep.today_count}건", P.sub)
+        if rep.forecast is not None:
+            self._pair(wrap, "이 속도면 달말에", usd(rep.forecast), P.sub)
+        if rep.last_month_usd > 0:
+            self._pair(wrap, "지난 달", usd(rep.last_month_usd), P.sub)
+
+        self._rule(wrap)
+        self._section(wrap, "일별", f"최근 {len(rep.days)}일")
+        self._chart_usd_days(wrap, rep.days, inner)
+        busiest = max(rep.days, key=lambda dv: dv[1])
+        if busiest[1] > 0:
+            self._pair(wrap, "가장 많이 쓴 날",
+                       f"{self._day_text(busiest[0])} {usd(busiest[1])}", P.sub)
+
+        if rep.by_who:
             self._rule(wrap)
-            self._section(wrap, "일별", f"최근 {len(rep.days)}일")
-            self._chart_usd_days(wrap, rep.days, inner)
-            busiest = max(rep.days, key=lambda dv: dv[1])
-            if busiest[1] > 0:
-                self._pair(wrap, "가장 많이 쓴 날",
-                           f"{self._day_text(busiest[0])} {usd(busiest[1])}", P.sub)
-
-            if rep.by_who:
-                self._rule(wrap)
-                self._section(wrap, "쓴 곳", "이번 달")
-                for name, n, value in rep.by_who:
-                    self._pair(wrap, f"{name} · {n}건", usd(value), P.sub)
-
-            self._finalize_panel(top, W)
-        except Exception:  # noqa: BLE001
-            pass
+            self._section(wrap, "쓴 곳", "이번 달")
+            for name, n, value in rep.by_who:
+                self._pair(wrap, f"{name} · {n}건", usd(value), P.sub)
 
     @staticmethod
     def _chart_usd_days(parent: tk.Misc, days: list, width: int, height: int = 52) -> None:
@@ -3725,7 +3505,7 @@ class App:
                 font=(KR, 7), fill=P.title if day == today else P.faint,
             )
 
-    def _build_stats_tabs(self, bar, top, content, rep, inner: int, W: int) -> None:
+    def _build_stats_tabs(self, bar, content, rep, inner: int, refit) -> None:
         """기간 고르는 줄. 고른 것만 밝고 밑에 초록 밑줄이 선다 (툴팁 없이 지금 상태를 보임)."""
         tabs: dict[str, tk.Label] = {}
 
@@ -3739,7 +3519,7 @@ class App:
             for w in content.winfo_children():
                 w.destroy()
             self._draw_stats(content, rep, inner, name)
-            self._refit_panel(top, W)
+            refit()
 
         for name in STATS_TABS:
             cell = tk.Frame(bar, bg=P.bg)
@@ -4167,9 +3947,9 @@ class App:
         """내용을 다 채운 뒤 크기를 재고 위젯 옆에 띄운다."""
         top.update_idletasks()
         height = top.winfo_reqheight()
-        x, y = clamp_to_screen(
-            self.root.winfo_x() + 28, self.root.winfo_y() + 28, width, height
-        )
+        # 메인 화면에서 연 팝업(시각 정하기·폰 연결·로그인)은 메인 화면 위에 띄운다
+        ax, ay = self.main.anchor() or (self.root.winfo_x(), self.root.winfo_y())
+        x, y = clamp_to_screen(ax + 28, ay + 28, width, height)
         top.geometry(f"{width}x{height}+{x}+{y}")
         top.deiconify()
         round_corners(top)  # 본체와 같은 둥근 모서리

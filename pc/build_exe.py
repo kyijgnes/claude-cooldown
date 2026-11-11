@@ -77,6 +77,7 @@ HIDDEN = [
     "cooldown_job",  # 세션에서 띄워지면 클로드 데스크톱 job 밖으로 다시 뜨기
     "cooldown_dino",  # 공룡 점프 규칙·그림표 (클로디를 아주 오래 꾹)
     "cooldown_dino_view",  # 공룡 점프 판 그리기
+    "cooldown_main",  # 메인 화면(사용량 세부 + 모든 설정). 앱이 import 하지만 명시해 확실히
     "qrcode",  # 폰 연결 QR. 함수 안에서 늦게 import 해 PyInstaller 가 못 찾는다
     "pystray._win32",
     "win32com.client",
