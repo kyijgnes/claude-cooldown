@@ -100,7 +100,7 @@ def main() -> None:
         skin.show(demo(), STAMP)
         skin.show_error("연결 실패", True, STAMP)
     else:
-        skin.show_error("눌러서 로그인 잇기", False, STAMP)
+        skin.show_error("눌러서 다시 연결", False, STAMP)
 
     root.overrideredirect(True)
     root.update_idletasks()

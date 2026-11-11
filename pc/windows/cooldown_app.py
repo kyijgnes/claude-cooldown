@@ -206,7 +206,40 @@ CLI_TRIES = 3  # 한 버전을 몇 번까지 깔아 볼지. 안 되는 것을 30
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
 STATS_TABS = ("일별", "주별", "달별", "전체")  # 사용량 통계에서 볼 수 있는 기간
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
-THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
+THEMES = (("auto", "윈도우 설정 따라가기"), ("light", "늘 밝게"), ("dark", "늘 어둡게"))
+
+class Label:
+    """메뉴 이름 한 곳. 위젯 우클릭 메뉴와 트레이 메뉴가 **같이** 쓴다(11-11 통일).
+    이름은 하는 일로 짓고 괄호로 풀어 쓰지 않는다(폴더 규칙). 값은 괄호에 보여 줘도 된다."""
+
+    FRONT = "위젯 보이기"
+    UPDATE = "클로드 새 버전으로 다시 켜기"
+    RELOGIN = "클로드 다시 로그인"
+    USAGE = "사용량"
+    PACE = "이번 주 사용 속도…"
+    STATS = "지난 사용 기록…"
+    API = "API 사용 요금…"
+    LOOK = "위젯 모양"
+    THEME = "밝게·어둡게"
+    TOPMOST = "다른 창 위에 늘 띄우기"
+    PING = "5시간 한도 미리 시작"
+    PING_ON = "정한 시각에 자동으로 시작"
+    PING_NOW = "지금 시작"
+    PING_TIMES = "시작 시각 정하기…"
+    PING_LOG = "시작 기록 보기…"
+    PHONE = "폰 앱"
+    PUSH = "폰에 사용량 보내기"
+    PAIR = "폰 연결하기…"
+    REMOTE = "폰·웹에서 이 PC 쓰기"
+    REMOTE_ON = "폰·웹에서 이 PC 에 세션 열기"
+    REMOTE_DIR = "세션 열 폴더 정하기…"
+    CONF = "앱 설정"
+    LOGIN = "클로드 로그인 확인…"
+    AUTO_UPDATE = "자리 비면 클로드 업데이트 자동 적용"
+    AUTOSTART = "윈도우 켤 때 자동 실행"
+    DOCK = "작업표시줄에 고정"
+    QUIT = "종료"
+
 
 
 class _Tray(pystray.Icon):
@@ -1042,13 +1075,13 @@ class App:
         # 속도는 **지금 이 창**을, 통계는 **쌓인 날들**을 본다.
         used = tk.Menu(self.menu, tearoff=0)
         # 게이지의 '적정선' 눈금이 무슨 뜻인지, 숫자와 판정까지 여기서 다 본다.
-        used.add_command(label="이번 주 사용 속도…", command=self.open_pace)
+        used.add_command(label=Label.PACE, command=self.open_pace)
         # 지나간 기록으로 보는 쪽 — 날짜별·시간대별·5시간 창별
-        used.add_command(label="사용량 통계…", command=self.open_stats)
+        used.add_command(label=Label.STATS, command=self.open_stats)
         # 구독 한도와 따로, API 키로 부른 것의 돈 — 그런 기록이 있는 PC 에서만 보인다
         if cooldown_api.available():
-            used.add_command(label="API 사용량…", command=self.open_api)
-        self.menu.add_cascade(label="사용량", menu=used)
+            used.add_command(label=Label.API, command=self.open_api)
+        self.menu.add_cascade(label=Label.USAGE, menu=used)
         self.menu.add_separator()
 
         # ---- 디자인 ----
@@ -1074,40 +1107,40 @@ class App:
                 variable=self.var_theme,
                 command=lambda k=key: self.switch_theme(k),
             )
-        cool.add_cascade(label="밝기", menu=theme)
+        cool.add_cascade(label=Label.THEME, menu=theme)
 
         # 여기서 '작업표시줄 슬림 바' 를 고르면 바로 작업표시줄에 붙고, 끌어 옮기면 그 자리에
         # 남는다. 고정을 켜고 끄는 것은 이 갈래가 아니라 메뉴 맨 아래(`_sync_dock_item`).
         cool.add_checkbutton(
-            label="항상 위에 표시", variable=self.var_topmost, command=self.toggle_topmost
+            label=Label.TOPMOST, variable=self.var_topmost, command=self.toggle_topmost
         )
         self.menu_cool = cool
-        self.menu.add_cascade(label="디자인", menu=cool)
+        self.menu.add_cascade(label=Label.LOOK, menu=cool)
 
         # ---- 클로드 모닝 스타터 ----
         # '핑' 같은 개발자 용어를 쓰지 않는다. 항목 이름이 곧 하는 일이 되게 한다.
         # 값(다음 시각·마지막 결과)은 메뉴에 나열하지 않는다 — 설정·기록 창에서 본다.
         ping = tk.Menu(self.menu, tearoff=0)
         ping.add_checkbutton(
-            label="정한 시각마다 5시간 자동 시작",
+            label=Label.PING_ON,
             variable=self.var_ping,
             command=self.toggle_ping,
         )
         ping.add_separator()
-        ping.add_command(label="지금 한 번 실행", command=self.send_ping_now)
-        ping.add_command(label="시각 설정…", command=self.open_ping_times)
-        ping.add_command(label="실행 기록…", command=self.open_ping_log)
-        self.menu.add_cascade(label="클로드 모닝 스타터", menu=ping)
+        ping.add_command(label=Label.PING_NOW, command=self.send_ping_now)
+        ping.add_command(label=Label.PING_TIMES, command=self.open_ping_times)
+        ping.add_command(label=Label.PING_LOG, command=self.open_ping_log)
+        self.menu.add_cascade(label=Label.PING, menu=ping)
 
         # ---- 모바일 ----
         # 조회에 성공할 때마다 퍼센트만 릴레이 서버로 올린다. 폰 앱이 그걸 읽는다.
         phone = tk.Menu(self.menu, tearoff=0)
         phone.add_checkbutton(
-            label="폰으로 보내기", variable=self.var_push, command=self.toggle_push
+            label=Label.PUSH, variable=self.var_push, command=self.toggle_push
         )
         phone.add_separator()
-        phone.add_command(label="폰 연결…", command=self.open_phone_link)
-        self.menu.add_cascade(label="모바일", menu=phone)
+        phone.add_command(label=Label.PAIR, command=self.open_phone_link)
+        self.menu.add_cascade(label=Label.PHONE, menu=phone)
 
         # ---- 클로드 코드 원격 ----
         # 폰이나 claude.ai/code 에서 **이 PC 에 새 세션을 열려면** `claude rc` 가
@@ -1115,37 +1148,37 @@ class App:
         # 값(폴더·마지막 실패)은 메뉴에 나열하지 않는다 — 폴더 창과 알림에서 본다.
         rc = tk.Menu(self.menu, tearoff=0)
         rc.add_checkbutton(
-            label="폰·웹에서 이 PC 에 세션 열기",
+            label=Label.REMOTE_ON,
             variable=self.var_remote,
             command=self.toggle_remote,
         )
         rc.add_separator()
-        rc.add_command(label="작업 폴더…", command=self.open_remote_folder)
-        self.menu.add_cascade(label="클로드 코드 원격", menu=rc)
+        rc.add_command(label=Label.REMOTE_DIR, command=self.open_remote_folder)
+        self.menu.add_cascade(label=Label.REMOTE, menu=rc)
 
         # ---- 앱 설정 ----
         # 앱 전체에 걸리는 것들 — 위젯 모양(쿨다운)이 아니라 '이 프로그램이 어떻게 도는가'.
         conf = tk.Menu(self.menu, tearoff=0)
         # 위젯이 사용량을 읽을 수 있는지 · 막혔으면 여기서 잇는다
-        conf.add_command(label="로그인 상태…", command=self.open_login)
+        conf.add_command(label=Label.LOGIN, command=self.open_login)
         conf.add_separator()
         # [업데이트 대기] 이름은 **언제 도는지**까지만 — 몇 분인지는 안 적는다.
         # 옛 이름은 `작업 없고 자리 비면 … (45분·20분)` 이었는데 메뉴 한 줄이 너무 길었다.
         conf.add_checkbutton(
-            label="자리 비면 클로드 업데이트 자동 적용",
+            label=Label.AUTO_UPDATE,
             variable=self.var_auto_update,
             command=self.toggle_auto_update,
         )
         conf.add_checkbutton(
-            label="윈도우 켤 때 자동 실행",
+            label=Label.AUTOSTART,
             variable=self.var_autostart,
             command=self.toggle_autostart,
         )
         self.menu_conf = conf
-        self.menu.add_cascade(label="앱 설정", menu=conf)
+        self.menu.add_cascade(label=Label.CONF, menu=conf)
 
         self.menu.add_separator()
-        self.menu.add_command(label="종료", command=self.quit)
+        self.menu.add_command(label=Label.QUIT, command=self.quit)
 
     def _build_tray(self) -> pystray.Icon:
         """트레이 메뉴 = 위젯 우클릭 메뉴와 **같은 차례·같은 이름**(11-11 지시: 통일).
@@ -1183,7 +1216,7 @@ class App:
             "클로드 쿨다운 — 불러오는 중",
             menu=M(
                 # default=True — 아이콘을 클릭(더블클릭 포함)하면 이게 실행된다
-                I("위젯 앞으로", tk_(self.bring_to_front), default=True),
+                I(Label.FRONT, tk_(self.bring_to_front), default=True),
                 # [업데이트 대기]·다시 로그인: 그럴 때만 나타난다. 위젯 메뉴도 맨 위에 같은 둘.
                 I(
                     lambda item: self._update_menu_label(),
@@ -1191,70 +1224,70 @@ class App:
                     visible=lambda item: self._update_pending is not None,
                 ),
                 I(
-                    "클로드 다시 로그인",
+                    Label.RELOGIN,
                     tk_(self.relogin),
                     visible=lambda item: self._relogin_item,
                 ),
                 M.SEPARATOR,
-                I("사용량", M(
-                    I("이번 주 사용 속도…", tk_(self.open_pace)),
-                    I("사용량 통계…", tk_(self.open_stats)),
+                I(Label.USAGE, M(
+                    I(Label.PACE, tk_(self.open_pace)),
+                    I(Label.STATS, tk_(self.open_stats)),
                     I(
-                        "API 사용량…",
+                        Label.API,
                         tk_(self.open_api),
                         visible=lambda item: cooldown_api.available(),
                     ),
                 )),
                 M.SEPARATOR,
-                I("디자인", M(
+                I(Label.LOOK, M(
                     *skin_items,
                     M.SEPARATOR,
-                    I("밝기", M(*theme_items)),
+                    I(Label.THEME, M(*theme_items)),
                     I(
-                        "항상 위에 표시",
+                        Label.TOPMOST,
                         tk_(self.toggle_topmost),
                         checked=lambda item: bool(self.state["topmost"]),
                     ),
                 )),
-                I("클로드 모닝 스타터", M(
+                I(Label.PING, M(
                     I(
-                        "정한 시각마다 5시간 자동 시작",
+                        Label.PING_ON,
                         tk_(self.toggle_ping),
                         checked=lambda item: bool(self.ping_cfg.get("enabled")),
                     ),
                     M.SEPARATOR,
-                    I("지금 한 번 실행", tk_(self.send_ping_now)),
-                    I("시각 설정…", tk_(self.open_ping_times)),
-                    I("실행 기록…", tk_(self.open_ping_log)),
+                    I(Label.PING_NOW, tk_(self.send_ping_now)),
+                    I(Label.PING_TIMES, tk_(self.open_ping_times)),
+                    I(Label.PING_LOG, tk_(self.open_ping_log)),
                 )),
-                I("모바일", M(
+                I(Label.PHONE, M(
                     I(
-                        "폰으로 보내기",
+                        Label.PUSH,
                         tk_(self.toggle_push),
                         checked=lambda item: bool(self.push_cfg.get("enabled")),
                     ),
                     M.SEPARATOR,
-                    I("폰 연결…", tk_(self.open_phone_link)),
+                    I(Label.PAIR, tk_(self.open_phone_link)),
                 )),
-                I("클로드 코드 원격", M(
+                I(Label.REMOTE, M(
                     I(
-                        "폰·웹에서 이 PC 에 세션 열기",
+                        Label.REMOTE_ON,
                         tk_(self.toggle_remote),
                         checked=lambda item: bool(self.remote_cfg.get("enabled")),
                     ),
                     M.SEPARATOR,
-                    I("작업 폴더…", tk_(self.open_remote_folder)),
+                    I(Label.REMOTE_DIR, tk_(self.open_remote_folder)),
                 )),
-                I("앱 설정", M(
-                    I("로그인 상태…", tk_(self.open_login)),
+                I(Label.CONF, M(
+                    I(Label.LOGIN, tk_(self.open_login)),
                     M.SEPARATOR,
                     I(
-                        "자리 비면 클로드 업데이트 자동 적용",
+                        Label.AUTO_UPDATE,
                         tk_(self.toggle_auto_update),
                         checked=lambda item: bool(self.state.get("auto_update")),
                     ),
                     I(
-                        "윈도우 켤 때 자동 실행",
+                        Label.AUTOSTART,
                         tk_(self.toggle_autostart),
                         checked=lambda item: autostart_enabled(),
                     ),
@@ -1262,12 +1295,12 @@ class App:
                 M.SEPARATOR,
                 # 위젯 메뉴처럼 작업표시줄 바일 때만 `종료` 바로 위에 선다
                 I(
-                    "작업표시줄에 고정",
+                    Label.DOCK,
                     tk_(self._tray_toggle_dock),
                     checked=lambda item: bool(self.state["dock"]),
                     visible=lambda item: bool(self.skin.dockable),
                 ),
-                I("종료", tk_(self.quit)),
+                I(Label.QUIT, tk_(self.quit)),
             ),
         )
 
@@ -1389,15 +1422,15 @@ class App:
         """
         want = bool(self.skin.dockable)
         if want and not self._dock_item:
-            at = self._menu_at("command", "종료")
+            at = self._menu_at("command", Label.QUIT)
             self.menu.insert_checkbutton(
                 self.menu.index("end") + 1 if at is None else at,
-                label="작업표시줄에 고정", variable=self.var_dock,
+                label=Label.DOCK, variable=self.var_dock,
                 command=self.toggle_dock,
             )
             self._dock_item = True
         elif self._dock_item and not want:
-            at = self._menu_at("checkbutton", "작업표시줄에 고정")
+            at = self._menu_at("checkbutton", Label.DOCK)
             if at is not None:
                 self.menu.delete(at)
             self._dock_item = False
@@ -1428,7 +1461,7 @@ class App:
 
     def _sync_top_items(self) -> None:
         """트레이 메뉴와 같이, 그럴 때만 메뉴 맨 위에 서는 둘:
-        `클로드 껐다 켜서 업데이트 끝내기 (… 대기)` · `클로드 다시 로그인`."""
+        `Label.UPDATE` · `Label.RELOGIN`."""
         n = getattr(self, "_top_n", 0)
         if n:
             self.menu.delete(0, n - 1)
@@ -1436,7 +1469,7 @@ class App:
         if self._update_pending is not None:
             items.append((self._update_menu_label(), self.apply_update))
         if self._relogin_item:
-            items.append(("클로드 다시 로그인", self.relogin))
+            items.append((Label.RELOGIN, self.relogin))
         for i, (label, fn) in enumerate(items):
             self.menu.insert_command(i, label=label, command=fn)
         if items:
@@ -1598,7 +1631,7 @@ class App:
         if got != want:
             # 시작 폴더에 못 쓰는 환경(정책·보안 솔루션)이다. 체크가 도로 풀려서
             # 눌러도 아무 일이 없는 것처럼 보이므로, 아예 잠가 이유를 드러낸다.
-            self.menu_conf.entryconfig("윈도우 켤 때 자동 실행", state="disabled")
+            self.menu_conf.entryconfig(Label.AUTOSTART, state="disabled")
         try:
             self.tray.update_menu()  # 트레이 쪽 체크는 스스로 갱신되지 않는다
         except Exception:  # noqa: BLE001
@@ -1831,14 +1864,14 @@ class App:
         """
         if isinstance(err, LoginRequired):
             if self._revive_busy:
-                return "로그인 잇는 중"
+                return "다시 연결 중"
             if self._login_state == cooldown_login.NO_CLI:
                 return "눌러서 클로드 코드 설치"
             # 로그아웃(CLI 가 말함) · 로그인이 끝남(자격 파일로 확실) — 잇기로는 안 된다
             if self._login_gone():
                 return "클로드 코드 로그인 필요"
             if isinstance(err, TokenStale):
-                return "눌러서 로그인 잇기"
+                return "눌러서 다시 연결"
             return "클로드 코드 로그인 필요"
         return str(err) or "알 수 없는 오류"
 
@@ -1938,8 +1971,8 @@ class App:
         """트레이 메뉴 항목 이름 = 하는 일 + 지금 값."""
         p = self._update_pending
         if p is None:
-            return "클로드 껐다 켜서 업데이트 끝내기"
-        return f"클로드 껐다 켜서 업데이트 끝내기 ({p.target} 대기)"
+            return Label.UPDATE
+        return f"{Label.UPDATE} ({p.target})"
 
     def toggle_auto_update(self) -> None:
         self.state["auto_update"] = not bool(self.state.get("auto_update"))
@@ -1962,7 +1995,7 @@ class App:
             hint = (
                 "작업이 없고 자리를 비우면 알아서 적용합니다"
                 if auto_will
-                else "트레이 아이콘 > 클로드 껐다 켜서 업데이트 끝내기"
+                else f"우클릭 > {Label.UPDATE}"
             )
             self.tray.notify(
                 f"{pending.line}\n"
@@ -2050,7 +2083,7 @@ class App:
             )
             running = f"\n지금 도는 것   {names}"
         if not messagebox.askyesno(
-            "클로드 껐다 켜서 업데이트 끝내기",
+            Label.UPDATE,
             f"지금 버전   {p.current}\n"
             f"대기 버전   {p.target}{when}{running}\n\n"
             "클로드를 지금 닫고 새 버전으로 다시 켭니다.\n"
@@ -2409,7 +2442,7 @@ class App:
         self.state["login_warned"] = warned
         save_state(self.state)
         applog(f"로그인 알림 — {line}")
-        self._tray_say(f"{line}\n트레이 메뉴 > 클로드 다시 로그인")
+        self._tray_say(f"{line}\n우클릭 > {Label.RELOGIN}")
 
     def relogin(self) -> None:
         """`클로드 다시 로그인` — 장기 토큰을 뺀 파워셸 창에 `claude auth login` 을 띄운다.
@@ -2448,9 +2481,9 @@ class App:
             return login
         if self.ping_cfg.get("enabled"):
             if self._ping_fail is not None:  # 실패가 놓침보다 급하다 (지금 안 열린 것)
-                return f"{self._ping_fail[0]:%H:%M} 핑 실패"
+                return f"{self._ping_fail[0]:%H:%M} 시작 실패"
             if self._missed_dt is not None:
-                return f"{self._missed_dt:%H:%M} 핑 놓침"
+                return f"{self._missed_dt:%H:%M} 시작 놓침"
         # 끝나는 날이 다가오는 것(`로그인 만료 D-3`)은 핑 뒤다 — 지금 막힌 것은 없다
         if login:
             return login
@@ -2462,7 +2495,7 @@ class App:
         # 원격 대기는 맨 뒤다 — 지금 잃는 것은 없고 폰에서 새 세션만 못 연다.
         # 여기서도 **까닭은 붙이지 않는다**(자리가 없다. 까닭은 트레이 알림에 있다).
         if self.remote_error:
-            return "원격 대기 끊김"
+            return "원격 연결 끊김"
         return ""
 
     def _apply_notice(self) -> None:
@@ -2835,7 +2868,7 @@ class App:
             ok, msg = self.remote.start(self.remote_cfg["folder"])
             self.remote_error = "" if ok else cooldown_remote.friendly_error(msg)
             if not ok:
-                self._tray_say(f"원격 대기 실패 · {self.remote_error}")
+                self._tray_say(f"원격 연결 실패 · {self.remote_error}")
         else:
             self.remote.stop()
             self.remote_error = ""
@@ -2887,7 +2920,7 @@ class App:
                 self.remote_cfg["enabled"] = False
                 cooldown_remote.save_cfg(self.remote_cfg)
                 self.var_remote.set(False)
-                self._tray_say(f"원격 대기 꺼짐 · {self.remote_error}")
+                self._tray_say(f"원격 연결 꺼짐 · {self.remote_error}")
                 self._say_state("fail")  # 폰에도 '안 됐다' 가 보이게
                 self._apply_notice()
                 return
@@ -3032,7 +3065,7 @@ class App:
             else:
                 self.remote.stop()
                 self.remote_error = ""
-            self._tray_say("폰에서 원격 대기 " + ("켬" if on else "끔"))
+            self._tray_say("폰에서 원격 연결 " + ("켬" if on else "끔"))
             self._apply_notice()
         cooldown_remote.save_cfg(self.remote_cfg)
         # 결과를 **여기서 바로** 알린다 — 다음 tick(30초)까지 미루면 누른 사람 화면에는
@@ -3219,7 +3252,7 @@ class App:
         """
         W = 300
         try:
-            top, body = self._open_panel("로그인 상태")
+            top, body = self._open_panel("클로드 로그인")
             wrap = tk.Frame(body, bg=P.bg)
             wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
 
@@ -3291,7 +3324,7 @@ class App:
 
                 if busy:
                     tk.Label(
-                        wrap, text="잇는 중…", bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w"
+                        wrap, text="다시 연결 중…", bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w"
                     ).pack(fill="x", pady=(10, 2))
                     self._refit_panel(top, W)
                     return
@@ -3338,7 +3371,7 @@ class App:
                 ).pack(fill="x", pady=(10, 8))
                 self._themed_button(
                     wrap,
-                    "5시간 창 열고 잇기" if costs_window else "지금 잇기",
+                    "5시간 창 열고 다시 연결" if costs_window else "다시 연결",
                     lambda paid=costs_window or self._five_open(): self._start_revive(paid=paid),
                     primary=True,
                     width=0 if costs_window else 7,
@@ -3516,7 +3549,7 @@ class App:
         W = 344
         try:
             rep = cooldown_stats.analyze(cooldown_stats.read_samples())
-            top, body = self._open_panel("사용량 통계")
+            top, body = self._open_panel("지난 사용 기록")
             wrap = tk.Frame(body, bg=P.bg)
             wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
             inner = W - PANEL_PAD * 2
@@ -3563,7 +3596,7 @@ class App:
         try:
             rep = cooldown_api.analyze(cooldown_api.read_rows())
             usd = cooldown_api.usd_text
-            top, body = self._open_panel("API 사용량")
+            top, body = self._open_panel("API 사용 요금")
             wrap = tk.Frame(body, bg=P.bg)
             wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
             inner = W - PANEL_PAD * 2
@@ -4193,7 +4226,7 @@ class App:
             if self._ping_fail is not None:
                 self._ping_fail = None
                 self._redraw()
-            top, body = self._open_panel("실행 기록")
+            top, body = self._open_panel("시작 기록")
             wrap = tk.Frame(body, bg=P.bg)
             wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
 
@@ -4244,7 +4277,7 @@ class App:
         시각들은 5시간 1분 이상 벌어져 있어야 저장된다."""
         W = 300
         try:
-            top, body = self._open_panel("모닝 스타터 · 시각", click_away=False)
+            top, body = self._open_panel("시작 시각 정하기", click_away=False)
             tk.Label(
                 body,
                 text="이 시각마다 5시간 자동 시작",
