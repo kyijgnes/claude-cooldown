@@ -18,7 +18,7 @@
   · 새는 높이가 셋(`BIRD_LIFTS`) — 낮은 것은 뛰어넘고, 가운데는 숙이거나 뛰고, 높은 것은 지나간다.
     폰은 가운데를 뺀 둘(`BIRD_LIFTS_TOUCH`, `touch=True`) — 크롬도 휴대폰에선 그렇다.
 - 크롬에 없는 것(11-11): 낮↔밤이 1.5초에 걸쳐 서서히 바뀐다(`night_mix`) · 보호막(`SHIELD`, 땅에
-  놓인 것은 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 날개(`WING`, 먹으면 `WING_FRAMES` 동안 2단 점프).
+  놓인 것은 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 날개(`WING`, 먹으면 공룡 등에 날개가 붙고 공중에서 한 번 더 뛰는 1회용).
   폰(`DinoGame.kt`·`DinoBoard.kt`)에도 같이 옮겼다(폰은 공중에서 손을 뗀 뒤 다시 탭하면 2단).
 - 한 걸음(`step`)이 1/60초다. 그리는 쪽은 흐른 시간만큼 `step` 을 불러 맞춘다.
 - 난수는 `random.Random(seed)` 하나만 쓴다. 같은 씨앗이면 같은 판이 나온다(확인용).
@@ -78,19 +78,17 @@ NIGHT_FRAMES = 720      # 밤은 12초
 NIGHT_FADE = 90         # 낮↔밤이 이만큼(1.5초)에 걸쳐 서서히 바뀐다 (밤 12초 안에서 앞뒤로)
 
 # ---------------------------------------------------------------- 2단 점프 (11-11)
-# **날개 아이템**을 먹으면 `WING_FRAMES` 동안 공중에서 한 번 더 뛸 수 있다(땅에 닿으면 다시 한 번).
+# **날개 아이템**(1회용)을 먹으면 공룡 등에 날개가 붙고, 공중에서 한 번 더 뛸 수 있다. 쓰면 사라진다.
 # 놓이는 자리·먹는 법은 보호막과 같다(`ITEM_LIFTS`).
-WING_FRAMES = 15 * FPS  # 날개가 가는 시간 (15초)
-WING_WARN = 3 * FPS     # 끝나기 이만큼 전부터 표시가 깜빡인다
-AIR_JUMP_V = 6.5        # 공중에서 뛰는 속도 — 판 위끝을 넘지 않게 첫 점프보다 약하다
-DOUBLE_NOTE = 120       # 날개를 먹은 순간 '2단 점프' 글자를 이만큼(2초) 띄운다
+AIR_JUMP_V = 8.0        # 공중에서 뛰는 속도의 상한 — 실제로는 판 위끝까지 남은 높이로 줄인다(`_air_jump`)
 CEILING = 4             # 공룡 그림 위끝이 이 y 보다 위로는 못 간다
+FLAP_FRAMES = 4         # 2단 점프 동안 등 날개가 이 프레임마다 팔락인다
 
 # ---------------------------------------------------------------- 아이템: 보호막 · 날개 (11-11)
 # 장애물 사이 틈 한가운데에 가끔 놓인다. 땅에 놓인 것은 **그냥 달려서**(뛰면 지나친다),
 # 공중에 뜬 것은 **뛰어서** 먹는다. 판에는 한 번에 하나만 놓이고, 이미 가진 것은 안 나온다.
 #   보호막: 들고 있으면 한 번 부딪혀도 그 장애물이 부서지고 계속 달린다.
-#   날개: `WING_FRAMES` 동안 2단 점프.
+#   날개: 1회용 2단 점프.
 ITEM_CHANCE = 0.14      # 장애물을 하나 놓을 때마다 이 확률로 그 뒤 틈에 아이템을 놓는다
 ITEM_FROM = 100         # 이 점수부터 나온다
 ITEM_LIFTS = (0, 44)    # 그림 아래끝이 땅에서 뜬 높이 — 달려서 먹기 · 뛰어서 먹기
@@ -245,22 +243,39 @@ SHIELD = (
 )
 SHIELD_RING_R = 26      # 들고 있을 때 공룡 둘레 고리의 반지름 (px)
 
-# 날개 — 먹으면 잠깐 2단 점프. 가진 동안 공룡 등에 `WING_ON` 이 붙어 뛸 때 팔락인다.
+# 날개 — 판 위에 놓인 것. 오른쪽 위가 어깨, 깃털 끝이 왼쪽 아래로 물결친다(🪽).
 WING = (
-    "##..........",
-    "####........",
-    ".#####......",
-    ".#######....",
-    "..#########.",
-    "..##########",
-    "...#.#.#.###",
-    "...#.#.#.#..",
+    "..........####..",
+    ".......########.",
+    ".....###########",
+    "...#############",
+    "..##############",
+    ".###############",
+    "################",
+    "###.############",
+    "##..##.#########",
+    "#...#..##.######",
+    "....#..#..#####.",
+    ".......#..#.##..",
+    "..........#.....",
 )
-WING_ON = (             # 공룡 등에 붙는 작은 날개 두 장(올림·내림)
-    ("#.....", "##....", "###...", ".####.", "..####"),
-    ("......", "......", "..####", ".#####", "###..."),
+# 공룡 등에 붙는 날개 — 판 위 날개(`WING`)를 줄인 것. [0] 내림(어깨가 오른쪽 위, 깃털이 아래로)
+# · [1] 올림(위아래 뒤집어 깃털 끝이 위로). 가진 동안은 올림으로 등 위에 솟아 있고, 2단 점프 동안
+# 둘을 번갈아 퍼덕인다. 몸 뒤에 그려 겹치는 곳은 몸이 덮는다.
+_WING_SMALL = (
+    ".......###.",
+    ".....######",
+    "...########",
+    ".##########",
+    "###########",
+    "##.########",
+    "#..#.######",
+    "...#..#.##.",
+    "......#....",
 )
-WING_AT = (14, 10)      # 공룡 그림 왼쪽 위에서 날개 그림 왼쪽 위까지 (px, 서 있을 때 등)
+WING_ON = (_WING_SMALL, tuple(reversed(_WING_SMALL)))
+# 공룡 그림 왼쪽 위에서 날개 그림 왼쪽 위까지 (px) — 그림마다. 어깨가 등(9칸째·7줄째) 언저리에 오게.
+WING_AT = ((-6, 10), (0, -4))
 ITEM_ART = {"shield": SHIELD, "wing": WING}
 
 CLOUD = (
@@ -452,9 +467,9 @@ class Game:
         self.new_best = False
         self.air_jumps = 0         # 이번 점프에서 공중으로 더 뛴 횟수 (2단 점프)
         self.jump_base = 0.0       # 지금 오르기를 시작한 높이 — 높이 제한을 여기서부터 잰다
-        self.double_note = 0       # '2단 점프' 글자 남은 프레임
         self.items: list[list] = []   # 판 위 아이템 — [x, 땅에서 뜬 높이, "shield"|"wing"]
-        self.wings = 0             # 날개(2단 점프) 남은 프레임
+        self.wing = False          # 날개(1회용 2단 점프)를 가졌다
+        self.flapping = False      # 날개로 뛰는 중 — 내려앉을 때까지 등 날개가 팔락인다
         self.shield = False        # 보호막을 들고 있다
         self.grace = 0             # 막아 준 뒤 안 부딪히는 남은 프레임
         self.broke = 0             # 막아 준 순간 반짝임 남은 프레임
@@ -472,7 +487,7 @@ class Game:
         elif self.state == "run":
             if not self.jumping and not self.ducking:
                 self._jump()
-            elif self.jumping and self.can_double and self.air_jumps == 0 and not self.holding:
+            elif self.jumping and self.wing and self.air_jumps == 0 and not self.holding:
                 self._air_jump()
         elif self.state == "over" and self.over_t >= OVER_WAIT:
             self._reset()                # 다시 하기 — 뛰지 않고 그냥 달린다(크롬과 같다)
@@ -513,11 +528,13 @@ class Game:
         self.reached_min = False
         self.fast_drop = False
         self.jump_base = self.h
-        self.vy = AIR_JUMP_V
-
-    @property
-    def can_double(self) -> bool:
-        return self.wings > 0
+        self.wing = False          # 1회용 — 쓰면 사라진다 (내려앉을 때까지는 팔락이며 보인다)
+        self.flapping = True
+        # ★ 판 위끝까지 남은 높이만큼만 오르게 속도를 줄인다 — 머리를 천장에 박고 뚝 멈추지 않게.
+        #   한 걸음에 h += vy, vy -= g 라 오르는 높이 ≈ v(v+g)/2g. 그게 남은 높이와 같아지는 v.
+        room = GROUND - CEILING - size(POSES["stand"])[1] - self.h
+        fit = (-GRAVITY + (GRAVITY * GRAVITY + 8 * GRAVITY * max(room, 0.0)) ** 0.5) / 2
+        self.vy = max(self.vy, min(AIR_JUMP_V, fit))
 
     def _end_jump(self) -> None:
         if self.reached_min and self.vy > DROP_V:
@@ -538,10 +555,6 @@ class Game:
         if self.speed < SPEED_MAX:
             self.speed = min(SPEED_MAX, self.speed + ACCEL)
         self.distance += self.speed
-        if self.double_note > 0:
-            self.double_note -= 1
-        if self.wings > 0:
-            self.wings -= 1
         self._step_obstacles()
         self._step_items()
         self._step_scenery()
@@ -592,6 +605,7 @@ class Game:
             self.ducking = self.down
             self.air_jumps = 0
             self.jump_base = 0.0
+            self.flapping = False
 
     def _step_blink(self) -> None:
         if self.blink > 0:
@@ -640,7 +654,7 @@ class Game:
         # 아이템 — 이 장애물 뒤 틈 한가운데. 판에 이미 있으면 안 놓고, 가진 것은 고르지 않는다.
         if not self.items and self.score >= ITEM_FROM and self.rng.random() < ITEM_CHANCE:
             kinds = [k for k in ITEM_ART if not (k == "shield" and self.shield)
-                     and not (k == "wing" and self.wings > WING_WARN)]
+                     and not (k == "wing" and self.wing)]
             if kinds:
                 kind = self.rng.choice(kinds)
                 iw, _ = size(ITEM_ART[kind])
@@ -660,8 +674,7 @@ class Game:
                 if it[2] == "shield":
                     self.shield = True
                 else:
-                    self.wings = WING_FRAMES
-                    self.double_note = DOUBLE_NOTE
+                    self.wing = True
                 continue
             keep.append(it)
         self.items = keep
@@ -763,9 +776,13 @@ class Game:
         return max(0.0, min(1.0, into / NIGHT_FADE, self.night / NIGHT_FADE))
 
     @property
-    def wing_shown(self) -> bool:
-        """날개 표시가 보이나 — 끝나기 `WING_WARN` 전부터 깜빡인다."""
-        return self.wings > WING_WARN or (self.wings > 0 and (self.wings // 8) % 2 == 0)
+    def wing_pose(self) -> int | None:
+        """등 날개 그림 번호(`WING_ON`) — 없으면 None. 날개로 뛰는 동안 팔락인다."""
+        if self.state != "run" or self.pose.startswith("duck"):
+            return None
+        if self.flapping:
+            return 1 - (self.t // FLAP_FRAMES) % 2
+        return 1 if self.wing else None
 
     @property
     def shield_blink(self) -> bool:

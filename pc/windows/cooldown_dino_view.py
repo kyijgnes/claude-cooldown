@@ -266,15 +266,16 @@ class DinoBoard:
         # 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다
         pose = g.pose
         if g.shield_blink:
+            # 날개 — 몸 **뒤에** 먼저 그린다(겹치는 곳은 몸이 덮는다). 가진 동안 등 위로 접혀 있고,
+            #   날개로 뛰는 동안 위아래로 팔락인다.
+            wp = g.wing_pose
+            if wp is not None:
+                wx, wy = dino.WING_AT[wp]
+                self._art(dino.WING_ON[wp], dino.DINO_X + wx, g.dino_y + wy,
+                          self._item_color("wing", pal))
             self._art(dino.POSES[pose], dino.DINO_X, g.dino_y, MASCOT_COLOR)
             eyes = (dino.DUCK_EYE if pose.startswith("duck") else dino.DINO_EYE)[g.eye]
             self._cells(eyes, dino.DINO_X, g.dino_y, pal.bg)
-            # 날개를 가진 동안 — 등에 작은 날개 (뛰는 중엔 팔락인다)
-            if g.wing_shown and not pose.startswith("duck") and g.state == "run":
-                flap = (g.t // 6) % 2 if g.jumping else 0
-                wx, wy = dino.WING_AT
-                self._art(dino.WING_ON[flap], dino.DINO_X + wx, g.dino_y + wy,
-                          self._item_color("wing", pal))
         # 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
         dw, dh = dino.size(dino.POSES[pose])
         cx, cy = dino.DINO_X + dw / 2, g.dino_y + dh / 2 - 3   # 고리 아래끝이 땅 줄에 걸치게 조금 위로
@@ -301,12 +302,9 @@ class DinoBoard:
                 x -= sw
                 self._art(dino.SHIELD, x, 7, pal.amber)
                 x -= 6
-            if g.wing_shown:
+            if g.wing:
                 x -= dino.size(dino.WING)[0]
-                self._art(dino.WING, x, 7, self._item_color("wing", pal))
-        if g.double_note > 0 and g.state == "run":
-            c.create_text(w / 2, 56, text="2단 점프 15초 · 공중에서 한 번 더 누르기",
-                          fill=self._item_color("wing", pal), font=(KR, 10, "bold"))
+                self._art(dino.WING, x, 4, self._item_color("wing", pal))
         if self.paused:
             c.create_text(w / 2, 56, text=PAUSED, fill=pal.title, font=(KR, 10, "bold"))
         elif g.state == "ready":
