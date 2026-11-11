@@ -43,6 +43,15 @@ object DinoSpec {
     const val IDLE_EXIT = 1200
     const val CLOSE_HIT = 30
     const val EGG_SPLIT = 6
+    const val NIGHT_FADE = 90
+    const val DOUBLE_FROM = 500
+    const val AIR_JUMP_V = 6.5f
+    const val DOUBLE_NOTE = 120
+    const val CEILING = 4.0f
+    const val SHIELD_CHANCE = 0.12f
+    const val SHIELD_FROM = 100
+    const val SHIELD_GRACE = 40
+    const val SHIELD_RING_R = 26.0f
 
     val BIRD_LIFTS = intArrayOf(0, 22, 42)
     val BIRD_LIFTS_TOUCH = intArrayOf(0, 42)
@@ -50,6 +59,7 @@ object DinoSpec {
     val CLOUD_GAP = intArrayOf(100, 400)
     val CLOUD_SKY = intArrayOf(32, 72)
     val CLOSE_AT = intArrayOf(10, 10)
+    val SHIELD_LIFTS = intArrayOf(0, 44)
 
     /** 공룡 자세마다의 그림 — 충돌도 이걸로 본다. 눈은 없고 `DINO_EYE` 칸을 파낸다. */
     val POSES = mapOf(
@@ -249,6 +259,19 @@ object DinoSpec {
         ".#......#.#",
         "..#.....#..",
         "...#####...",
+    )
+
+    /** 보호막 — 판 위에 놓인 것(먹을 것). 들고 있으면 공룡 둘레에 점선 고리(`SHIELD_RING_R`)가 돈다. */
+    val SHIELD = arrayOf(
+        "..#####..",
+        ".#######.",
+        "####.####",
+        "###...###",
+        "####.####",
+        ".#######.",
+        "..#####..",
+        "...###...",
+        "....#....",
     )
 
     /** 닫기 — 판 왼쪽 위 구석의 도트 ✕ (`CLOSE_AT` 에 그리고 `CLOSE_HIT` 안을 누르면 닫는다) */

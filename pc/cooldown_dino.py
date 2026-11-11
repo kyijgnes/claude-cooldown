@@ -19,7 +19,7 @@
     폰은 가운데를 뺀 둘(`BIRD_LIFTS_TOUCH`, `touch=True`) — 크롬도 휴대폰에선 그렇다.
 - 크롬에 없는 것(11-11): 낮↔밤이 1.5초에 걸쳐 서서히 바뀐다(`night_mix`) · 보호막(`SHIELD`, 땅에
   놓인 것은 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 500점부터 2단 점프(`DOUBLE_FROM`).
-  ★ 폰(`DinoGame.kt`·`DinoBoard.kt`)에는 아직 안 옮겼다.
+  폰(`DinoGame.kt`·`DinoBoard.kt`)에도 같이 옮겼다(폰은 공중에서 손을 뗀 뒤 다시 탭하면 2단).
 - 한 걸음(`step`)이 1/60초다. 그리는 쪽은 흐른 시간만큼 `step` 을 불러 맞춘다.
 - 난수는 `random.Random(seed)` 하나만 쓴다. 같은 씨앗이면 같은 판이 나온다(확인용).
 

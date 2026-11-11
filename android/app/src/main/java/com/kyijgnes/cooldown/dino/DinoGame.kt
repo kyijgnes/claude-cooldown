@@ -11,6 +11,8 @@ import com.kyijgnes.cooldown.dino.DinoSpec as S
  * 상태는 셋 — `ready`(기다림) · `run`(달리는 중) · `over`(부딪힘).
  * `step()` 한 번이 1/60초. 그리는 쪽(`DinoView`)은 흐른 시간만큼 `step` 을 부른다.
  * 폰은 `touch = true` — 새가 두 높이뿐이다(크롬도 휴대폰에선 그렇다. 숙일 단추가 없어서).
+ * 크롬에 없는 것(11-11, PC 와 같음): 낮↔밤이 1.5초에 걸쳐 서서히(`nightMix`) · 보호막(`SHIELD`, 땅에 놓인 것은
+ * 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 500점부터 2단 점프(`DOUBLE_FROM`, 공중에서 손을 뗀 뒤 다시 탭).
  */
 class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: Float = S.W) {
 
@@ -51,6 +53,17 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
     private var nextBlink = 0
     var newBest = false
         private set
+    private var airJumps = 0       // 이번 점프에서 공중으로 더 뛴 횟수 (2단 점프)
+    private var jumpBase = 0f      // 지금 오르기를 시작한 높이 — 높이 제한을 여기서부터 잰다
+    var doubleNote = 0             // '2단 점프' 글자 남은 프레임
+        private set
+    /** 판 위 보호막 [x, 땅에서 뜬 높이] */
+    val items = ArrayList<FloatArray>()
+    var shield = false             // 보호막을 들고 있다
+        private set
+    private var grace = 0          // 막아 준 뒤 안 부딪히는 남은 프레임
+    var broke = 0                  // 막아 준 순간 반짝임 남은 프레임
+        private set
     /** 구름 [x, y] */
     val clouds = ArrayList<FloatArray>()
     private var cloudGap = 0f
@@ -89,6 +102,13 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         blink = 0
         nextBlink = rndInt(S.BLINK_EVERY[0], S.BLINK_EVERY[1])
         newBest = false
+        airJumps = 0
+        jumpBase = 0f
+        doubleNote = 0
+        items.clear()
+        shield = false
+        grace = 0
+        broke = 0
         clouds.clear()
         clouds.add(floatArrayOf(rnd(w * 0.3f, w), rnd(S.CLOUD_SKY[0].toFloat(), S.CLOUD_SKY[1].toFloat())))
         cloudGap = rnd(S.CLOUD_GAP[0].toFloat(), S.CLOUD_GAP[1].toFloat())
@@ -103,6 +123,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         when (state) {
             "ready" -> { reset(); jump() }             // 첫 누르기 — 뛰어오르며 출발
             "run" -> if (!jumping && !ducking) jump()
+                else if (jumping && canDouble && airJumps == 0 && !holding) airJump()
             "over" -> if (overT >= S.OVER_WAIT) reset()   // 다시 하기 — 뛰지 않고 그냥 달린다
         }
         holding = true
@@ -134,7 +155,20 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         reachedMin = false
         fastDrop = false
         vy = S.JUMP_V + speed / 10f
+        airJumps = 0
+        jumpBase = 0f
     }
+
+    /** 공중에서 한 번 더 (2단 점프). 누르고 있으면 더 오르고 일찍 떼면 낮게 — 첫 점프와 같은 결. */
+    private fun airJump() {
+        airJumps++
+        reachedMin = false
+        fastDrop = false
+        jumpBase = h
+        vy = S.AIR_JUMP_V
+    }
+
+    val canDouble: Boolean get() = score >= S.DOUBLE_FROM
 
     private fun endJump() {
         if (reachedMin && vy > S.DROP_V) vy = S.DROP_V
@@ -148,8 +182,12 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         runT++
         if (jumping) stepJump()
         if (speed < S.SPEED_MAX) speed = minOf(S.SPEED_MAX, speed + S.ACCEL)
+        val could = canDouble
         distance += speed
+        if (canDouble && !could) doubleNote = S.DOUBLE_NOTE
+        else if (doubleNote > 0) doubleNote--
         stepObstacles()
+        stepItems()
         stepScenery()
         val before = flashScore
         flashScore = score / S.FLASH_EVERY * S.FLASH_EVERY
@@ -160,20 +198,38 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
             flash--
         }
         if (night > 0) night--
-        if (collides()) crash()
+        if (broke > 0) broke--
+        if (grace > 0) { grace--; return }
+        val hit = collides() ?: return
+        if (shield) {                 // 보호막이 막는다 — 그 장애물은 부서지고 계속 달린다
+            shield = false
+            grace = S.SHIELD_GRACE
+            broke = S.SHIELD_GRACE
+            obstacles.remove(hit)
+        } else {
+            crash()
+        }
     }
 
     private fun stepJump() {
         h += vy * (if (fastDrop) S.FAST_DROP else 1)
         vy -= S.GRAVITY
-        if (h > S.MIN_JUMP || fastDrop) reachedMin = true
-        if (h > S.MAX_JUMP || fastDrop) endJump() else if (!holding) endJump()
+        val rise = h - jumpBase
+        val standH = Art.height(S.POSES.getValue("stand"))
+        if (S.GROUND - h - standH < S.CEILING) {   // 판 위끝 — 머리를 박고 내려온다
+            h = S.GROUND - S.CEILING - standH
+            vy = minOf(vy, 0f)
+        }
+        if (rise > S.MIN_JUMP || fastDrop) reachedMin = true
+        if (rise > S.MAX_JUMP || fastDrop) endJump() else if (!holding) endJump()
         if (h <= 0f) {                // 내려앉았다 — ↓ 를 누른 채면 그대로 숙인다
             h = 0f
             vy = 0f
             jumping = false
             fastDrop = false
             ducking = down
+            airJumps = 0
+            jumpBase = 0f
         }
     }
 
@@ -222,9 +278,48 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         val oneW = Art.width(spec.art[0])
         val minGap = Math.round(oneW * count * speed + spec.minGap * S.GAP_COEF)
         val gap = rndInt(minGap, Math.round(minGap * S.GAP_MAX))
-        obstacles.add(Obstacle(kind, w, count, lift, wobble, gap))
+        val ob = Obstacle(kind, w, count, lift, wobble, gap)
+        obstacles.add(ob)
         history.add(kind)
         while (history.size > S.MAX_DUP) history.removeAt(0)
+        // 보호막 — 이 장애물 뒤 틈 한가운데. 들고 있거나 판에 이미 있으면 안 놓는다.
+        if (!shield && items.isEmpty() && score >= S.SHIELD_FROM && rng.nextFloat() < S.SHIELD_CHANCE) {
+            val iw = Art.width(S.SHIELD)
+            val lift2 = S.SHIELD_LIFTS[rng.nextInt(S.SHIELD_LIFTS.size)]
+            items.add(floatArrayOf(ob.x + ob.w + gap / 2f - iw / 2f, lift2.toFloat()))
+        }
+    }
+
+    /** 보호막이 흘러가다 공룡에 닿으면 먹는다(칸끼리 겹치면). */
+    private fun stepItems() {
+        val iw = Art.width(S.SHIELD)
+        val ih = Art.height(S.SHIELD)
+        val it = items.iterator()
+        while (it.hasNext()) {
+            val item = it.next()
+            item[0] -= speed
+            if (item[0] + iw <= 0f) { it.remove(); continue }
+            if (touches(item[0], S.GROUND - item[1] - ih, iw, ih)) {
+                shield = true
+                it.remove()
+            }
+        }
+    }
+
+    /** 공룡 칸 하나라도 이 네모에 닿나. */
+    private fun touches(x: Float, y: Float, w: Float, h: Float): Boolean {
+        val rows = S.POSES.getValue(pose)
+        val dx0 = S.DINO_X
+        val dy0 = dinoY
+        if (x >= dx0 + Art.width(rows) || x + w <= dx0 || y >= dy0 + Art.height(rows) || y + h <= dy0) return false
+        val mine = Art.runs(rows, false)
+        var b = 0
+        while (b < mine.size) {
+            val mx = dx0 + mine[b]; val my = dy0 + mine[b + 1]
+            if (x < mx + mine[b + 2] && mx < x + w && y < my + mine[b + 3] && my < y + h) return true
+            b += 4
+        }
+        return false
     }
 
     private fun stepScenery() {
@@ -248,8 +343,8 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
     }
 
     // -------------------------------------------------- 부딪힘
-    /** 도트 칸끼리 겹치나 — 그림 테두리가 겹칠 때만 칸을 본다. */
-    private fun collides(): Boolean {
+    /** 부딪힌 장애물 (없으면 null) — 도트 칸끼리 겹치나, 그림 테두리가 겹칠 때만 칸을 본다. */
+    private fun collides(): Obstacle? {
         val rows = S.POSES.getValue(pose)
         val dx0 = S.DINO_X
         val dy0 = dinoY
@@ -270,7 +365,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
                     while (b < mine.size) {
                         val mx = dx0 + mine[b]; val my = dy0 + mine[b + 1]
                         if (ox < mx + mine[b + 2] && mx < ox + ow && oy < my + mine[b + 3] && my < oy + oh) {
-                            return true
+                            return ob
                         }
                         b += 4
                     }
@@ -278,7 +373,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
                 }
             }
         }
-        return false
+        return null
     }
 
     private fun crash() {
@@ -322,8 +417,30 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
     /** 반짝이는 동안 켜졌다 꺼졌다 한다 (1/4초마다). */
     val scoreVisible: Boolean get() = flash <= 0 || (flash / 15) % 2 == 0
 
+    /** 밤이 든 정도 0~1 — 밤 들 때 `NIGHT_FADE` 동안 0→1, 끝날 때 1→0 으로 서서히. */
+    val nightMix: Float
+        get() {
+            if (night <= 0) return 0f
+            val into = S.NIGHT_FRAMES - night          // 밤이 시작되고 흐른 프레임
+            return maxOf(0f, minOf(1f, into / S.NIGHT_FADE.toFloat(), night / S.NIGHT_FADE.toFloat()))
+        }
+
+    /** 막아 준 뒤 안 부딪히는 동안 공룡이 깜빡인다 (보이면 참). */
+    val shieldBlink: Boolean get() = grace <= 0 || (grace / 4) % 2 == 0
+
     /** 미리보기·테스트용 — 지금 자리에서 곧바로 부딪힌 것으로 한다. */
     fun crashForPreview() { if (state == "run") crash() }
+
+    /** 미리보기·테스트용 — 보호막·밤·2단 점프 글자·점수를 곧바로 그 상태로 둔다. */
+    fun setForPreview(shield: Boolean? = null, night: Int? = null, doubleNote: Int? = null, score: Int? = null) {
+        if (shield != null) this.shield = shield
+        if (night != null) this.night = night
+        if (doubleNote != null) this.doubleNote = doubleNote
+        if (score != null) {
+            distance = (score + 0.5f) / S.SCORE_COEF
+            flashScore = this.score / S.FLASH_EVERY * S.FLASH_EVERY
+        }
+    }
 
     private companion object {
         val DEPTHS = listOf(2f, 4f, 6f)

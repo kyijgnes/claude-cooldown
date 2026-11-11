@@ -294,6 +294,115 @@ class RenderPreviewTest {
     }
 
     /**
+     * 공룡 점프 11-11 더한 것 — 보호막 들고(앞에 하나 더 놓임) · 밤 드는 중(반쯤 섞임) · 2단 점프 열림 글자(공중).
+     * PC `cooldown_dino_view.py shot` 과 눈으로 대조.
+     */
+    @Test
+    fun `공룡 점프 보호막·밤 드는 중·2단 점프 그림을 남긴다`() {
+        val S = com.kyijgnes.cooldown.dino.DinoSpec
+        for (theme in listOf("밝게", "어둡게")) {
+            RuntimeEnvironment.setQualifiers(if (theme == "어둡게") "+night" else "+notnight")
+            val ctx = RuntimeEnvironment.getApplication()
+            for (scene in listOf("보호막", "밤드는중", "2단점프")) {
+                val view = com.kyijgnes.cooldown.dino.DinoView(ctx, best = 312, seed = 3L)
+                view.layout(0, 0, 960, 307)
+                val g = view.game
+                g.pressJump(); g.releaseJump()
+                repeat(700) { if (g.state == "run") { dinoBot(g); g.step() } }
+                when (scene) {
+                    "보호막" -> {
+                        g.setForPreview(shield = true)
+                        g.items.add(floatArrayOf(g.w * 0.62f, S.SHIELD_LIFTS[1].toFloat()))
+                        repeat(4) { dinoBot(g); g.step() }
+                    }
+                    "밤드는중" -> {
+                        g.setForPreview(night = S.NIGHT_FRAMES)
+                        repeat(S.NIGHT_FADE / 2) { dinoBot(g); g.step() }
+                        assertEquals(0.5f, g.nightMix, 0.02f)
+                    }
+                    "2단점프" -> {
+                        g.setForPreview(score = S.DOUBLE_FROM - 1, shield = true)   // 보호막은 부딪혀 그림이 끊기지 않게
+                        while (g.jumping) g.step()
+                        g.pressJump()                     // 첫 점프
+                        repeat(14) { g.step() }
+                        g.releaseJump()
+                        g.pressJump()                     // 공중에서 한 번 더
+                        repeat(12) { g.step() }
+                        g.setForPreview(shield = false)
+                    }
+                }
+                assertEquals("run", g.state)
+                val bmp = Bitmap.createBitmap(960, 307, Bitmap.Config.ARGB_8888)
+                view.paint(Canvas(bmp))
+                save(bmp, "공룡점프_${scene}_$theme.png")
+            }
+        }
+        RuntimeEnvironment.setQualifiers("+notnight")
+    }
+
+    /** 보호막은 한 번 막아 주고, 2단 점프는 500점부터 공중에서 한 번 더 오른다. 밤은 서서히 든다. */
+    @Test
+    fun `공룡 점프 보호막과 2단 점프`() {
+        val S = com.kyijgnes.cooldown.dino.DinoSpec
+        // 보호막 — 들고 가만히 있으면 첫 장애물은 부수고 계속, 그다음엔 부딪힌다
+        val g = com.kyijgnes.cooldown.dino.DinoGame(seed = 1L)
+        g.pressJump(); g.releaseJump()
+        g.setForPreview(shield = true)
+        var saved = false
+        repeat(60 * 20) {
+            if (g.state == "run") {
+                val before = g.obstacles.size
+                g.step()
+                if (!g.shield && g.broke > 0 && !saved) {
+                    saved = true
+                    assertTrue("막은 장애물은 없어진다", g.obstacles.size < before + 1)
+                }
+            }
+        }
+        assertTrue("보호막이 한 번 막는다", saved)
+        assertEquals("두 번째는 부딪힌다", "over", g.state)
+
+        // 땅에 놓인 보호막은 달려서 먹는다
+        val eat = com.kyijgnes.cooldown.dino.DinoGame(seed = 2L)
+        eat.pressJump(); eat.releaseJump()
+        while (eat.jumping) eat.step()
+        eat.items.add(floatArrayOf(S.DINO_X + 60f, 0f))
+        repeat(30) { eat.step() }
+        assertTrue("달려서 먹는다", eat.shield)
+        assertTrue(eat.items.isEmpty())
+
+        // 2단 점프 — 500점 전엔 공중에서 눌러도 그대로, 넘으면 더 오른다
+        fun peak(score: Int, again: Boolean): Float {
+            val d = com.kyijgnes.cooldown.dino.DinoGame(seed = 5L)
+            d.pressJump(); d.releaseJump()
+            while (d.jumping) d.step()
+            d.setForPreview(score = score)
+            d.pressJump()
+            repeat(4) { d.step() }            // 짧게 톡 — 낮은 첫 점프
+            d.releaseJump()
+            repeat(6) { d.step() }
+            if (again) d.pressJump()
+            var top = 0f
+            repeat(80) { d.step(); top = maxOf(top, d.h) }
+            return top
+        }
+        assertEquals("500점 전엔 2단 점프가 없다", peak(S.DOUBLE_FROM - 20, false), peak(S.DOUBLE_FROM - 20, true), 0.01f)
+        val one = peak(S.DOUBLE_FROM + 10, false)
+        val two = peak(S.DOUBLE_FROM + 10, true)
+        assertTrue("500점부터 공중에서 한 번 더 ($one → $two)", two > one + 10f)
+        val standH = S.POSES.getValue("stand").size * S.U
+        assertTrue("판 위끝을 안 넘는다", two <= S.GROUND - S.CEILING - standH + 0.01f)
+
+        // 밤 — 1.5초에 걸쳐 들고 나간다
+        val n = com.kyijgnes.cooldown.dino.DinoGame(seed = 1L)
+        n.pressJump(); n.releaseJump()
+        n.setForPreview(night = S.NIGHT_FRAMES)
+        assertEquals(0f, n.nightMix, 0.001f)
+        repeat(S.NIGHT_FADE) { n.step() }
+        assertEquals(1f, n.nightMix, 0.001f)
+    }
+
+    /**
      * 앱 첫 화면 — 제목 옆 클로디, 그리고 **공룡 점프 중**(게이지 자리가 판이 되고 클로디는 숨는다).
      * 화면(액티비티)은 작업 예약까지 돌리므로 레이아웃만 불러 그대로 그린다.
      */

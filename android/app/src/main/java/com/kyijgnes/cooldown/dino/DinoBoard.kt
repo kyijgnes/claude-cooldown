@@ -21,7 +21,10 @@ import com.kyijgnes.cooldown.dino.DinoSpec as S
  * - 한 걸음은 1/60초로 고정하고 흐른 시간만큼 밟는다(`advance`).
  * - **들어오는 장면**(`startIntro`): 알에서 깬 작은 공룡이 그 자리에서 **폴짝 판으로 뛰어들고**, 판은
  *   땅 줄에서 위아래로 벌어지며 공룡 자리에서 오른쪽으로 번진다(크롬 첫 장면처럼). 0.6초. 그동안은 누르기를 안 받는다.
- * - 색은 폰 테마(`Palette`), 밤(700점마다 12초)에는 판만 반대 테마로 뒤집는다.
+ * - 색은 폰 테마(`Palette`), 밤(700점마다 12초)에는 판만 반대 테마로 뒤집는다. 바뀔 때는 1.5초에 걸쳐
+ *   두 벌을 칸마다 섞어 서서히(`DinoGame.nightMix`).
+ * - 보호막: 판 위에 놓인 것은 호박색 도트, 들고 있으면 공룡 둘레에 도는 점선 고리와 점수 왼쪽 작은 표시,
+ *   막아 준 순간엔 고리가 퍼지며 깜빡인다. 2단 점프가 열리면 가운데에 글자가 2초 뜬다.
  */
 class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
 
@@ -33,14 +36,16 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
     /** 닫을 때 한 번 (✕ · 오래 그대로 둠). 판을 실제로 치우는 것은 부르는 쪽이 한다. */
     var onExit: (() -> Unit)? = null
 
-    private val day = Palette(ctx)
-    private val night = Palette(flipped(ctx))
+    private val day = Colors(Palette(ctx))
+    private val night = Colors(Palette(flipped(ctx)))
     private val coral = ctx.getColor(R.color.coral)
     private val fill = Paint()            // 도트 칸 — 안티에일리어싱 없이 (칸 경계가 번지지 않게)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.RIGHT }
     private val mid = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val numBold = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
     private val num = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+    private var mixT = -1f                // 마지막으로 섞은 밤 정도 — 같으면 다시 안 섞는다
+    private var mixed = day
 
     private var last = 0L
     private var acc = 0.0
@@ -206,7 +211,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
                 col += n
             }
         }
-        fill.color = (if (game.night > 0) night else day).bg
+        fill.color = colors().bg
         val eyes = S.DINO_EYE.getValue("open")
         var i = 0
         while (i < eyes.size) {
@@ -218,7 +223,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
 
     private fun paintBoard(c: Canvas, top: Float, width: Float, withDino: Boolean) {
         val g = game
-        val p = if (g.night > 0) night else day
+        val p = colors()
         val s = width / g.w
         drawnTop = top
         drawnScale = s
@@ -248,10 +253,29 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
                 }
             }
         }
+        // 보호막 — 판 위에 놓인 것
+        val sw = Art.width(S.SHIELD)
+        val sh = Art.height(S.SHIELD)
+        for (it in g.items) art(c, S.SHIELD, it[0], S.GROUND - it[1] - sh, p.amber)
+        // 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다
         val pose = g.pose
-        if (withDino) art(c, S.POSES.getValue(pose), S.DINO_X, g.dinoY, coral)
-        val eyes = (if (pose.startsWith("duck")) S.DUCK_EYE else S.DINO_EYE).getValue(g.eye)
-        if (withDino) cells(c, eyes, S.DINO_X, g.dinoY, p.bg)
+        if (withDino && g.shieldBlink) {
+            art(c, S.POSES.getValue(pose), S.DINO_X, g.dinoY, coral)
+            val eyes = (if (pose.startsWith("duck")) S.DUCK_EYE else S.DINO_EYE).getValue(g.eye)
+            cells(c, eyes, S.DINO_X, g.dinoY, p.bg)
+        }
+        // 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
+        if (withDino) {
+            val rows = S.POSES.getValue(pose)
+            val cx = S.DINO_X + Art.width(rows) / 2f
+            val cy = g.dinoY + Art.height(rows) / 2f - 3f   // 고리 아래끝이 땅 줄에 걸치게 조금 위로
+            if (g.shield && g.state != "over") {
+                ring(c, cx, cy, S.SHIELD_RING_R, p.amber, g.t / 3)
+            } else if (g.broke > 0) {
+                val grow = (S.SHIELD_GRACE - g.broke) * 1.2f
+                if ((g.broke / 3) % 2 == 0) ring(c, cx, cy, S.SHIELD_RING_R + grow, p.amber, 0)
+            }
+        }
         art(c, S.CLOSE, S.CLOSE_AT[0].toFloat(), S.CLOSE_AT[1].toFloat(), p.faint)   // 닫기 ✕
 
         // 점수 — 오른쪽 위 (HI 최고 · 지금)
@@ -266,12 +290,23 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
             text.typeface = num
             c.drawText("HI %05d".format(g.best), g.w - 72f, 26f, text)
         }
+        // 들고 있는 보호막 — 점수 왼쪽에 작은 표시
+        if (g.shield && g.state == "run") {
+            text.typeface = num
+            val hi = if (g.best > 0) text.measureText("HI 00000") else 0f
+            art(c, S.SHIELD, g.w - 72f - hi - 10f - sw, 21f - sh / 2f, p.amber)
+        }
         mid.textSize = 12f
         when {
             paused -> {
                 mid.color = p.title
                 mid.typeface = Typeface.DEFAULT_BOLD
                 c.drawText(PAUSED, g.w / 2f, 60f, mid)
+            }
+            g.doubleNote > 0 && g.state == "run" -> {
+                mid.color = p.amber
+                mid.typeface = Typeface.DEFAULT_BOLD
+                c.drawText(DOUBLE_NOTE, g.w / 2f, 60f, mid)
             }
             g.state == "ready" -> {
                 mid.color = p.label
@@ -302,6 +337,51 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
         }
     }
 
+    /** 도트 점선 고리 — 반지름 r, `turn` 만큼 돌려서(돌아가 보이게). PC `_ring` 과 같다. */
+    private fun ring(c: Canvas, cx: Float, cy: Float, r: Float, color: Int, turn: Int) {
+        fill.color = color
+        val u = S.U
+        val n = kotlin.math.max(16, (r * 1.5f).toInt())   // 고리 둘레의 점 수
+        val ry = r * 0.82f                                 // 위아래로 조금 납작하게 (공룡이 옆으로 길다)
+        for (i in 0 until n) {
+            if ((i + turn) % 4 == 0) continue              // 넷에 하나는 비워 점선으로 (돌아 보인다)
+            val a = 2.0 * Math.PI * i / n
+            val x = Math.round((cx + r * kotlin.math.cos(a).toFloat()) / u) * u
+            val y = Math.round((cy + ry * kotlin.math.sin(a).toFloat()) / u) * u
+            c.drawRect(x, y, x + u, y + u, fill)
+        }
+    }
+
+    /** 지금 판에 쓸 색 한 벌 — 낮, 밤, 그 사이면 두 벌을 섞어서. */
+    private fun colors(): Colors {
+        val t = game.nightMix
+        if (t <= 0f) return day
+        if (t >= 1f) return night
+        if (t != mixT) {
+            mixT = t
+            mixed = day.mix(night, t)
+        }
+        return mixed
+    }
+
+    /** 판이 쓰는 색만 — 낮↔밤 사이를 섞으려고 `Palette` 에서 옮겨 담는다. */
+    private class Colors(
+        val bg: Int, val title: Int, val label: Int, val sub: Int, val faint: Int,
+        val track: Int, val green: Int, val amber: Int,
+    ) {
+        constructor(p: Palette) : this(p.bg, p.title, p.label, p.sub, p.faint, p.track, p.green, p.amber)
+
+        fun mix(o: Colors, t: Float) = Colors(
+            blend(bg, o.bg, t), blend(title, o.title, t), blend(label, o.label, t), blend(sub, o.sub, t),
+            blend(faint, o.faint, t), blend(track, o.track, t), blend(green, o.green, t), blend(amber, o.amber, t),
+        )
+
+        private fun blend(a: Int, b: Int, t: Float): Int {
+            fun ch(sh: Int) = Math.round(((a ushr sh) and 0xff) + (((b ushr sh) and 0xff) - ((a ushr sh) and 0xff)) * t)
+            return (ch(24) shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+        }
+    }
+
     /** 낱칸 몇 개 (눈 파내기). `cells` 는 (col, row) 가 번갈아. */
     private fun cells(c: Canvas, cells: IntArray, x: Float, y: Float, color: Int) {
         fill.color = color
@@ -322,6 +402,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
         const val INTRO_FRAMES = 36     // 들어오는 장면 (60fps 로 0.6초)
         const val HINT = "눌러서 점프"
         const val PAUSED = "일시 정지 · 눌러서 이어 하기"
+        const val DOUBLE_NOTE = "2단 점프 열림 · 공중에서 한 번 더"
 
         /** 밤에 쓸 반대 테마 — 지금이 어둡게면 밝게, 밝게면 어둡게. */
         fun flipped(ctx: Context): Context {

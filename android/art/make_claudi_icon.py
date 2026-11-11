@@ -290,9 +290,12 @@ DINO_CONSTS = (
     "GAP_COEF", "GAP_MAX", "MAX_GROUP", "MAX_DUP", "BIRD_WOBBLE",
     "OVER_WAIT", "RUN_BEAT", "FLAP_BEAT", "FLASH_EVERY", "FLASH_FRAMES",
     "NIGHT_EVERY", "NIGHT_FRAMES", "CLOUD_MAX", "CLOUD_SPEED", "IDLE_EXIT", "CLOSE_HIT",
-    "EGG_SPLIT",
+    "EGG_SPLIT", "NIGHT_FADE",
+    "DOUBLE_FROM", "AIR_JUMP_V", "DOUBLE_NOTE", "CEILING",
+    "SHIELD_CHANCE", "SHIELD_FROM", "SHIELD_GRACE", "SHIELD_RING_R",
 )
-DINO_PAIRS = ("BIRD_LIFTS", "BIRD_LIFTS_TOUCH", "BLINK_EVERY", "CLOUD_GAP", "CLOUD_SKY", "CLOSE_AT")
+DINO_PAIRS = ("BIRD_LIFTS", "BIRD_LIFTS_TOUCH", "BLINK_EVERY", "CLOUD_GAP", "CLOUD_SKY", "CLOSE_AT",
+              "SHIELD_LIFTS")
 
 
 def write_dino() -> None:
@@ -301,7 +304,8 @@ def write_dino() -> None:
     for name in DINO_CONSTS:
         v = getattr(dino, name)
         # 판 크기·자리처럼 곱셈에 섞이는 값은 Float 로 둔다 (정수 나눗셈 함정을 피하려고)
-        if name in ("W", "H", "GROUND", "U", "DINO_X", "MIN_JUMP", "MAX_JUMP"):
+        if name in ("W", "H", "GROUND", "U", "DINO_X", "MIN_JUMP", "MAX_JUMP",
+                    "CEILING", "SHIELD_RING_R"):
             v = float(v)
         consts.append(f"    const val {name} = {_kt_num(v)}")
     pairs = []
@@ -329,7 +333,7 @@ def write_dino() -> None:
         cactus_l=_kt_art(dino.CACTUS_L, "    "), birds=birds,
         bird_eye=_kt_pairs(dino.BIRD_EYE), cloud=_kt_art(dino.CLOUD, "    "),
         restart=_kt_art(dino.RESTART, "    "), close=_kt_art(dino.CLOSE, "    "),
-        egg=_kt_art(dino.EGG, "    "),
+        egg=_kt_art(dino.EGG, "    "), shield=_kt_art(dino.SHIELD, "    "),
         cracks=", ".join(_kt_pairs(c) for c in dino.EGG_CRACKS),
         kinds=NL.join(kinds),
     )
@@ -379,6 +383,9 @@ object DinoSpec {{
 
     /** 다시 하기 — 둥근 화살표 */
     val RESTART = {restart}
+
+    /** 보호막 — 판 위에 놓인 것(먹을 것). 들고 있으면 공룡 둘레에 점선 고리(`SHIELD_RING_R`)가 돈다. */
+    val SHIELD = {shield}
 
     /** 닫기 — 판 왼쪽 위 구석의 도트 ✕ (`CLOSE_AT` 에 그리고 `CLOSE_HIT` 안을 누르면 닫는다) */
     val CLOSE = {close}
