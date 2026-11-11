@@ -23,8 +23,9 @@ import com.kyijgnes.cooldown.dino.DinoSpec as S
  *   땅 줄에서 위아래로 벌어지며 공룡 자리에서 오른쪽으로 번진다(크롬 첫 장면처럼). 0.6초. 그동안은 누르기를 안 받는다.
  * - 색은 폰 테마(`Palette`), 밤(700점마다 12초)에는 판만 반대 테마로 뒤집는다. 바뀔 때는 1.5초에 걸쳐
  *   두 벌을 칸마다 섞어 서서히(`DinoGame.nightMix`).
- * - 보호막: 판 위에 놓인 것은 호박색 도트, 들고 있으면 공룡 둘레에 도는 점선 고리와 점수 왼쪽 작은 표시,
- *   막아 준 순간엔 고리가 퍼지며 깜빡인다. 2단 점프가 열리면 가운데에 글자가 2초 뜬다.
+ * - 아이템: 보호막(금색)은 들고 있으면 공룡 둘레에 도는 점선 고리, 막아 준 순간엔 고리가 퍼지며 깜빡인다.
+ *   날개(글자색)는 가진 동안 공룡 등에 붙어 뛸 때 팔락이고, 먹은 순간 가운데에 글자가 2초 뜬다.
+ *   가진 것은 점수 왼쪽에 보호막·날개 차례로 작게 보인다(날개는 끝나기 3초 전부터 깜빡).
  */
 class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
 
@@ -253,16 +254,19 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
                 }
             }
         }
-        // 보호막 — 판 위에 놓인 것
-        val sw = Art.width(S.SHIELD)
-        val sh = Art.height(S.SHIELD)
-        for (it in g.items) art(c, S.SHIELD, it[0], S.GROUND - it[1] - sh, p.amber)
+        // 아이템 — 판 위에 놓인 것
+        for (it in g.items) art(c, it.art, it.x, it.y, itemColor(it.kind, p))
         // 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다
         val pose = g.pose
         if (withDino && g.shieldBlink) {
             art(c, S.POSES.getValue(pose), S.DINO_X, g.dinoY, coral)
             val eyes = (if (pose.startsWith("duck")) S.DUCK_EYE else S.DINO_EYE).getValue(g.eye)
             cells(c, eyes, S.DINO_X, g.dinoY, p.bg)
+            // 날개를 가진 동안 — 등에 작은 날개 (뛰는 중엔 팔락인다)
+            if (g.wingShown && !pose.startsWith("duck") && g.state == "run") {
+                val flap = if (g.jumping) (g.t / 6) % 2 else 0
+                art(c, S.WING_ON[flap], S.DINO_X + S.WING_AT[0], g.dinoY + S.WING_AT[1], itemColor("wing", p))
+            }
         }
         // 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
         if (withDino) {
@@ -290,11 +294,20 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
             text.typeface = num
             c.drawText("HI %05d".format(g.best), g.w - 72f, 26f, text)
         }
-        // 들고 있는 보호막 — 점수 왼쪽에 작은 표시
-        if (g.shield && g.state == "run") {
+        // 가진 아이템 — 점수 왼쪽에 보호막·날개 차례로 작게
+        if (g.state == "run") {
             text.typeface = num
             val hi = if (g.best > 0) text.measureText("HI 00000") else 0f
-            art(c, S.SHIELD, g.w - 72f - hi - 10f - sw, 21f - sh / 2f, p.amber)
+            var x = g.w - 72f - hi - 10f
+            if (g.shield) {
+                x -= Art.width(S.SHIELD)
+                art(c, S.SHIELD, x, 21f - Art.height(S.SHIELD) / 2f, p.amber)
+                x -= 6f
+            }
+            if (g.wingShown) {
+                x -= Art.width(S.WING)
+                art(c, S.WING, x, 21f - Art.height(S.WING) / 2f, itemColor("wing", p))
+            }
         }
         mid.textSize = 12f
         when {
@@ -304,7 +317,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
                 c.drawText(PAUSED, g.w / 2f, 60f, mid)
             }
             g.doubleNote > 0 && g.state == "run" -> {
-                mid.color = p.amber
+                mid.color = itemColor("wing", p)
                 mid.typeface = Typeface.DEFAULT_BOLD
                 c.drawText(DOUBLE_NOTE, g.w / 2f, 60f, mid)
             }
@@ -351,6 +364,9 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
             c.drawRect(x, y, x + u, y + u, fill)
         }
     }
+
+    /** 보호막은 금색, 날개는 글자색. 선인장 초록과 안 헷갈리게. */
+    private fun itemColor(kind: String, p: Colors) = if (kind == "shield") p.amber else p.title
 
     /** 지금 판에 쓸 색 한 벌 — 낮, 밤, 그 사이면 두 벌을 섞어서. */
     private fun colors(): Colors {
@@ -402,7 +418,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
         const val INTRO_FRAMES = 36     // 들어오는 장면 (60fps 로 0.6초)
         const val HINT = "눌러서 점프"
         const val PAUSED = "일시 정지 · 눌러서 이어 하기"
-        const val DOUBLE_NOTE = "2단 점프 열림 · 공중에서 한 번 더"
+        const val DOUBLE_NOTE = "2단 점프 15초 · 공중에서 한 번 더 누르기"
 
         /** 밤에 쓸 반대 테마 — 지금이 어둡게면 밝게, 밝게면 어둡게. */
         fun flipped(ctx: Context): Context {

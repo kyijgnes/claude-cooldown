@@ -291,11 +291,11 @@ DINO_CONSTS = (
     "OVER_WAIT", "RUN_BEAT", "FLAP_BEAT", "FLASH_EVERY", "FLASH_FRAMES",
     "NIGHT_EVERY", "NIGHT_FRAMES", "CLOUD_MAX", "CLOUD_SPEED", "IDLE_EXIT", "CLOSE_HIT",
     "EGG_SPLIT", "NIGHT_FADE",
-    "DOUBLE_FROM", "AIR_JUMP_V", "DOUBLE_NOTE", "CEILING",
-    "SHIELD_CHANCE", "SHIELD_FROM", "SHIELD_GRACE", "SHIELD_RING_R",
+    "WING_FRAMES", "WING_WARN", "AIR_JUMP_V", "DOUBLE_NOTE", "CEILING",
+    "ITEM_CHANCE", "ITEM_FROM", "SHIELD_GRACE", "SHIELD_RING_R",
 )
 DINO_PAIRS = ("BIRD_LIFTS", "BIRD_LIFTS_TOUCH", "BLINK_EVERY", "CLOUD_GAP", "CLOUD_SKY", "CLOSE_AT",
-              "SHIELD_LIFTS")
+              "ITEM_LIFTS", "WING_AT")
 
 
 def write_dino() -> None:
@@ -334,6 +334,8 @@ def write_dino() -> None:
         bird_eye=_kt_pairs(dino.BIRD_EYE), cloud=_kt_art(dino.CLOUD, "    "),
         restart=_kt_art(dino.RESTART, "    "), close=_kt_art(dino.CLOSE, "    "),
         egg=_kt_art(dino.EGG, "    "), shield=_kt_art(dino.SHIELD, "    "),
+        wing=_kt_art(dino.WING, "    "),
+        wing_on=", ".join(_kt_art(w, "        ") for w in dino.WING_ON),
         cracks=", ".join(_kt_pairs(c) for c in dino.EGG_CRACKS),
         kinds=NL.join(kinds),
     )
@@ -386,6 +388,15 @@ object DinoSpec {{
 
     /** 보호막 — 판 위에 놓인 것(먹을 것). 들고 있으면 공룡 둘레에 점선 고리(`SHIELD_RING_R`)가 돈다. */
     val SHIELD = {shield}
+
+    /** 날개 — 먹으면 `WING_FRAMES` 동안 2단 점프. */
+    val WING = {wing}
+
+    /** 날개를 가진 동안 공룡 등(`WING_AT`)에 붙는 작은 날개 두 장(올림·내림). */
+    val WING_ON = arrayOf({wing_on})
+
+    /** 판에 놓이는 아이템 — 종류 → 그림. 놓이는 자리·먹는 법은 같다(`ITEM_LIFTS`). */
+    val ITEM_ART = linkedMapOf("shield" to SHIELD, "wing" to WING)
 
     /** 닫기 — 판 왼쪽 위 구석의 도트 ✕ (`CLOSE_AT` 에 그리고 `CLOSE_HIT` 안을 누르면 닫는다) */
     val CLOSE = {close}

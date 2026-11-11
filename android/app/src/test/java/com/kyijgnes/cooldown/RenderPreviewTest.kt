@@ -294,7 +294,7 @@ class RenderPreviewTest {
     }
 
     /**
-     * 공룡 점프 11-11 더한 것 — 보호막 들고(앞에 하나 더 놓임) · 밤 드는 중(반쯤 섞임) · 2단 점프 열림 글자(공중).
+     * 공룡 점프 11-11 더한 것 — 보호막 들고(앞에 날개가 놓임) · 밤 드는 중(반쯤 섞임) · 날개 먹고 2단 점프(글자·등 날개·표시 둘).
      * PC `cooldown_dino_view.py shot` 과 눈으로 대조.
      */
     @Test
@@ -312,7 +312,8 @@ class RenderPreviewTest {
                 when (scene) {
                     "보호막" -> {
                         g.setForPreview(shield = true)
-                        g.items.add(floatArrayOf(g.w * 0.62f, S.SHIELD_LIFTS[1].toFloat()))
+                        g.items.clear()
+                        g.items.add(com.kyijgnes.cooldown.dino.Item(g.w * 0.62f, S.ITEM_LIFTS[1].toFloat(), "wing"))
                         repeat(4) { dinoBot(g); g.step() }
                     }
                     "밤드는중" -> {
@@ -321,14 +322,17 @@ class RenderPreviewTest {
                         assertEquals(0.5f, g.nightMix, 0.02f)
                     }
                     "2단점프" -> {
-                        g.setForPreview(score = S.DOUBLE_FROM - 1, shield = true)   // 보호막은 부딪혀 그림이 끊기지 않게
+                        g.setForPreview(shield = true)      // 보호막은 부딪혀 그림이 끊기지 않게, 표시 둘이 같이 보이게
+                        g.items.clear()
                         while (g.jumping) g.step()
+                        g.items.add(com.kyijgnes.cooldown.dino.Item(S.DINO_X + 40f, 0f, "wing"))   // 달려서 날개 먹기
+                        repeat(12) { g.step() }
+                        assertTrue("날개를 먹었다", g.canDouble)
                         g.pressJump()                     // 첫 점프
                         repeat(14) { g.step() }
                         g.releaseJump()
                         g.pressJump()                     // 공중에서 한 번 더
-                        repeat(12) { g.step() }
-                        g.setForPreview(shield = false)
+                        repeat(10) { g.step() }
                     }
                 }
                 assertEquals("run", g.state)
@@ -340,9 +344,9 @@ class RenderPreviewTest {
         RuntimeEnvironment.setQualifiers("+notnight")
     }
 
-    /** 보호막은 한 번 막아 주고, 2단 점프는 500점부터 공중에서 한 번 더 오른다. 밤은 서서히 든다. */
+    /** 보호막은 한 번 막아 주고, 날개를 먹으면 15초 동안 공중에서 한 번 더 오른다. 밤은 서서히 든다. */
     @Test
-    fun `공룡 점프 보호막과 2단 점프`() {
+    fun `공룡 점프 보호막과 날개(2단 점프)`() {
         val S = com.kyijgnes.cooldown.dino.DinoSpec
         // 보호막 — 들고 가만히 있으면 첫 장애물은 부수고 계속, 그다음엔 부딪힌다
         val g = com.kyijgnes.cooldown.dino.DinoGame(seed = 1L)
@@ -366,17 +370,27 @@ class RenderPreviewTest {
         val eat = com.kyijgnes.cooldown.dino.DinoGame(seed = 2L)
         eat.pressJump(); eat.releaseJump()
         while (eat.jumping) eat.step()
-        eat.items.add(floatArrayOf(S.DINO_X + 60f, 0f))
+        eat.items.add(com.kyijgnes.cooldown.dino.Item(S.DINO_X + 60f, 0f, "shield"))
         repeat(30) { eat.step() }
         assertTrue("달려서 먹는다", eat.shield)
         assertTrue(eat.items.isEmpty())
 
-        // 2단 점프 — 500점 전엔 공중에서 눌러도 그대로, 넘으면 더 오른다
-        fun peak(score: Int, again: Boolean): Float {
+        // 날개 — 먹으면 15초 동안 2단 점프, 글자 2초
+        val wing = com.kyijgnes.cooldown.dino.DinoGame(seed = 2L)
+        wing.pressJump(); wing.releaseJump()
+        while (wing.jumping) wing.step()
+        wing.items.add(com.kyijgnes.cooldown.dino.Item(S.DINO_X + 60f, 0f, "wing"))
+        repeat(30) { wing.step() }
+        assertTrue("날개를 먹으면 2단 점프", wing.canDouble)
+        assertTrue(wing.doubleNote > 0)
+        assertTrue(wing.wings in (S.WING_FRAMES - 30)..S.WING_FRAMES)
+
+        // 2단 점프 — 날개 없으면 공중에서 눌러도 그대로, 있으면 더 오른다
+        fun peak(wings: Int, again: Boolean): Float {
             val d = com.kyijgnes.cooldown.dino.DinoGame(seed = 5L)
             d.pressJump(); d.releaseJump()
             while (d.jumping) d.step()
-            d.setForPreview(score = score)
+            d.setForPreview(wings = wings)
             d.pressJump()
             repeat(4) { d.step() }            // 짧게 톡 — 낮은 첫 점프
             d.releaseJump()
@@ -386,10 +400,10 @@ class RenderPreviewTest {
             repeat(80) { d.step(); top = maxOf(top, d.h) }
             return top
         }
-        assertEquals("500점 전엔 2단 점프가 없다", peak(S.DOUBLE_FROM - 20, false), peak(S.DOUBLE_FROM - 20, true), 0.01f)
-        val one = peak(S.DOUBLE_FROM + 10, false)
-        val two = peak(S.DOUBLE_FROM + 10, true)
-        assertTrue("500점부터 공중에서 한 번 더 ($one → $two)", two > one + 10f)
+        assertEquals("날개 없으면 2단 점프가 없다", peak(0, false), peak(0, true), 0.01f)
+        val one = peak(S.WING_FRAMES, false)
+        val two = peak(S.WING_FRAMES, true)
+        assertTrue("날개가 있으면 공중에서 한 번 더 ($one → $two)", two > one + 10f)
         val standH = S.POSES.getValue("stand").size * S.U
         assertTrue("판 위끝을 안 넘는다", two <= S.GROUND - S.CEILING - standH + 0.01f)
 
