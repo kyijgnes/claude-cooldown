@@ -73,6 +73,7 @@ HIDDEN = [
     "cooldown_update",  # [업데이트 대기] 클로드 업데이트 감시
     "cooldown_leftover",  # [남은 식구] 강제 업데이트 뒤 안 켜지는 클로드 풀기
     "cooldown_reboot",  # 윈도우 업데이트 재시작 대기 감시
+    "cooldown_newver",  # 쿨다운 자기 새 버전 알림
     "cooldown_job",  # 세션에서 띄워지면 클로드 데스크톱 job 밖으로 다시 뜨기
     "cooldown_dino",  # 공룡 점프 규칙·그림표 (클로디를 아주 오래 꾹)
     "cooldown_dino_view",  # 공룡 점프 판 그리기
@@ -160,6 +161,9 @@ def main() -> int:
             shutil.rmtree(built, ignore_errors=True)
             return 1
     os.rename(built, final)
+    # 새 버전 알림이 내 버전을 여기서 읽는다(`cooldown_newver.current`)
+    with open(os.path.join(final, "version.txt"), "w", encoding="utf-8") as f:
+        f.write(ver)
     exe = os.path.join(final, f"{NAME}.exe")
     total = sum(
         os.path.getsize(os.path.join(b, f)) for b, _d, fs in os.walk(final) for f in fs

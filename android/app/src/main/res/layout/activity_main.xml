@@ -63,6 +63,16 @@
             android:textColor="@color/faint"
             android:textSize="13sp" />
 
+        <!-- 쿨다운 새 버전이 릴리스에 올라왔을 때만 선다 (NewVersion) -->
+        <Button
+            android:id="@+id/newVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textColor="@color/title"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
         <Button
             android:id="@+id/connect"
             android:layout_width="match_parent"

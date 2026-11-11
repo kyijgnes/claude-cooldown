@@ -67,6 +67,7 @@ import cooldown_remote  # noqa: E402
 import cooldown_stats  # noqa: E402
 import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐지면 지운다
 import cooldown_leftover  # noqa: E402  [남은 식구] 클로드가 고쳐지면 지운다
+import cooldown_newver  # noqa: E402  쿨다운 자기 새 버전 알림
 import cooldown_dino  # noqa: E402  클로디를 아주 오래 꾹 누르면 뜨는 공룡 점프
 import skins  # noqa: E402
 from cooldown_dino_view import DinoBoard  # noqa: E402
@@ -214,6 +215,7 @@ class Label:
 
     FRONT = "위젯 보이기"
     UPDATE = "클로드 새 버전으로 다시 켜기"
+    NEWVER = "쿨다운 새 버전 받기"
     RELOGIN = "클로드 다시 로그인"
     USAGE = "사용량"
     PACE = "이번 주 사용 속도…"
@@ -794,6 +796,9 @@ class App:
         self.warned = {"five": False, "week": False}
         # [업데이트 대기] 클로드 앱 업데이트가 실행 중인 세션을 죽이기 전에 알린다
         self.update_out: queue.Queue = queue.Queue()
+        # 쿨다운 자기 새 버전 — 묻는 스레드가 번호(또는 None)를 넣는다
+        self.newver_out: queue.Queue = queue.Queue()
+        self._new_version: str | None = None
         # ★ 결과도 큐로 돌려받는다. **작업 스레드에서 root.after 를 부르면 안 된다** —
         #   Tk 는 스레드 안전하지 않아 조용히 씹히거나 죽는다(실제로 씹혔다).
         self.update_done: queue.Queue = queue.Queue()
@@ -927,6 +932,7 @@ class App:
         threading.Thread(target=self.tray.run, daemon=True).start()
         # [업데이트 대기] 사용량 조회와 무관하므로 폴러에 얹지 않고 따로 돈다
         threading.Thread(target=self._update_watch, daemon=True).start()
+        threading.Thread(target=self._newver_watch, daemon=True).start()
         # [오래 도는 작업] 재는 동안 몇 초 자므로 반드시 제 스레드에서 돈다
         threading.Thread(target=self._jobs_watch, daemon=True).start()
         # [남은 식구] 치울 때는 수십 초를 기다리므로 제 스레드에서 돈다
@@ -1228,6 +1234,11 @@ class App:
                     tk_(self.relogin),
                     visible=lambda item: self._relogin_item,
                 ),
+                I(
+                    lambda item: f"{Label.NEWVER} ({self._new_version})",
+                    tk_(self.open_release),
+                    visible=lambda item: bool(self._new_version),
+                ),
                 M.SEPARATOR,
                 I(Label.USAGE, M(
                     I(Label.PACE, tk_(self.open_pace)),
@@ -1470,6 +1481,8 @@ class App:
             items.append((self._update_menu_label(), self.apply_update))
         if self._relogin_item:
             items.append((Label.RELOGIN, self.relogin))
+        if self._new_version:
+            items.append((f"{Label.NEWVER} ({self._new_version})", self.open_release))
         for i, (label, fn) in enumerate(items):
             self.menu.insert_command(i, label=label, command=fn)
         if items:
@@ -1763,6 +1776,14 @@ class App:
                 break
             self._on_update_state(pending)
 
+        # 쿨다운 자기 새 버전
+        while True:
+            try:
+                ver = self.newver_out.get_nowait()
+            except queue.Empty:
+                break
+            self._on_new_version(ver)
+
         # [오래 도는 작업] 세션이 돌리고 있는 것 — 재는 스레드가 넣어 둔다
         while True:
             try:
@@ -1966,6 +1987,40 @@ class App:
             except Exception:  # noqa: BLE001  못 물어봤으면 다음 차례에 다시
                 pass
             time.sleep(UPDATE_EVERY)
+
+    # -------------------------------------------------- 쿨다운 자기 새 버전
+    def _newver_watch(self) -> None:
+        """켜고 조금 뒤 한 번, 그 뒤로 `CHECK_EVERY` 마다 릴리스 최신 번호를 묻는다."""
+        time.sleep(cooldown_newver.FIRST_WAIT)
+        while self.alive:
+            try:
+                self.newver_out.put(cooldown_newver.check())
+            except Exception:  # noqa: BLE001  못 물어봤으면 다음 차례에
+                pass
+            time.sleep(cooldown_newver.CHECK_EVERY)
+
+    def _on_new_version(self, ver: str | None) -> None:
+        """메뉴 맨 위 항목을 세우고, **버전마다 한 번** 트레이로 알린다."""
+        self._new_version = ver
+        try:
+            self.tray.update_menu()
+        except Exception:  # noqa: BLE001
+            pass
+        if ver and self.state.get("newver_told") != ver:
+            self.state["newver_told"] = ver
+            save_state(self.state)
+            applog(f"쿨다운 새 버전 {ver} 알림")
+            self._tray_say(f"클로드 쿨다운 새 버전 {ver}\n우클릭 > {Label.NEWVER}")
+
+    def open_release(self) -> None:
+        """릴리스 페이지를 브라우저로 연다. ★ `os.startfile` 금지(하지 말 것 절) — explorer 로 넘긴다."""
+        import subprocess
+
+        try:
+            subprocess.Popen(["explorer.exe", cooldown_newver.RELEASE_PAGE],
+                             env=cooldown_env.clean_env(), close_fds=True)
+        except OSError as e:
+            self._tray_say(f"릴리스 페이지를 못 열었습니다 · {e}")
 
     def _update_menu_label(self) -> str:
         """트레이 메뉴 항목 이름 = 하는 일 + 지금 값."""

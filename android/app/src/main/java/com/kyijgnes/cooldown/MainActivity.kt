@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var connect: Button
     private lateinit var refresh: Button
+    private lateinit var newVersion: Button
     private lateinit var claudi: ClaudiView
     private lateinit var stage: FrameLayout
 
@@ -61,6 +62,14 @@ class MainActivity : Activity() {
         connect.setOnClickListener { openOptions() }
         refresh.setOnClickListener { reload() }
         findViewById<Button>(R.id.options).setOnClickListener { openOptions() }
+        newVersion = findViewById(R.id.newVersion)
+        newVersion.setOnClickListener {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(NewVersion.PAGE)))
+            } catch (e: Exception) {
+                Toast.makeText(this, "브라우저를 못 열었어요", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         takePairFrom(intent)
         RefreshWorker.schedule(this)
@@ -87,6 +96,9 @@ class MainActivity : Activity() {
         //   있을 때 배경을 바꿔도 안 따라온다(실제로 옛 그림이 남았다).
         seedWallpaper()
         showValues()
+        Thread {   // 쿨다운 새 버전 — 6시간에 한 번만 묻는다
+            if (NewVersion.refresh(this)) runOnUiThread { if (!isFinishing) showValues() }
+        }.start()
         if (!Store.paired(this)) {
             if (!sentToPair) {
                 sentToPair = true
@@ -184,6 +196,9 @@ class MainActivity : Activity() {
 
         if (paired) drawGauge()
         status.text = statusLine()
+        val ver = NewVersion.pending(this)
+        newVersion.visibility = if (ver != null) View.VISIBLE else View.GONE
+        if (ver != null) newVersion.text = "쿨다운 새 버전 받기 ($ver)"
     }
 
     private fun drawGauge() {
