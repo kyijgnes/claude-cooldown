@@ -17,6 +17,9 @@
   · 충돌은 상자가 아니라 **도트 칸끼리**(`hits`) 본다. 그림이 도트 표라 그대로 쓰면 된다.
   · 새는 높이가 셋(`BIRD_LIFTS`) — 낮은 것은 뛰어넘고, 가운데는 숙이거나 뛰고, 높은 것은 지나간다.
     폰은 가운데를 뺀 둘(`BIRD_LIFTS_TOUCH`, `touch=True`) — 크롬도 휴대폰에선 그렇다.
+- 크롬에 없는 것(11-11): 낮↔밤이 1.5초에 걸쳐 서서히 바뀐다(`night_mix`) · 보호막(`SHIELD`, 땅에
+  놓인 것은 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 500점부터 2단 점프(`DOUBLE_FROM`).
+  ★ 폰(`DinoGame.kt`·`DinoBoard.kt`)에는 아직 안 옮겼다.
 - 한 걸음(`step`)이 1/60초다. 그리는 쪽은 흐른 시간만큼 `step` 을 불러 맞춘다.
 - 난수는 `random.Random(seed)` 하나만 쓴다. 같은 씨앗이면 같은 판이 나온다(확인용).
 
@@ -72,6 +75,22 @@ FLASH_EVERY = 100       # 이 점수마다 점수가 반짝인다
 FLASH_FRAMES = 60
 NIGHT_EVERY = 700       # 이 점수마다 밤이 온다
 NIGHT_FRAMES = 720      # 밤은 12초
+NIGHT_FADE = 90         # 낮↔밤이 이만큼(1.5초)에 걸쳐 서서히 바뀐다 (밤 12초 안에서 앞뒤로)
+
+# ---------------------------------------------------------------- 2단 점프 (11-11)
+# 판에서 이 점수를 넘기면 열린다. 열리면 공중에서 한 번 더 뛸 수 있다(땅에 닿으면 다시 한 번).
+DOUBLE_FROM = 500
+AIR_JUMP_V = 6.5        # 공중에서 뛰는 속도 — 판 위끝을 넘지 않게 첫 점프보다 약하다
+DOUBLE_NOTE = 120       # 열린 순간 '2단 점프' 글자를 이만큼(2초) 띄운다
+CEILING = 4             # 공룡 그림 위끝이 이 y 보다 위로는 못 간다
+
+# ---------------------------------------------------------------- 보호막 (11-11)
+# 장애물 사이 틈 한가운데에 가끔 놓인다. 땅에 놓인 것은 **그냥 달려서**(뛰면 지나친다),
+# 공중에 뜬 것은 **뛰어서** 먹는다. 들고 있으면 한 번 부딪혀도 그 장애물이 부서지고 계속 달린다.
+SHIELD_CHANCE = 0.12    # 장애물을 하나 놓을 때마다 이 확률로 그 뒤 틈에 보호막을 놓는다
+SHIELD_FROM = 100       # 이 점수부터 나온다
+SHIELD_LIFTS = (0, 44)  # 그림 아래끝이 땅에서 뜬 높이 — 달려서 먹기 · 뛰어서 먹기
+SHIELD_GRACE = 40       # 막아 준 뒤 이만큼은 안 부딪힌다 (깜빡인다)
 CLOUD_MAX = 6
 CLOUD_GAP = (100, 400)
 CLOUD_SKY = (32, 72)    # 구름이 뜨는 높이 (y) — 점수 글자(위 30px)와 안 겹치게
@@ -207,6 +226,20 @@ BIRD = (
     ),
 )
 BIRD_EYE = ((4, 6), (4, 5))   # 장마다 눈 자리 (날개를 내린 장은 몸이 한 줄 위다)
+
+# 보호막 — 판 위에 놓인 것(먹을 것). 들고 있으면 공룡 둘레에 `SHIELD_RING` 이 돈다.
+SHIELD = (
+    "..#####..",
+    ".#######.",
+    "####.####",
+    "###...###",
+    "####.####",
+    ".#######.",
+    "..#####..",
+    "...###...",
+    "....#....",
+)
+SHIELD_RING_R = 26      # 들고 있을 때 공룡 둘레 고리의 반지름 (px)
 
 CLOUD = (
     "......####......",
@@ -395,6 +428,13 @@ class Game:
         self.blink = 0
         self.next_blink = self.rng.randint(*BLINK_EVERY)
         self.new_best = False
+        self.air_jumps = 0         # 이번 점프에서 공중으로 더 뛴 횟수 (2단 점프)
+        self.jump_base = 0.0       # 지금 오르기를 시작한 높이 — 높이 제한을 여기서부터 잰다
+        self.double_note = 0       # '2단 점프' 글자 남은 프레임
+        self.items: list[list[float]] = []   # 판 위 보호막 — [x, 땅에서 뜬 높이]
+        self.shield = False        # 보호막을 들고 있다
+        self.grace = 0             # 막아 준 뒤 안 부딪히는 남은 프레임
+        self.broke = 0             # 막아 준 순간 반짝임 남은 프레임
         self.clouds: list[list[float]] = [[self.rng.uniform(self.w * 0.3, self.w), self.rng.uniform(*CLOUD_SKY)]]
         self.cloud_gap = self.rng.uniform(*CLOUD_GAP)
         # 땅의 자갈 — (x, 땅 아래 깊이, 폭). 흘러가다 왼쪽으로 빠지면 오른쪽에서 다시 나온다.
@@ -409,6 +449,8 @@ class Game:
         elif self.state == "run":
             if not self.jumping and not self.ducking:
                 self._jump()
+            elif self.jumping and self.can_double and self.air_jumps == 0 and not self.holding:
+                self._air_jump()
         elif self.state == "over" and self.over_t >= OVER_WAIT:
             self._reset()                # 다시 하기 — 뛰지 않고 그냥 달린다(크롬과 같다)
         self.holding = True
@@ -439,6 +481,20 @@ class Game:
         self.reached_min = False
         self.fast_drop = False
         self.vy = JUMP_V + self.speed / 10
+        self.air_jumps = 0
+        self.jump_base = 0.0
+
+    def _air_jump(self) -> None:
+        """공중에서 한 번 더 (2단 점프). 누르고 있으면 더 오르고 일찍 떼면 낮게 — 첫 점프와 같은 결."""
+        self.air_jumps += 1
+        self.reached_min = False
+        self.fast_drop = False
+        self.jump_base = self.h
+        self.vy = AIR_JUMP_V
+
+    @property
+    def can_double(self) -> bool:
+        return self.score >= DOUBLE_FROM
 
     def _end_jump(self) -> None:
         if self.reached_min and self.vy > DROP_V:
@@ -458,8 +514,14 @@ class Game:
             self._step_jump()
         if self.speed < SPEED_MAX:
             self.speed = min(SPEED_MAX, self.speed + ACCEL)
+        could = self.can_double
         self.distance += self.speed
+        if self.can_double and not could:
+            self.double_note = DOUBLE_NOTE
+        elif self.double_note > 0:
+            self.double_note -= 1
         self._step_obstacles()
+        self._step_items()
         self._step_scenery()
         before = self.flash_score
         self.flash_score = self.score // FLASH_EVERY * FLASH_EVERY
@@ -471,15 +533,32 @@ class Game:
             self.flash -= 1
         if self.night > 0:
             self.night -= 1
-        if self._collides():
-            self._crash()
+        if self.broke > 0:
+            self.broke -= 1
+        if self.grace > 0:
+            self.grace -= 1
+            return
+        hit = self._collides()
+        if hit is not None:
+            if self.shield:          # 보호막이 막는다 — 그 장애물은 부서지고 계속 달린다
+                self.shield = False
+                self.grace = SHIELD_GRACE
+                self.broke = SHIELD_GRACE
+                self.obstacles.remove(hit)
+            else:
+                self._crash()
 
     def _step_jump(self) -> None:
         self.h += self.vy * (FAST_DROP if self.fast_drop else 1)
         self.vy -= GRAVITY
-        if self.h > MIN_JUMP or self.fast_drop:
+        rise = self.h - self.jump_base
+        top = GROUND - self.h - size(POSES["stand"])[1]
+        if top < CEILING:          # 판 위끝 — 머리를 박고 내려온다
+            self.h = GROUND - CEILING - size(POSES["stand"])[1]
+            self.vy = min(self.vy, 0.0)
+        if rise > MIN_JUMP or self.fast_drop:
             self.reached_min = True
-        if self.h > MAX_JUMP or self.fast_drop:
+        if rise > MAX_JUMP or self.fast_drop:
             self._end_jump()
         elif not self.holding:
             self._end_jump()
@@ -489,6 +568,8 @@ class Game:
             self.jumping = False
             self.fast_drop = False
             self.ducking = self.down
+            self.air_jumps = 0
+            self.jump_base = 0.0
 
     def _step_blink(self) -> None:
         if self.blink > 0:
@@ -531,8 +612,37 @@ class Game:
         one_w, _ = size(spec["art"][0])
         min_gap = round(one_w * count * self.speed + spec["min_gap"] * GAP_COEF)
         gap = self.rng.randint(min_gap, round(min_gap * GAP_MAX))
-        self.obstacles.append(Obstacle(kind, float(self.w), count, lift, wobble, gap))
+        ob = Obstacle(kind, float(self.w), count, lift, wobble, gap)
+        self.obstacles.append(ob)
         self.history = (self.history + [kind])[-MAX_DUP:]
+        # 보호막 — 이 장애물 뒤 틈 한가운데. 들고 있거나 판에 이미 있으면 안 놓는다.
+        if (not self.shield and not self.items and self.score >= SHIELD_FROM
+                and self.rng.random() < SHIELD_CHANCE):
+            iw, _ = size(SHIELD)
+            self.items.append([ob.x + ob.w + gap / 2 - iw / 2, float(self.rng.choice(SHIELD_LIFTS))])
+
+    def _step_items(self) -> None:
+        """보호막이 흘러가다 공룡에 닿으면 먹는다(칸끼리 겹치면)."""
+        iw, ih = size(SHIELD)
+        keep = []
+        for it in self.items:
+            it[0] -= self.speed
+            if it[0] + iw <= 0:
+                continue
+            x, y = it[0], GROUND - it[1] - ih
+            if self._touches(x, y, iw, ih):
+                self.shield = True
+                continue
+            keep.append(it)
+        self.items = keep
+
+    def _touches(self, x: float, y: float, w: float, h: float) -> bool:
+        dx0, dy0 = DINO_X, self.dino_y
+        dw, dh = size(POSES[self.pose])
+        if x >= dx0 + dw or x + w <= dx0 or y >= dy0 + dh or y + h <= dy0:
+            return False
+        return any(x < mx + mw and mx < x + w and y < my + mh and my < y + h
+                   for mx, my, mw, mh in self.dino_runs())
 
     def _step_scenery(self) -> None:
         drift = self.speed * CLOUD_SPEED
@@ -558,7 +668,8 @@ class Game:
         for rx, ry, rw, rh in _POSE_RUNS[self.pose]:
             yield DINO_X + rx, top + ry, rw, rh
 
-    def _collides(self) -> bool:
+    def _collides(self) -> Obstacle | None:
+        """부딪힌 장애물 (없으면 None)."""
         dx0, dy0 = DINO_X, self.dino_y
         dw, dh = size(POSES[self.pose])
         mine = None
@@ -571,8 +682,8 @@ class Game:
             for ox, oy, ow, oh in ob.hit_runs():
                 for mx, my, mw, mh in mine:
                     if ox < mx + mw and mx < ox + ow and oy < my + mh and my < oy + oh:
-                        return True
-        return False
+                        return ob
+        return None
 
     def _crash(self) -> None:
         self.state = "over"
@@ -612,6 +723,19 @@ class Game:
     def dino_y(self) -> float:
         """공룡 그림 위끝."""
         return GROUND - self.h - size(POSES[self.pose])[1]
+
+    @property
+    def night_mix(self) -> float:
+        """밤이 든 정도 0~1 — 밤 들 때 `NIGHT_FADE` 동안 0→1, 끝날 때 1→0 으로 서서히."""
+        if self.night <= 0:
+            return 0.0
+        into = NIGHT_FRAMES - self.night          # 밤이 시작되고 흐른 프레임
+        return max(0.0, min(1.0, into / NIGHT_FADE, self.night / NIGHT_FADE))
+
+    @property
+    def shield_blink(self) -> bool:
+        """막아 준 뒤 안 부딪히는 동안 공룡이 깜빡인다 (보이면 참)."""
+        return self.grace <= 0 or (self.grace // 4) % 2 == 0
 
     @property
     def shown_score(self) -> int:

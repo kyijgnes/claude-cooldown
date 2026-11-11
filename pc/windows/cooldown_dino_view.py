@@ -24,10 +24,12 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import sys
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if __name__ == "__main__":
@@ -42,6 +44,23 @@ STEP = 1.0 / dino.FPS
 MAX_CATCH_UP = 5      # 한 번에 밟는 걸음의 상한 — 창을 끌던 사이 몇 초가 흘러도 순간이동하지 않게
 HINT = "스페이스 · 클릭 점프    ↓ 숙이기"
 PAUSED = "일시 정지 · 눌러서 이어 하기"
+
+
+def _blend(a: str, b: str, t: float) -> str:
+    """색 두 개(#rrggbb)를 t(0=a, 1=b) 만큼 섞는다."""
+    ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+
+
+class _Mixed:
+    """낮↔밤 사이의 색 한 벌 — 팔레트 두 벌을 칸마다 섞는다(읽을 때 계산)."""
+
+    def __init__(self, a, b, t: float) -> None:
+        self._a, self._b, self._t = a, b, t
+
+    def __getattr__(self, name: str) -> str:
+        return _blend(getattr(self._a, name), getattr(self._b, name), self._t)
 
 
 class DinoBoard:
@@ -67,6 +86,7 @@ class DinoBoard:
         self._idle = 0.0          # 기다림·부딪힘·멈춤으로 흐른 초 — `IDLE_EXIT` 넘으면 닫는다
         self._fine_timer = False
         self._close_hot = False   # ✕ 위에 마우스가 있다 (밝게 그린다)
+        self._hi_w = tkfont.Font(font=(NUM, 11)).measure("HI 00000")  # 보호막 표시를 그 왼쪽에
         self._bind()
         self._timer_fine(True)
         self.c.bind("<Destroy>", lambda e: self.close() if e.widget is self.c else None)
@@ -206,11 +226,14 @@ class DinoBoard:
 
     # -------------------------------------------------- 그리기
     def _colors(self):
-        """판에 쓸 색 한 벌 — 지금 테마(`P`), 밤이면 반대 테마."""
-        pal = P
-        if self.game.night > 0:
-            pal = LIGHT if P.bg == DARK.bg else DARK
-        return pal
+        """판에 쓸 색 한 벌 — 지금 테마(`P`), 밤이면 반대 테마. 바뀔 때는 두 벌을 섞어 서서히."""
+        mix = self.game.night_mix
+        if mix <= 0:
+            return P
+        other = LIGHT if P.bg == DARK.bg else DARK
+        if mix >= 1:
+            return other
+        return _Mixed(P, other, mix)
 
     def draw(self) -> None:
         c, g, w = self.c, self.game, self.w
@@ -235,11 +258,25 @@ class DinoBoard:
                 if ob.kind == "bird":
                     col, row = dino.BIRD_EYE[ob.frame % 2]
                     self._cells(((col, row),), x, y, pal.bg)
-        # 공룡
+        # 보호막 — 판 위에 놓인 것
+        sw, sh = dino.size(dino.SHIELD)
+        for x, lift in g.items:
+            self._art(dino.SHIELD, x, dino.GROUND - lift - sh, pal.amber)
+        # 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다
         pose = g.pose
-        self._art(dino.POSES[pose], dino.DINO_X, g.dino_y, MASCOT_COLOR)
-        eyes = (dino.DUCK_EYE if pose.startswith("duck") else dino.DINO_EYE)[g.eye]
-        self._cells(eyes, dino.DINO_X, g.dino_y, pal.bg)
+        if g.shield_blink:
+            self._art(dino.POSES[pose], dino.DINO_X, g.dino_y, MASCOT_COLOR)
+            eyes = (dino.DUCK_EYE if pose.startswith("duck") else dino.DINO_EYE)[g.eye]
+            self._cells(eyes, dino.DINO_X, g.dino_y, pal.bg)
+        # 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
+        dw, dh = dino.size(dino.POSES[pose])
+        cx, cy = dino.DINO_X + dw / 2, g.dino_y + dh / 2 - 3   # 고리 아래끝이 땅 줄에 걸치게 조금 위로
+        if g.shield and g.state != "over":
+            self._ring(cx, cy, dino.SHIELD_RING_R, pal.amber, g.t // 3)
+        elif g.broke > 0:
+            grow = (dino.SHIELD_GRACE - g.broke) * 1.2
+            if (g.broke // 3) % 2 == 0:
+                self._ring(cx, cy, dino.SHIELD_RING_R + grow, pal.amber, 0)
         # 닫기 ✕ — 왼쪽 위 구석
         self._art(dino.CLOSE, *dino.CLOSE_AT, pal.title if self._close_hot else pal.faint)
         # 점수 — 오른쪽 위 (HI 최고 · 지금)
@@ -249,6 +286,13 @@ class DinoBoard:
         if g.best > 0 or g.state == "over":
             c.create_text(w - 70, 14, text=f"HI {g.best:05d}", anchor="ne",
                           fill=pal.label, font=(NUM, 11))
+        # 들고 있는 보호막 — 점수 왼쪽에 작은 표시
+        if g.shield and g.state == "run":
+            hi = self._hi_w if (g.best > 0 or g.state == "over") else 0
+            self._art(dino.SHIELD, w - 70 - hi - 10 - sw, 7, pal.amber)
+        if g.double_note > 0 and g.state == "run":
+            c.create_text(w / 2, 56, text="2단 점프 열림 · 공중에서 한 번 더",
+                          fill=pal.amber, font=(KR, 10, "bold"))
         if self.paused:
             c.create_text(w / 2, 56, text=PAUSED, fill=pal.title, font=(KR, 10, "bold"))
         elif g.state == "ready":
@@ -265,6 +309,19 @@ class DinoBoard:
         for rx, ry, rw, rh in dino._art_runs(rows, flip):
             self.c.create_rectangle(bx + rx, by + ry, bx + rx + rw, by + ry + rh,
                                     fill=color, width=0)
+
+    def _ring(self, cx, cy, r, color, turn: int) -> None:
+        """도트 점선 고리 — 반지름 r, `turn` 만큼 돌려서(돌아가 보이게)."""
+        u = dino.U
+        n = max(16, int(r * 1.5))            # 고리 둘레의 점 수
+        ry = r * 0.82                        # 위아래로 조금 납작하게 (공룡이 옆으로 길다)
+        for i in range(n):
+            if (i + turn) % 4 == 0:          # 넷에 하나는 비워 점선으로 (돌아 보인다)
+                continue
+            a = 2 * math.pi * i / n
+            x = round((cx + r * math.cos(a)) / u) * u
+            y = round((cy + ry * math.sin(a)) / u) * u
+            self.c.create_rectangle(x, y, x + u, y + u, fill=color, width=0)
 
     def _cells(self, cells, x, y, color) -> None:
         """낱칸 몇 개 (눈 파내기)."""
