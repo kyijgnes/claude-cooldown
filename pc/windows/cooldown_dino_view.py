@@ -260,14 +260,21 @@ class DinoBoard:
                     self._cells(((col, row),), x, y, pal.bg)
         # 보호막 — 판 위에 놓인 것
         sw, sh = dino.size(dino.SHIELD)
-        for x, lift in g.items:
-            self._art(dino.SHIELD, x, dino.GROUND - lift - sh, pal.amber)
+        for x, lift, kind in g.items:
+            art = dino.ITEM_ART[kind]
+            self._art(art, x, dino.GROUND - lift - dino.size(art)[1], self._item_color(kind, pal))
         # 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다
         pose = g.pose
         if g.shield_blink:
             self._art(dino.POSES[pose], dino.DINO_X, g.dino_y, MASCOT_COLOR)
             eyes = (dino.DUCK_EYE if pose.startswith("duck") else dino.DINO_EYE)[g.eye]
             self._cells(eyes, dino.DINO_X, g.dino_y, pal.bg)
+            # 날개를 가진 동안 — 등에 작은 날개 (뛰는 중엔 팔락인다)
+            if g.wing_shown and not pose.startswith("duck") and g.state == "run":
+                flap = (g.t // 6) % 2 if g.jumping else 0
+                wx, wy = dino.WING_AT
+                self._art(dino.WING_ON[flap], dino.DINO_X + wx, g.dino_y + wy,
+                          self._item_color("wing", pal))
         # 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
         dw, dh = dino.size(dino.POSES[pose])
         cx, cy = dino.DINO_X + dw / 2, g.dino_y + dh / 2 - 3   # 고리 아래끝이 땅 줄에 걸치게 조금 위로
@@ -287,12 +294,19 @@ class DinoBoard:
             c.create_text(w - 70, 14, text=f"HI {g.best:05d}", anchor="ne",
                           fill=pal.label, font=(NUM, 11))
         # 들고 있는 보호막 — 점수 왼쪽에 작은 표시
-        if g.shield and g.state == "run":
-            hi = self._hi_w if (g.best > 0 or g.state == "over") else 0
-            self._art(dino.SHIELD, w - 70 - hi - 10 - sw, 7, pal.amber)
+        if g.state == "run":
+            hi = self._hi_w if g.best > 0 else 0
+            x = w - 70 - hi - 10
+            if g.shield:
+                x -= sw
+                self._art(dino.SHIELD, x, 7, pal.amber)
+                x -= 6
+            if g.wing_shown:
+                x -= dino.size(dino.WING)[0]
+                self._art(dino.WING, x, 7, self._item_color("wing", pal))
         if g.double_note > 0 and g.state == "run":
-            c.create_text(w / 2, 56, text="2단 점프 열림 · 공중에서 한 번 더",
-                          fill=pal.amber, font=(KR, 10, "bold"))
+            c.create_text(w / 2, 56, text="2단 점프 15초 · 공중에서 한 번 더 누르기",
+                          fill=self._item_color("wing", pal), font=(KR, 10, "bold"))
         if self.paused:
             c.create_text(w / 2, 56, text=PAUSED, fill=pal.title, font=(KR, 10, "bold"))
         elif g.state == "ready":
@@ -309,6 +323,11 @@ class DinoBoard:
         for rx, ry, rw, rh in dino._art_runs(rows, flip):
             self.c.create_rectangle(bx + rx, by + ry, bx + rx + rw, by + ry + rh,
                                     fill=color, width=0)
+
+    @staticmethod
+    def _item_color(kind: str, pal) -> str:
+        """보호막은 금색, 날개는 글자색. 선인장 초록과 안 헷갈리게."""
+        return pal.amber if kind == "shield" else pal.title
 
     def _ring(self, cx, cy, r, color, turn: int) -> None:
         """도트 점선 고리 — 반지름 r, `turn` 만큼 돌려서(돌아가 보이게)."""
