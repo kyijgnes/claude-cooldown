@@ -18,7 +18,7 @@
   · 새는 높이가 셋(`BIRD_LIFTS`) — 낮은 것은 뛰어넘고, 가운데는 숙이거나 뛰고, 높은 것은 지나간다.
     폰은 가운데를 뺀 둘(`BIRD_LIFTS_TOUCH`, `touch=True`) — 크롬도 휴대폰에선 그렇다.
 - 크롬에 없는 것(11-11): 낮↔밤이 1.5초에 걸쳐 서서히 바뀐다(`night_mix`) · 보호막(`SHIELD`, 땅에
-  놓인 것은 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 500점부터 2단 점프(`DOUBLE_FROM`).
+  놓인 것은 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 날개(`WING`, 먹으면 `WING_FRAMES` 동안 2단 점프).
   ★ 폰(`DinoGame.kt`·`DinoBoard.kt`)에는 아직 안 옮겼다.
 - 한 걸음(`step`)이 1/60초다. 그리는 쪽은 흐른 시간만큼 `step` 을 불러 맞춘다.
 - 난수는 `random.Random(seed)` 하나만 쓴다. 같은 씨앗이면 같은 판이 나온다(확인용).
@@ -78,18 +78,22 @@ NIGHT_FRAMES = 720      # 밤은 12초
 NIGHT_FADE = 90         # 낮↔밤이 이만큼(1.5초)에 걸쳐 서서히 바뀐다 (밤 12초 안에서 앞뒤로)
 
 # ---------------------------------------------------------------- 2단 점프 (11-11)
-# 판에서 이 점수를 넘기면 열린다. 열리면 공중에서 한 번 더 뛸 수 있다(땅에 닿으면 다시 한 번).
-DOUBLE_FROM = 500
+# **날개 아이템**을 먹으면 `WING_FRAMES` 동안 공중에서 한 번 더 뛸 수 있다(땅에 닿으면 다시 한 번).
+# 놓이는 자리·먹는 법은 보호막과 같다(`ITEM_LIFTS`).
+WING_FRAMES = 15 * FPS  # 날개가 가는 시간 (15초)
+WING_WARN = 3 * FPS     # 끝나기 이만큼 전부터 표시가 깜빡인다
 AIR_JUMP_V = 6.5        # 공중에서 뛰는 속도 — 판 위끝을 넘지 않게 첫 점프보다 약하다
-DOUBLE_NOTE = 120       # 열린 순간 '2단 점프' 글자를 이만큼(2초) 띄운다
+DOUBLE_NOTE = 120       # 날개를 먹은 순간 '2단 점프' 글자를 이만큼(2초) 띄운다
 CEILING = 4             # 공룡 그림 위끝이 이 y 보다 위로는 못 간다
 
-# ---------------------------------------------------------------- 보호막 (11-11)
+# ---------------------------------------------------------------- 아이템: 보호막 · 날개 (11-11)
 # 장애물 사이 틈 한가운데에 가끔 놓인다. 땅에 놓인 것은 **그냥 달려서**(뛰면 지나친다),
-# 공중에 뜬 것은 **뛰어서** 먹는다. 들고 있으면 한 번 부딪혀도 그 장애물이 부서지고 계속 달린다.
-SHIELD_CHANCE = 0.12    # 장애물을 하나 놓을 때마다 이 확률로 그 뒤 틈에 보호막을 놓는다
-SHIELD_FROM = 100       # 이 점수부터 나온다
-SHIELD_LIFTS = (0, 44)  # 그림 아래끝이 땅에서 뜬 높이 — 달려서 먹기 · 뛰어서 먹기
+# 공중에 뜬 것은 **뛰어서** 먹는다. 판에는 한 번에 하나만 놓이고, 이미 가진 것은 안 나온다.
+#   보호막: 들고 있으면 한 번 부딪혀도 그 장애물이 부서지고 계속 달린다.
+#   날개: `WING_FRAMES` 동안 2단 점프.
+ITEM_CHANCE = 0.14      # 장애물을 하나 놓을 때마다 이 확률로 그 뒤 틈에 아이템을 놓는다
+ITEM_FROM = 100         # 이 점수부터 나온다
+ITEM_LIFTS = (0, 44)    # 그림 아래끝이 땅에서 뜬 높이 — 달려서 먹기 · 뛰어서 먹기
 SHIELD_GRACE = 40       # 막아 준 뒤 이만큼은 안 부딪힌다 (깜빡인다)
 CLOUD_MAX = 6
 CLOUD_GAP = (100, 400)
@@ -240,6 +244,24 @@ SHIELD = (
     "....#....",
 )
 SHIELD_RING_R = 26      # 들고 있을 때 공룡 둘레 고리의 반지름 (px)
+
+# 날개 — 먹으면 잠깐 2단 점프. 가진 동안 공룡 등에 `WING_ON` 이 붙어 뛸 때 팔락인다.
+WING = (
+    "##..........",
+    "####........",
+    ".#####......",
+    ".#######....",
+    "..#########.",
+    "..##########",
+    "...#.#.#.###",
+    "...#.#.#.#..",
+)
+WING_ON = (             # 공룡 등에 붙는 작은 날개 두 장(올림·내림)
+    ("#.....", "##....", "###...", ".####.", "..####"),
+    ("......", "......", "..####", ".#####", "###..."),
+)
+WING_AT = (14, 10)      # 공룡 그림 왼쪽 위에서 날개 그림 왼쪽 위까지 (px, 서 있을 때 등)
+ITEM_ART = {"shield": SHIELD, "wing": WING}
 
 CLOUD = (
     "......####......",
@@ -431,7 +453,8 @@ class Game:
         self.air_jumps = 0         # 이번 점프에서 공중으로 더 뛴 횟수 (2단 점프)
         self.jump_base = 0.0       # 지금 오르기를 시작한 높이 — 높이 제한을 여기서부터 잰다
         self.double_note = 0       # '2단 점프' 글자 남은 프레임
-        self.items: list[list[float]] = []   # 판 위 보호막 — [x, 땅에서 뜬 높이]
+        self.items: list[list] = []   # 판 위 아이템 — [x, 땅에서 뜬 높이, "shield"|"wing"]
+        self.wings = 0             # 날개(2단 점프) 남은 프레임
         self.shield = False        # 보호막을 들고 있다
         self.grace = 0             # 막아 준 뒤 안 부딪히는 남은 프레임
         self.broke = 0             # 막아 준 순간 반짝임 남은 프레임
@@ -494,7 +517,7 @@ class Game:
 
     @property
     def can_double(self) -> bool:
-        return self.score >= DOUBLE_FROM
+        return self.wings > 0
 
     def _end_jump(self) -> None:
         if self.reached_min and self.vy > DROP_V:
@@ -514,12 +537,11 @@ class Game:
             self._step_jump()
         if self.speed < SPEED_MAX:
             self.speed = min(SPEED_MAX, self.speed + ACCEL)
-        could = self.can_double
         self.distance += self.speed
-        if self.can_double and not could:
-            self.double_note = DOUBLE_NOTE
-        elif self.double_note > 0:
+        if self.double_note > 0:
             self.double_note -= 1
+        if self.wings > 0:
+            self.wings -= 1
         self._step_obstacles()
         self._step_items()
         self._step_scenery()
@@ -615,23 +637,31 @@ class Game:
         ob = Obstacle(kind, float(self.w), count, lift, wobble, gap)
         self.obstacles.append(ob)
         self.history = (self.history + [kind])[-MAX_DUP:]
-        # 보호막 — 이 장애물 뒤 틈 한가운데. 들고 있거나 판에 이미 있으면 안 놓는다.
-        if (not self.shield and not self.items and self.score >= SHIELD_FROM
-                and self.rng.random() < SHIELD_CHANCE):
-            iw, _ = size(SHIELD)
-            self.items.append([ob.x + ob.w + gap / 2 - iw / 2, float(self.rng.choice(SHIELD_LIFTS))])
+        # 아이템 — 이 장애물 뒤 틈 한가운데. 판에 이미 있으면 안 놓고, 가진 것은 고르지 않는다.
+        if not self.items and self.score >= ITEM_FROM and self.rng.random() < ITEM_CHANCE:
+            kinds = [k for k in ITEM_ART if not (k == "shield" and self.shield)
+                     and not (k == "wing" and self.wings > WING_WARN)]
+            if kinds:
+                kind = self.rng.choice(kinds)
+                iw, _ = size(ITEM_ART[kind])
+                self.items.append([ob.x + ob.w + gap / 2 - iw / 2,
+                                   float(self.rng.choice(ITEM_LIFTS)), kind])
 
     def _step_items(self) -> None:
-        """보호막이 흘러가다 공룡에 닿으면 먹는다(칸끼리 겹치면)."""
-        iw, ih = size(SHIELD)
+        """아이템이 흘러가다 공룡에 닿으면 먹는다(칸끼리 겹치면)."""
         keep = []
         for it in self.items:
+            iw, ih = size(ITEM_ART[it[2]])
             it[0] -= self.speed
             if it[0] + iw <= 0:
                 continue
             x, y = it[0], GROUND - it[1] - ih
             if self._touches(x, y, iw, ih):
-                self.shield = True
+                if it[2] == "shield":
+                    self.shield = True
+                else:
+                    self.wings = WING_FRAMES
+                    self.double_note = DOUBLE_NOTE
                 continue
             keep.append(it)
         self.items = keep
@@ -731,6 +761,11 @@ class Game:
             return 0.0
         into = NIGHT_FRAMES - self.night          # 밤이 시작되고 흐른 프레임
         return max(0.0, min(1.0, into / NIGHT_FADE, self.night / NIGHT_FADE))
+
+    @property
+    def wing_shown(self) -> bool:
+        """날개 표시가 보이나 — 끝나기 `WING_WARN` 전부터 깜빡인다."""
+        return self.wings > WING_WARN or (self.wings > 0 and (self.wings // 8) % 2 == 0)
 
     @property
     def shield_blink(self) -> bool:
