@@ -207,6 +207,23 @@ PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 
 STATS_TABS = ("일별", "주별", "달별", "전체")  # 사용량 통계에서 볼 수 있는 기간
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
 THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
+
+
+class _Tray(pystray.Icon):
+    """우클릭할 때마다 메뉴를 새로 짓는 트레이 아이콘.
+
+    pystray(win32)는 `update_menu()` 를 부를 때만 메뉴를 짓고 그 모양을 들고 있어서,
+    위젯 쪽에서 디자인·체크를 바꾸면 트레이 체크가 옛 값으로 남는다. 띄우기 직전에
+    다시 지으면 바꾼 곳마다 `update_menu()` 를 챙길 필요가 없다.
+    """
+
+    def _on_notify(self, wparam, lparam):
+        if lparam == 0x0205:  # WM_RBUTTONUP
+            try:
+                self._update_menu()
+            except Exception:  # noqa: BLE001 — 못 지으면 옛 메뉴라도 띄운다
+                pass
+        return super()._on_notify(wparam, lparam)
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
 ALPHA = 0.96  # 평소 창 불투명도
 BUSY_ALPHA = 0.78  # 새로고침 누른 직후
@@ -1131,50 +1148,137 @@ class App:
         self.menu.add_command(label="종료", command=self.quit)
 
     def _build_tray(self) -> pystray.Icon:
-        return pystray.Icon(
+        """트레이 메뉴 = 위젯 우클릭 메뉴와 **같은 차례·같은 이름**(11-11 지시: 통일).
+        다른 것은 맨 위 `위젯 앞으로`(아이콘을 누르면 도는 기본 항목) 하나뿐이다.
+
+        ★ 여기 lambda 는 **트레이 스레드**에서 돈다. Tk 를 직접 부르지 말고 전부
+          `self.commands` 로 넘긴다(`_tk`). 체크 표시도 Tk 변수가 아니라 저장 값을 읽는다.
+        ★ 메뉴를 새로 고칠 때 위젯 메뉴(`_build_menu`)도 같이 고친다.
+        """
+        M, I = pystray.Menu, pystray.MenuItem
+        tk_ = self._tk
+
+        skin_items = [
+            I(
+                cls.name,
+                tk_(lambda k=cls.key: self.switch_skin(k)),
+                checked=lambda item, k=cls.key: self.skin.key == k,
+                radio=True,
+            )
+            for cls in skins.SKINS
+        ]
+        theme_items = [
+            I(
+                label,
+                tk_(lambda k=key: self.switch_theme(k)),
+                checked=lambda item, k=key: self.state["theme"] == k,
+                radio=True,
+            )
+            for key, label in THEMES
+        ]
+
+        return _Tray(
             "claude_cooldown",
             draw_icon(None),
             "클로드 쿨다운 — 불러오는 중",
-            menu=pystray.Menu(
+            menu=M(
                 # default=True — 아이콘을 클릭(더블클릭 포함)하면 이게 실행된다
-                pystray.MenuItem(
-                    "위젯 앞으로",
-                    lambda: self.commands.put("front"),
-                    default=True,
-                ),
-                # [업데이트 대기] 대기 중일 때만 나타난다. 평소엔 없는 항목이다.
-                pystray.MenuItem(
+                I("위젯 앞으로", tk_(self.bring_to_front), default=True),
+                # [업데이트 대기]·다시 로그인: 그럴 때만 나타난다. 위젯 메뉴도 맨 위에 같은 둘.
+                I(
                     lambda item: self._update_menu_label(),
-                    lambda: self.commands.put("apply_update"),
+                    tk_(self.apply_update),
                     visible=lambda item: self._update_pending is not None,
                 ),
-                # 클로드 코드 로그인이 끝났거나 끝나는 날이 다가왔을 때만 나타난다.
-                # ★ 트레이 메뉴는 한 번 지어 두고 다시 안 짓는다 — 나타나고 사라질 때
-                #   `_expiry_tick` 이 `update_menu()` 를 부른다.
-                pystray.MenuItem(
+                I(
                     "클로드 다시 로그인",
-                    lambda: self.commands.put("relogin"),
+                    tk_(self.relogin),
                     visible=lambda item: self._relogin_item,
                 ),
-                pystray.MenuItem("지금 새로고침", lambda: self.refresh_now()),
-                pystray.MenuItem(
-                    "이번 주 사용 속도", lambda: self.commands.put("pace")
+                M.SEPARATOR,
+                I("사용량", M(
+                    I("이번 주 사용 속도…", tk_(self.open_pace)),
+                    I("사용량 통계…", tk_(self.open_stats)),
+                    I(
+                        "API 사용량…",
+                        tk_(self.open_api),
+                        visible=lambda item: cooldown_api.available(),
+                    ),
+                )),
+                M.SEPARATOR,
+                I("디자인", M(
+                    *skin_items,
+                    M.SEPARATOR,
+                    I("밝기", M(*theme_items)),
+                    I(
+                        "항상 위에 표시",
+                        tk_(self.toggle_topmost),
+                        checked=lambda item: bool(self.state["topmost"]),
+                    ),
+                )),
+                I("클로드 모닝 스타터", M(
+                    I(
+                        "정한 시각마다 5시간 자동 시작",
+                        tk_(self.toggle_ping),
+                        checked=lambda item: bool(self.ping_cfg.get("enabled")),
+                    ),
+                    M.SEPARATOR,
+                    I("지금 한 번 실행", tk_(self.send_ping_now)),
+                    I("시각 설정…", tk_(self.open_ping_times)),
+                    I("실행 기록…", tk_(self.open_ping_log)),
+                )),
+                I("모바일", M(
+                    I(
+                        "폰으로 보내기",
+                        tk_(self.toggle_push),
+                        checked=lambda item: bool(self.push_cfg.get("enabled")),
+                    ),
+                    M.SEPARATOR,
+                    I("폰 연결…", tk_(self.open_phone_link)),
+                )),
+                I("클로드 코드 원격", M(
+                    I(
+                        "폰·웹에서 이 PC 에 세션 열기",
+                        tk_(self.toggle_remote),
+                        checked=lambda item: bool(self.remote_cfg.get("enabled")),
+                    ),
+                    M.SEPARATOR,
+                    I("작업 폴더…", tk_(self.open_remote_folder)),
+                )),
+                I("앱 설정", M(
+                    I("로그인 상태…", tk_(self.open_login)),
+                    M.SEPARATOR,
+                    I(
+                        "자리 비면 클로드 업데이트 자동 적용",
+                        tk_(self.toggle_auto_update),
+                        checked=lambda item: bool(self.state.get("auto_update")),
+                    ),
+                    I(
+                        "윈도우 켤 때 자동 실행",
+                        tk_(self.toggle_autostart),
+                        checked=lambda item: autostart_enabled(),
+                    ),
+                )),
+                M.SEPARATOR,
+                # 위젯 메뉴처럼 작업표시줄 바일 때만 `종료` 바로 위에 선다
+                I(
+                    "작업표시줄에 고정",
+                    tk_(self._tray_toggle_dock),
+                    checked=lambda item: bool(self.state["dock"]),
+                    visible=lambda item: bool(self.skin.dockable),
                 ),
-                pystray.MenuItem("사용량 통계", lambda: self.commands.put("stats")),
-                pystray.MenuItem(
-                    "API 사용량",
-                    lambda: self.commands.put("api"),
-                    visible=lambda item: cooldown_api.available(),
-                ),
-                pystray.MenuItem("로그인 상태", lambda: self.commands.put("login")),
-                pystray.MenuItem(
-                    "윈도우 켤 때 자동 실행",
-                    lambda: self.commands.put("toggle_autostart"),
-                    checked=lambda item: autostart_enabled(),
-                ),
-                pystray.MenuItem("종료", lambda: self.commands.put("quit")),
+                I("종료", tk_(self.quit)),
             ),
         )
+
+    def _tk(self, fn):
+        """트레이 항목이 부를 것 — Tk 스레드(`_pump`)에서 돌도록 큐에 넣는다."""
+        return lambda: self.commands.put(fn)
+
+    def _tray_toggle_dock(self) -> None:
+        # 위젯 메뉴의 체크 칸은 누르면 변수부터 바뀐 뒤 `toggle_dock` 이 그걸 읽는다
+        self.var_dock.set(not bool(self.state["dock"]))
+        self.toggle_dock()
 
     # -------------------------------------------------- 드래그
     def _press(self, e):
@@ -1322,13 +1426,35 @@ class App:
             self.show_window()   # 같은 자리 · 작업표시줄 위면 '항상 위' 를 그대로 지킨다
         applog(f"작업표시줄 고정 → {want}")
 
+    def _sync_top_items(self) -> None:
+        """트레이 메뉴와 같이, 그럴 때만 메뉴 맨 위에 서는 둘:
+        `클로드 껐다 켜서 업데이트 끝내기 (… 대기)` · `클로드 다시 로그인`."""
+        n = getattr(self, "_top_n", 0)
+        if n:
+            self.menu.delete(0, n - 1)
+        items = []
+        if self._update_pending is not None:
+            items.append((self._update_menu_label(), self.apply_update))
+        if self._relogin_item:
+            items.append(("클로드 다시 로그인", self.relogin))
+        for i, (label, fn) in enumerate(items):
+            self.menu.insert_command(i, label=label, command=fn)
+        if items:
+            self.menu.insert_separator(len(items))
+        self._top_n = len(items) + (1 if items else 0)
+
     def _popup(self, e):
+        self._sync_top_items()
         self._sync_dock_item()
         self.var_topmost.set(bool(self.state["topmost"]))
         self.var_autostart.set(autostart_enabled())
         self.var_skin.set(self.skin.key)
         self.var_theme.set(self.state["theme"])
         self.var_ping.set(bool(self.ping_cfg.get("enabled")))
+        # 트레이에서 바꿨을 수 있다 — 위젯 메뉴 체크도 저장 값에 맞춘다
+        self.var_push.set(bool(self.push_cfg.get("enabled")))
+        self.var_remote.set(bool(self.remote_cfg.get("enabled")))
+        self.var_auto_update.set(bool(self.state.get("auto_update")))
         # 메뉴가 떠 있는 동안에는 위젯을 위로 올리지 않는다 (올리면 메뉴를 덮는다)
         self._menu_open = True
         try:
@@ -1577,6 +1703,11 @@ class App:
                 cmd = self.commands.get_nowait()
             except queue.Empty:
                 break
+            if callable(cmd):  # 트레이 메뉴 항목(`_tk`)
+                cmd()
+                if cmd == self.quit:
+                    return
+                continue
             {
                 "quit": self.quit,
                 "front": self.bring_to_front,
