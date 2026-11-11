@@ -12,7 +12,7 @@ import com.kyijgnes.cooldown.dino.DinoSpec as S
  * `step()` 한 번이 1/60초. 그리는 쪽(`DinoView`)은 흐른 시간만큼 `step` 을 부른다.
  * 폰은 `touch = true` — 새가 두 높이뿐이다(크롬도 휴대폰에선 그렇다. 숙일 단추가 없어서).
  * 크롬에 없는 것(11-11, PC 와 같음): 낮↔밤이 1.5초에 걸쳐 서서히(`nightMix`) · 보호막(`SHIELD`, 땅에 놓인 것은
- * 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 날개(`WING`, 먹으면 `WING_FRAMES` 동안 2단 점프, 공중에서 손을 뗀 뒤 다시 탭).
+ * 달려서·뜬 것은 뛰어서 먹고 한 번 막아 준다) · 날개(`WING`, 먹으면 등에 날개가 붙고 1회용 2단 점프, 공중에서 손을 뗀 뒤 다시 탭).
  */
 class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: Float = S.W) {
 
@@ -55,11 +55,11 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         private set
     private var airJumps = 0       // 이번 점프에서 공중으로 더 뛴 횟수 (2단 점프)
     private var jumpBase = 0f      // 지금 오르기를 시작한 높이 — 높이 제한을 여기서부터 잰다
-    var doubleNote = 0             // '2단 점프' 글자 남은 프레임
-        private set
     /** 판 위 아이템 (보호막·날개) — 한 번에 하나만 */
     val items = ArrayList<Item>()
-    var wings = 0                  // 날개(2단 점프) 남은 프레임
+    var wing = false               // 날개(1회용 2단 점프)를 가졌다
+        private set
+    var flapping = false           // 날개로 뛰는 중 — 내려앉을 때까지 등 날개가 팔락인다
         private set
     var shield = false             // 보호막을 들고 있다
         private set
@@ -106,9 +106,9 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         newBest = false
         airJumps = 0
         jumpBase = 0f
-        doubleNote = 0
         items.clear()
-        wings = 0
+        wing = false
+        flapping = false
         shield = false
         grace = 0
         broke = 0
@@ -126,7 +126,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         when (state) {
             "ready" -> { reset(); jump() }             // 첫 누르기 — 뛰어오르며 출발
             "run" -> if (!jumping && !ducking) jump()
-                else if (jumping && canDouble && airJumps == 0 && !holding) airJump()
+                else if (jumping && wing && airJumps == 0 && !holding) airJump()
             "over" -> if (overT >= S.OVER_WAIT) reset()   // 다시 하기 — 뛰지 않고 그냥 달린다
         }
         holding = true
@@ -168,10 +168,17 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         reachedMin = false
         fastDrop = false
         jumpBase = h
-        vy = S.AIR_JUMP_V
+        wing = false               // 1회용 — 쓰면 사라진다 (내려앉을 때까지는 팔락이며 보인다)
+        flapping = true
+        // ★ 판 위끝까지 남은 높이만큼만 오르게 속도를 줄인다 — 머리를 천장에 박고 뚝 멈추지 않게.
+        //   한 걸음에 h += vy, vy -= g 라 오르는 높이 ≈ v(v+g)/2g. 그게 남은 높이와 같아지는 v.
+        val g = S.GRAVITY
+        val room = maxOf(0f, S.GROUND - S.CEILING - Art.height(S.POSES.getValue("stand")) - h)
+        val fit = (-g + kotlin.math.sqrt(g * g + 8f * g * room)) / 2f
+        vy = maxOf(vy, minOf(S.AIR_JUMP_V, fit))
     }
 
-    val canDouble: Boolean get() = wings > 0
+    val canDouble: Boolean get() = wing
 
     private fun endJump() {
         if (reachedMin && vy > S.DROP_V) vy = S.DROP_V
@@ -186,8 +193,6 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         if (jumping) stepJump()
         if (speed < S.SPEED_MAX) speed = minOf(S.SPEED_MAX, speed + S.ACCEL)
         distance += speed
-        if (doubleNote > 0) doubleNote--
-        if (wings > 0) wings--
         stepObstacles()
         stepItems()
         stepScenery()
@@ -232,6 +237,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
             ducking = down
             airJumps = 0
             jumpBase = 0f
+            flapping = false
         }
     }
 
@@ -287,7 +293,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
         // 아이템 — 이 장애물 뒤 틈 한가운데. 판에 이미 있으면 안 놓고, 가진 것은 고르지 않는다.
         if (items.isEmpty() && score >= S.ITEM_FROM && rng.nextFloat() < S.ITEM_CHANCE) {
             val kinds = S.ITEM_ART.keys.filter {
-                !(it == "shield" && shield) && !(it == "wing" && wings > S.WING_WARN)
+                !(it == "shield" && shield) && !(it == "wing" && wing)
             }
             if (kinds.isNotEmpty()) {
                 val kind = pick(kinds)
@@ -309,8 +315,7 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
                 if (item.kind == "shield") {
                     shield = true
                 } else {
-                    wings = S.WING_FRAMES
-                    doubleNote = S.DOUBLE_NOTE
+                    wing = true
                 }
                 it.remove()
             }
@@ -436,8 +441,13 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
             return maxOf(0f, minOf(1f, into / S.NIGHT_FADE.toFloat(), night / S.NIGHT_FADE.toFloat()))
         }
 
-    /** 날개 표시가 보이나 — 끝나기 `WING_WARN` 전부터 깜빡인다. */
-    val wingShown: Boolean get() = wings > S.WING_WARN || (wings > 0 && (wings / 8) % 2 == 0)
+    /** 등 날개 그림 번호(`WING_ON`) — 없으면 null. 가진 동안은 올림, 날개로 뛰는 동안 팔락인다. */
+    val wingPose: Int?
+        get() {
+            if (state != "run" || pose.startsWith("duck")) return null
+            if (flapping) return 1 - (t / S.FLAP_FRAMES) % 2
+            return if (wing) 1 else null
+        }
 
     /** 막아 준 뒤 안 부딪히는 동안 공룡이 깜빡인다 (보이면 참). */
     val shieldBlink: Boolean get() = grace <= 0 || (grace / 4) % 2 == 0
@@ -445,14 +455,13 @@ class DinoGame(seed: Long? = null, best: Int = 0, touch: Boolean = true, val w: 
     /** 미리보기·테스트용 — 지금 자리에서 곧바로 부딪힌 것으로 한다. */
     fun crashForPreview() { if (state == "run") crash() }
 
-    /** 미리보기·테스트용 — 보호막·날개·밤·2단 점프 글자·점수를 곧바로 그 상태로 둔다. */
+    /** 미리보기·테스트용 — 보호막·날개·밤·점수를 곧바로 그 상태로 둔다. */
     fun setForPreview(
-        shield: Boolean? = null, wings: Int? = null, night: Int? = null, doubleNote: Int? = null, score: Int? = null,
+        shield: Boolean? = null, wing: Boolean? = null, night: Int? = null, score: Int? = null,
     ) {
         if (shield != null) this.shield = shield
-        if (wings != null) this.wings = wings
+        if (wing != null) this.wing = wing
         if (night != null) this.night = night
-        if (doubleNote != null) this.doubleNote = doubleNote
         if (score != null) {
             distance = (score + 0.5f) / S.SCORE_COEF
             flashScore = this.score / S.FLASH_EVERY * S.FLASH_EVERY

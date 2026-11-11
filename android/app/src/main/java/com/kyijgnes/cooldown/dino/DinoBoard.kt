@@ -259,14 +259,15 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
         // 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다
         val pose = g.pose
         if (withDino && g.shieldBlink) {
+            // 날개 — 몸 **뒤에** 먼저 그린다(겹치는 곳은 몸이 덮는다). 가진 동안 등 위로 접혀 있고,
+            //   날개로 뛰는 동안 위아래로 팔락인다.
+            g.wingPose?.let { wp ->
+                val at = S.WING_AT[wp]
+                art(c, S.WING_ON[wp], S.DINO_X + at[0], g.dinoY + at[1], itemColor("wing", p))
+            }
             art(c, S.POSES.getValue(pose), S.DINO_X, g.dinoY, coral)
             val eyes = (if (pose.startsWith("duck")) S.DUCK_EYE else S.DINO_EYE).getValue(g.eye)
             cells(c, eyes, S.DINO_X, g.dinoY, p.bg)
-            // 날개를 가진 동안 — 등에 작은 날개 (뛰는 중엔 팔락인다)
-            if (g.wingShown && !pose.startsWith("duck") && g.state == "run") {
-                val flap = if (g.jumping) (g.t / 6) % 2 else 0
-                art(c, S.WING_ON[flap], S.DINO_X + S.WING_AT[0], g.dinoY + S.WING_AT[1], itemColor("wing", p))
-            }
         }
         // 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
         if (withDino) {
@@ -304,7 +305,7 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
                 art(c, S.SHIELD, x, 21f - Art.height(S.SHIELD) / 2f, p.amber)
                 x -= 6f
             }
-            if (g.wingShown) {
+            if (g.wing) {
                 x -= Art.width(S.WING)
                 art(c, S.WING, x, 21f - Art.height(S.WING) / 2f, itemColor("wing", p))
             }
@@ -315,11 +316,6 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
                 mid.color = p.title
                 mid.typeface = Typeface.DEFAULT_BOLD
                 c.drawText(PAUSED, g.w / 2f, 60f, mid)
-            }
-            g.doubleNote > 0 && g.state == "run" -> {
-                mid.color = itemColor("wing", p)
-                mid.typeface = Typeface.DEFAULT_BOLD
-                c.drawText(DOUBLE_NOTE, g.w / 2f, 60f, mid)
             }
             g.state == "ready" -> {
                 mid.color = p.label
@@ -418,7 +414,6 @@ class DinoBoard(ctx: Context, best: Int, seed: Long? = null) {
         const val INTRO_FRAMES = 36     // 들어오는 장면 (60fps 로 0.6초)
         const val HINT = "눌러서 점프"
         const val PAUSED = "일시 정지 · 눌러서 이어 하기"
-        const val DOUBLE_NOTE = "2단 점프 15초 · 공중에서 한 번 더 누르기"
 
         /** 밤에 쓸 반대 테마 — 지금이 어둡게면 밝게, 밝게면 어둡게. */
         fun flipped(ctx: Context): Context {

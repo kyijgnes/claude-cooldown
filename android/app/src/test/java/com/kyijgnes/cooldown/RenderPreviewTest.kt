@@ -344,7 +344,7 @@ class RenderPreviewTest {
         RuntimeEnvironment.setQualifiers("+notnight")
     }
 
-    /** 보호막은 한 번 막아 주고, 날개를 먹으면 15초 동안 공중에서 한 번 더 오른다. 밤은 서서히 든다. */
+    /** 보호막은 한 번 막아 주고, 날개를 먹으면 공중에서 한 번 더 오른다(1회용). 밤은 서서히 든다. */
     @Test
     fun `공룡 점프 보호막과 날개(2단 점프)`() {
         val S = com.kyijgnes.cooldown.dino.DinoSpec
@@ -375,22 +375,28 @@ class RenderPreviewTest {
         assertTrue("달려서 먹는다", eat.shield)
         assertTrue(eat.items.isEmpty())
 
-        // 날개 — 먹으면 15초 동안 2단 점프, 글자 2초
+        // 날개 — 먹으면 등에 날개가 붙고(올림), 2단 점프를 한 번 쓰면 사라진다
         val wing = com.kyijgnes.cooldown.dino.DinoGame(seed = 2L)
         wing.pressJump(); wing.releaseJump()
         while (wing.jumping) wing.step()
         wing.items.add(com.kyijgnes.cooldown.dino.Item(S.DINO_X + 60f, 0f, "wing"))
         repeat(30) { wing.step() }
         assertTrue("날개를 먹으면 2단 점프", wing.canDouble)
-        assertTrue(wing.doubleNote > 0)
-        assertTrue(wing.wings in (S.WING_FRAMES - 30)..S.WING_FRAMES)
+        assertEquals("가진 동안 등 날개는 올림", 1, wing.wingPose)
+        wing.pressJump(); repeat(10) { wing.step() }
+        wing.releaseJump(); wing.pressJump()
+        assertTrue("쓰면 사라진다", !wing.wing)
+        assertTrue("날개로 뛰는 동안 팔락인다", wing.flapping)
+        wing.releaseJump()
+        while (wing.jumping) wing.step()
+        assertEquals("내려앉으면 등 날개도 없다", null, wing.wingPose)
 
         // 2단 점프 — 날개 없으면 공중에서 눌러도 그대로, 있으면 더 오른다
-        fun peak(wings: Int, again: Boolean): Float {
+        fun peak(withWing: Boolean, again: Boolean): Float {
             val d = com.kyijgnes.cooldown.dino.DinoGame(seed = 5L)
             d.pressJump(); d.releaseJump()
             while (d.jumping) d.step()
-            d.setForPreview(wings = wings)
+            d.setForPreview(wing = withWing)
             d.pressJump()
             repeat(4) { d.step() }            // 짧게 톡 — 낮은 첫 점프
             d.releaseJump()
@@ -400,9 +406,9 @@ class RenderPreviewTest {
             repeat(80) { d.step(); top = maxOf(top, d.h) }
             return top
         }
-        assertEquals("날개 없으면 2단 점프가 없다", peak(0, false), peak(0, true), 0.01f)
-        val one = peak(S.WING_FRAMES, false)
-        val two = peak(S.WING_FRAMES, true)
+        assertEquals("날개 없으면 2단 점프가 없다", peak(false, false), peak(false, true), 0.01f)
+        val one = peak(true, false)
+        val two = peak(true, true)
         assertTrue("날개가 있으면 공중에서 한 번 더 ($one → $two)", two > one + 10f)
         val standH = S.POSES.getValue("stand").size * S.U
         assertTrue("판 위끝을 안 넘는다", two <= S.GROUND - S.CEILING - standH + 0.01f)

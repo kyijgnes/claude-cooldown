@@ -44,11 +44,9 @@ object DinoSpec {
     const val CLOSE_HIT = 30
     const val EGG_SPLIT = 6
     const val NIGHT_FADE = 90
-    const val WING_FRAMES = 900
-    const val WING_WARN = 180
-    const val AIR_JUMP_V = 6.5f
-    const val DOUBLE_NOTE = 120
+    const val AIR_JUMP_V = 8.0f
     const val CEILING = 4.0f
+    const val FLAP_FRAMES = 4
     const val ITEM_CHANCE = 0.14f
     const val ITEM_FROM = 100
     const val SHIELD_GRACE = 40
@@ -61,7 +59,6 @@ object DinoSpec {
     val CLOUD_SKY = intArrayOf(32, 72)
     val CLOSE_AT = intArrayOf(10, 10)
     val ITEM_LIFTS = intArrayOf(0, 44)
-    val WING_AT = intArrayOf(14, 10)
 
     /** 공룡 자세마다의 그림 — 충돌도 이걸로 본다. 눈은 없고 `DINO_EYE` 칸을 파낸다. */
     val POSES = mapOf(
@@ -276,32 +273,48 @@ object DinoSpec {
         "....#....",
     )
 
-    /** 날개 — 먹으면 `WING_FRAMES` 동안 2단 점프. */
+    /** 날개 — 판 위에 놓인 것. 먹으면 1회용 2단 점프(🪽 모양). */
     val WING = arrayOf(
-        "##..........",
-        "####........",
-        ".#####......",
-        ".#######....",
-        "..#########.",
-        "..##########",
-        "...#.#.#.###",
-        "...#.#.#.#..",
+        "..........####..",
+        ".......########.",
+        ".....###########",
+        "...#############",
+        "..##############",
+        ".###############",
+        "################",
+        "###.############",
+        "##..##.#########",
+        "#...#..##.######",
+        "....#..#..#####.",
+        ".......#..#.##..",
+        "..........#.....",
     )
 
-    /** 날개를 가진 동안 공룡 등(`WING_AT`)에 붙는 작은 날개 두 장(올림·내림). */
+    /** 공룡 등에 붙는 날개 두 장 — [0] 내림 · [1] 올림. 몸 뒤에 그린다. */
     val WING_ON = arrayOf(arrayOf(
-            "#.....",
-            "##....",
-            "###...",
-            ".####.",
-            "..####",
+            ".......###.",
+            ".....######",
+            "...########",
+            ".##########",
+            "###########",
+            "##.########",
+            "#..#.######",
+            "...#..#.##.",
+            "......#....",
         ), arrayOf(
-            "......",
-            "......",
-            "..####",
-            ".#####",
-            "###...",
+            "......#....",
+            "...#..#.##.",
+            "#..#.######",
+            "##.########",
+            "###########",
+            ".##########",
+            "...########",
+            ".....######",
+            ".......###.",
         ))
+
+    /** 공룡 그림 왼쪽 위에서 등 날개 그림 왼쪽 위까지 (px) — `WING_ON` 그림마다. */
+    val WING_AT = arrayOf(intArrayOf(-6, 10), intArrayOf(0, -4))
 
     /** 판에 놓이는 아이템 — 종류 → 그림. 놓이는 자리·먹는 법은 같다(`ITEM_LIFTS`). */
     val ITEM_ART = linkedMapOf("shield" to SHIELD, "wing" to WING)
