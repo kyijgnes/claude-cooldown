@@ -16,6 +16,10 @@
   `timeBeginPeriod(1)` 로 눈금을 1ms 로 당긴다(닫으면 되돌린다).
 - **포커스를 잃으면 멈춘다.** 딴 창을 누른 사이 혼자 달리다 부딪혀 있으면 억울하다.
 - 색은 테마(`P`)를 따르고, 밤(700점마다 12초)에는 판만 반대 테마로 뒤집는다(크롬과 같다).
+- **이펙트는 전부 여기 것이다**(규칙은 모른다). 판이 `Game.events` 에 적은 일을 걸음마다 읽어 먼지·파편·
+  바람 줄기·반짝이를 터뜨린다. 알갱이는 `MAX_PARTICLES` 를 넘지 않고(넘으면 오래된 것부터 버린다),
+  캔버스는 매 프레임 통째로 지우므로 남는 도형이 없다. 색은 팔레트 칸 이름으로 들고 있다가 그릴 때 읽어
+  밤으로 넘어가는 중에도 같이 바뀐다. 부딪히면 몇 프레임 **멈췄다가**(`HIT_STOP`) 흔들린다.
 
 혼자 띄워 보기: `python pc/windows/cooldown_dino_view.py [너비]`
 그림으로 남기기: `python pc/windows/cooldown_dino_view.py shot out.png [프레임] [light|dark] [over] [w=460]`
@@ -26,6 +30,7 @@ from __future__ import annotations
 import ctypes
 import math
 import os
+import random
 import sys
 import time
 import tkinter as tk
@@ -43,6 +48,20 @@ STEP = 1.0 / dino.FPS
 MAX_CATCH_UP = 5      # 한 번에 밟는 걸음의 상한 — 창을 끌던 사이 몇 초가 흘러도 순간이동하지 않게
 HINT = "스페이스 · 클릭 점프    ↓ 숙이기"
 PAUSED = "일시 정지 · 눌러서 이어 하기"
+
+# ---------------------------------------------------------------- 이펙트
+MAX_PARTICLES = 72    # 알갱이 상한 — 넘으면 오래된 것부터 버린다
+HIT_STOP = 6          # 부딪힌 순간 이만큼(0.1초) 판이 멎는다. 보호막이 막을 땐 `BREAK_STOP`
+BREAK_STOP = 3
+SHAKE = (22, 6)       # 부딪힘: 흔들리는 프레임 · 처음 폭(px). 폭은 0 으로 줄어든다
+BREAK_SHAKE = (8, 3)
+GAUGE_W = 26          # 공룡 머리 위 활공 게이지 너비 (px)
+OVER_TEXT = "GAME OVER"
+# 색 — 팔레트 칸 이름 하나, 또는 (칸, 칸, 섞는 정도). 새 색은 두지 않고 있는 칸을 섞어 쓴다.
+C_DUST = ("label", "bg", 0.15)     # 먼지
+C_WIND = ("title", "bg", 0.6)      # 바람 줄기
+C_GROOVE = ("title", "bg", 0.5)    # 깃털 사이 결
+C_FLASH = ("bg", "title", 0.14)    # 부딪힌 순간 판 바탕
 
 
 def _blend(a: str, b: str, t: float) -> str:
@@ -86,6 +105,19 @@ class DinoBoard:
         self._fine_timer = False
         self._close_hot = False   # ✕ 위에 마우스가 있다 (밝게 그린다)
         self._hi_w = tkfont.Font(font=(NUM, 11)).measure("HI 00000")  # 보호막 표시를 그 왼쪽에
+        # 이펙트 — 알갱이: [종류, x, y, vx, vy, 남은, 처음, 크기, 색, 중력]
+        self._rng = random.Random(seed)
+        self._parts: list[list] = []
+        self._fx_t = 0            # 이펙트 걸음 수 (판이 멎은 동안은 안 흐른다)
+        self._freeze = 0          # 판이 멎어 있을 남은 프레임
+        self._flash = 0           # 부딪힌 번쩍임 남은 프레임
+        self._flash_at = (0.0, 0.0)
+        self._shake = (0, 0, 0)   # 남은 · 전체 · 폭
+        self._over_k = 0          # 부딪히고(멎은 뒤) 흐른 프레임 — 글자가 떨어지는 박자
+        self._pop = 0             # 점수 이정표에서 숫자가 커져 있을 남은 프레임
+        stars = random.Random(width)
+        self._stars = [(stars.randrange(8, max(9, width - 8)), stars.randrange(30, 84), stars.randrange(40))
+                       for _ in range(max(6, width // 50))]
         self._bind()
         self._timer_fine(True)
         self.c.bind("<Destroy>", lambda e: self.close() if e.widget is self.c else None)
@@ -207,7 +239,7 @@ class DinoBoard:
         else:
             n = 0
             while self._acc >= STEP and n < MAX_CATCH_UP:
-                g.step()
+                self._tick()
                 self._acc -= STEP
                 n += 1
             if n == MAX_CATCH_UP:
@@ -223,6 +255,180 @@ class DinoBoard:
         except tk.TclError:   # 판이 치워졌다
             self.close()
 
+    # -------------------------------------------------- 이펙트
+    def _tick(self) -> None:
+        """한 걸음(1/60초) — 판을 밟고, 일어난 일로 이펙트를 터뜨리고, 알갱이를 한 박자 옮긴다."""
+        g = self.game
+        if self._flash > 0:
+            self._flash -= 1
+        if self._freeze > 0:          # 부딪힌 순간 — 판도 알갱이도 멎는다
+            self._freeze -= 1
+            return
+        was = g.state
+        g.step()
+        if g.state == "run" and (was != "run" or g.run_t <= 1):   # 새 판 — 지난 판의 것을 치운다
+            self._parts.clear()
+            self._shake = (0, 0, 0)
+            self._over_k = 0
+        events, g.events[:] = list(g.events), []
+        for ev in events:
+            self._on_event(*ev)
+        self._fx_step()
+
+    def _spawn(self, kind, x, y, vx, vy, life, size, color, grav=0.0) -> None:
+        self._parts.append([kind, x, y, vx, vy, life, life, size, color, grav])
+        if len(self._parts) > MAX_PARTICLES:
+            del self._parts[:len(self._parts) - MAX_PARTICLES]
+
+    def _dust(self, n: int, power: float, back: bool = False) -> None:
+        """발밑 먼지 — `back` 이면 뒤로만(박차고 뛸 때), 아니면 양옆으로(내려앉을 때)."""
+        r = self._rng
+        feet = dino.DINO_X + 16
+        for _ in range(n):
+            side = -1 if back or r.random() < 0.6 else 1
+            self._spawn("sq", feet + side * r.uniform(2, 12), dino.GROUND - 4,
+                        side * r.uniform(0.8, 1.6 + power * 2) - (0.6 if back else 0),
+                        -r.uniform(0.2, 0.6 + power * 0.8), r.randint(14, 24), 4, C_DUST, 0.03)
+
+    def _stars_at(self, x, y, n: int, color, speed: float = 2.2) -> None:
+        r = self._rng
+        for i in range(n):
+            a = 2 * math.pi * (i + r.uniform(-0.2, 0.2)) / n
+            v = speed * r.uniform(0.7, 1.2)
+            self._spawn("star", x, y, v * math.cos(a), v * math.sin(a), r.randint(14, 22), 2, color)
+
+    def _feathers(self, x, y, n: int) -> None:
+        r = self._rng
+        for _ in range(n):
+            self._spawn("feather", x + r.uniform(-12, 8), y + r.uniform(-8, 6), -r.uniform(0.4, 1.8),
+                        -r.uniform(0.0, 1.2), r.randint(36, 56), 4, "title", 0.035)
+
+    def _debris(self, ob, n: int, near=None) -> None:
+        """장애물 도트가 조각나 튄다 — `near` 가 있으면 그 둘레 칸만(부딪힌 자리), 없으면 통째로."""
+        r = self._rng
+        cells = list(ob.hit_runs())
+        if near is not None:
+            cells.sort(key=lambda c: (c[0] + c[2] / 2 - near[0]) ** 2 + (c[1] - near[1]) ** 2)
+            cells = cells[:n]
+        elif len(cells) > n:
+            cells = r.sample(cells, n)
+        color = "label" if ob.kind == "bird" else "green"
+        for x, y, w, _h in cells:
+            self._spawn("sq", x + w / 2, y, r.uniform(-1.0, 4.5), -r.uniform(1.0, 5.0),
+                        r.randint(28, 46), r.choice((2, 4, 4)), color, 0.4)
+
+    def _on_event(self, name, *a) -> None:
+        g, r = self.game, self._rng
+        if name == "jump":
+            self._dust(3, 0.6, back=True)
+        elif name == "land":           # 세게 떨어질수록 먼지가 많다 — 활공으로 내려앉으면 살짝만
+            power = min(1.0, a[0] / 12)
+            self._dust(3 + round(power * 7), power)
+        elif name == "glide":          # 날개를 편 순간 — 바람이 한 번 훅
+            for _ in range(4):
+                self._wind(burst=True)
+        elif name == "wing_out":
+            self._feathers(a[0], a[1], 6)
+        elif name == "item":
+            kind, x, y = a
+            self._stars_at(x, y, 7, "amber" if kind == "shield" else "title")
+        elif name == "score":
+            self._pop = 12
+            self._stars_at(self.w - 34, 22, 5, "sub", 1.6)
+        elif name == "break":          # 보호막이 막았다 — 장애물이 통째로 부서진다
+            ob = a[0]
+            self._debris(ob, 20)
+            self._stars_at(ob.x + ob.w / 2, ob.y + ob.h / 2, 6, "amber", 3.0)
+            self._freeze = BREAK_STOP
+            self._shake = (BREAK_SHAKE[0], *BREAK_SHAKE)
+        elif name == "crash":
+            ob, x, y = a
+            self._debris(ob, 14, near=(x, y))
+            for _ in range(6):         # 공룡 쪽으로도 코랄 조각이 튄다
+                self._spawn("sq", x, y, -r.uniform(0.5, 3.5), -r.uniform(0.5, 4.0), r.randint(20, 34), 2,
+                            "mascot", 0.35)
+            if g.wing:
+                self._feathers(dino.DINO_X + 10, g.dino_y + 16, 5)
+            if g.new_best:
+                self._stars_at(self.w - 70 - self._hi_w / 2, 22, 8, "amber", 2.0)
+            self._freeze = HIT_STOP
+            self._flash = HIT_STOP + 3
+            self._flash_at = (x, y)
+            self._shake = (SHAKE[0], *SHAKE)
+
+    def _wind(self, burst: bool = False) -> None:
+        g, r = self.game, self._rng
+        self._spawn("line", dino.DINO_X + r.uniform(-14, 34), g.dino_y + r.uniform(2, 34),
+                    -(g.speed * 0.8 + r.uniform(2, 5) + (3 if burst else 0)), 0.0, r.randint(10, 18),
+                    r.choice((8, 12, 16, 22)), C_WIND)
+
+    def _fx_step(self) -> None:
+        g, r = self.game, self._rng
+        self._fx_t += 1
+        t = self._fx_t
+        if self._pop > 0:
+            self._pop -= 1
+        if self._shake[0] > 0:
+            self._shake = (self._shake[0] - 1, *self._shake[1:])
+        self._over_k = self._over_k + 1 if g.state == "over" else 0
+        if g.state == "run":
+            if g.gliding:
+                if t % 3 == 0:
+                    self._wind()
+                if t % 2 == 0:         # 깃털 끝에서 흘러나오는 자국
+                    self._spawn("sq", dino.DINO_X - 18, g.dino_y + 16 + r.choice((0, 2)), -g.speed * 0.6, 0.1,
+                                r.randint(8, 12), 2, C_GROOVE)
+                if g.glide_left < dino.GLIDE_LOW and t % 9 == 0:   # 얼마 안 남았다 — 깃털이 빠진다
+                    self._feathers(dino.DINO_X - 4, g.dino_y + 18, 1)
+            elif not g.jumping and t % 7 == 0:                     # 달리는 발끝의 흙
+                self._spawn("sq", dino.DINO_X + r.uniform(6, 14), dino.GROUND - 2, -r.uniform(1.0, 2.4),
+                            -r.uniform(0.3, 1.1), r.randint(8, 13), 2, C_DUST, 0.06)
+        keep = []
+        for p in self._parts:
+            p[1] += p[3]
+            p[2] += p[4]
+            p[4] += p[9]
+            p[5] -= 1
+            if p[0] == "sq" and p[9] > 0.2 and p[2] > dino.GROUND - p[7]:   # 파편은 땅에서 한 번 튄다
+                p[2] = dino.GROUND - p[7]
+                p[4] *= -0.35
+                p[3] *= 0.6
+            elif p[0] == "feather":
+                p[4] = min(p[4], 0.55)                 # 깃털은 천천히 내려앉는다
+                if p[2] > dino.GROUND - 3:
+                    p[2], p[3], p[4] = dino.GROUND - 3, p[3] * 0.8, 0.0
+            if p[5] > 0 and -30 < p[1] < self.w + 30:
+                keep.append(p)
+        self._parts = keep
+
+    def _draw_parts(self, col, lines: bool) -> None:
+        """알갱이 — 바람 줄기(`lines`)는 공룡 **뒤에**, 나머지는 앞에 그리려고 두 번에 나눠 부른다."""
+        c, u = self.c, dino.U
+        for kind, x, y, _vx, _vy, life, life0, sz, color, _g in self._parts:
+            if (kind == "line") != lines:
+                continue
+            fill = col(color)
+            old = life * 2 < life0          # 수명 절반을 넘기면 작아진다
+            if kind == "sq":
+                s = u if old else sz
+                bx, by = round(x / u) * u, round(y / u) * u
+                c.create_rectangle(bx, by, bx + s, by + s, fill=fill, width=0)
+            elif kind == "line":
+                n = sz * life / life0
+                c.create_rectangle(x, round(y), x + n, round(y) + 1, fill=fill, width=0)
+            elif kind == "star":            # 네 방향 반짝이 — 늙으면 가운데 점만
+                bx, by = round(x / u) * u, round(y / u) * u
+                if old:
+                    c.create_rectangle(bx, by, bx + u, by + u, fill=fill, width=0)
+                else:
+                    c.create_rectangle(bx - u, by, bx + 2 * u, by + u, fill=fill, width=0)
+                    c.create_rectangle(bx, by - u, bx + u, by + 2 * u, fill=fill, width=0)
+            else:                           # 깃털 — 좌우로 살랑이며 떨어진다
+                bx = round((x + 3 * math.sin((life + sz) * 0.22)) / u) * u
+                by = round(y / u) * u
+                c.create_rectangle(bx, by, bx + 2 * u, by + u, fill=fill, width=0)
+                c.create_rectangle(bx + 2 * u, by - u, bx + 3 * u, by, fill=fill, width=0)
+
     # -------------------------------------------------- 그리기
     def _colors(self):
         """판에 쓸 색 한 벌 — 지금 테마(`P`), 밤이면 반대 테마. 바뀔 때는 두 벌을 섞어 서서히."""
@@ -237,14 +443,33 @@ class DinoBoard:
     def draw(self) -> None:
         c, g, w = self.c, self.game, self.w
         pal = self._colors()
-        if c.cget("bg") != pal.bg:
-            c.configure(bg=pal.bg)
+        cache: dict = {}
+
+        def col(spec) -> str:
+            """색 — 팔레트 칸 이름, 또는 (칸, 칸, 섞는 정도). 한 프레임 안에서는 한 번만 계산한다."""
+            got = cache.get(spec)
+            if got is None:
+                got = cache[spec] = (getattr(pal, spec) if isinstance(spec, str)
+                                     else _blend(getattr(pal, spec[0]), getattr(pal, spec[1]), spec[2]))
+            return got
+
+        flash = self._flash > 0 and g.state == "over"
+        bg = col(C_FLASH) if flash else pal.bg
+        if c.cget("bg") != bg:
+            c.configure(bg=bg)
         c.delete("all")
+        # 밤하늘 별 — 밤이 든 만큼만 떠오르고, 제각기 깜빡인다
+        mix = g.night_mix
+        if mix > 0:
+            star = _blend(pal.bg, pal.title, 0.55 * mix)
+            for x, y, phase in self._stars:
+                if (g.t // 20 + phase) % 5:
+                    c.create_rectangle(x, y, x + 2, y + 2, fill=star, width=0)
         # 구름 — 판보다 흐리게, 제일 뒤에
         for x, y in g.clouds:
             self._art(dino.CLOUD, x, y, pal.track)
-        # 땅 — 선 하나와 흘러가는 자갈
-        c.create_rectangle(0, dino.GROUND - 1, w, dino.GROUND, fill=pal.label, width=0)
+        # 땅 — 선 하나와 흘러가는 자갈 (흔들릴 때 끝이 안 비게 양옆으로 넉넉히)
+        c.create_rectangle(-10, dino.GROUND - 1, w + 10, dino.GROUND, fill=pal.label, width=0)
         for x, depth, pw in g.pebbles:
             xi = round(x)
             c.create_rectangle(xi, dino.GROUND + depth, xi + pw, dino.GROUND + depth + 1,
@@ -255,45 +480,74 @@ class DinoBoard:
             for art, x, y, flip in ob.parts():
                 self._art(art, x, y, color, flip)
                 if ob.kind == "bird":
-                    col, row = dino.BIRD_EYE[ob.frame % 2]
-                    self._cells(((col, row),), x, y, pal.bg)
-        # 보호막 — 판 위에 놓인 것
+                    ex, ey = dino.BIRD_EYE[ob.frame % 2]
+                    self._cells(((ex, ey),), x, y, bg)
+        # 아이템 — 판 위에 놓인 것. 눈에 띄게 위아래로 살짝 떠 있는다.
         sw, sh = dino.size(dino.SHIELD)
         for x, lift, kind in g.items:
             art = dino.ITEM_ART[kind]
-            self._art(art, x, dino.GROUND - lift - dino.size(art)[1], self._item_color(kind, pal))
-        # 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다
+            y = dino.GROUND - lift - dino.size(art)[1] - (2 if lift and (g.t // 16) % 2 else 0)
+            self._art(art, x, y, self._item_color(kind, pal))
+            if kind == "wing":
+                self._art(dino.WING_GROOVE, x, y, col(C_GROOVE))
+        self._draw_parts(col, lines=True)
+        # 공룡 — 막아 준 뒤 안 부딪히는 동안은 깜빡인다. 부딪히면 뒤로 움찔한다.
         pose = g.pose
+        dx, dy = dino.DINO_X, g.dino_y
+        if g.state == "over" and self._freeze <= 0:
+            k = self._over_k
+            dx -= round(4 * min(1.0, k / 5))
+            if k < 14 and g.h <= 0:
+                dy -= round(5 * math.sin(math.pi * k / 14))
         if g.shield_blink:
-            # 날개 — 몸 **뒤에** 먼저 그린다(겹치는 곳은 몸이 덮는다). 가진 동안 등 위로 접혀 있고,
-            #   날개로 뛰는 동안 위아래로 팔락인다.
+            self._art(dino.POSES[pose], dx, dy, pal.title if flash and self._flash > 3 else P.mascot)
+            eyes = (dino.DUCK_EYE if pose.startswith("duck") else dino.DINO_EYE)[g.eye]
+            self._cells(eyes, dx, dy, bg)
+            # 날개 — 몸 **앞에**. 달릴 땐 접고, 뛰어오르며 퍼덕이고, 활공 중엔 펼친 채 살짝 일렁인다.
+            #   활공이 얼마 안 남으면 깃털이 흐려졌다 돌아왔다 한다.
             wp = g.wing_pose
             if wp is not None:
-                wx, wy = dino.WING_AT[wp]
-                self._art(dino.WING_ON[wp], dino.DINO_X + wx, g.dino_y + wy,
-                          self._item_color("wing", pal))
-            self._art(dino.POSES[pose], dino.DINO_X, g.dino_y, P.mascot)
-            eyes = (dino.DUCK_EYE if pose.startswith("duck") else dino.DINO_EYE)[g.eye]
-            self._cells(eyes, dino.DINO_X, g.dino_y, pal.bg)
+                rows, groove, (wx, wy) = dino.WING_BACK[wp]
+                if g.gliding:
+                    wy += round(math.sin(g.t * 0.3))
+                low = g.gliding and g.glide_left < dino.GLIDE_LOW and (g.t // 4) % 2
+                self._art(rows, dx + wx, dy + wy, col(C_GROOVE) if low else pal.title)
+                if not low:
+                    self._art(groove, dx + wx, dy + wy, col(C_GROOVE))
+        self._draw_parts(col, lines=False)
         # 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
         dw, dh = dino.size(dino.POSES[pose])
-        cx, cy = dino.DINO_X + dw / 2, g.dino_y + dh / 2 - 3   # 고리 아래끝이 땅 줄에 걸치게 조금 위로
+        cx, cy = dx + dw / 2, dy + dh / 2 - 3   # 고리 아래끝이 땅 줄에 걸치게 조금 위로
         if g.shield and g.state != "over":
             self._ring(cx, cy, dino.SHIELD_RING_R, pal.amber, g.t // 3)
         elif g.broke > 0:
             grow = (dino.SHIELD_GRACE - g.broke) * 1.2
             if (g.broke // 3) % 2 == 0:
                 self._ring(cx, cy, dino.SHIELD_RING_R + grow, pal.amber, 0)
+        # 부딪힌 자리 — 여덟 방향으로 터지는 섬광 (판이 멎어 있는 동안)
+        if flash:
+            self._burst(*self._flash_at, HIT_STOP + 3 - self._flash, pal.title)
+        # 활공 게이지 — 날개를 달고 떠 있는 동안 머리 위에. 얼마 안 남으면 빨갛게 깜빡인다.
+        if g.wing and g.jumping and g.state == "run":
+            self._gauge(dx + 8, dy - 9, GAUGE_W, g.glide_left, pal)
+        # 흔들기 — 여기까지 그린 것(판)만. 점수·단추는 가만히 둔다.
+        left, total, amp = self._shake
+        if left > 0 and self._freeze <= 0:
+            a = amp * left / total
+            c.move("all", round(self._rng.uniform(-a, a)), round(self._rng.uniform(-a, a) * 0.6))
         # 닫기 ✕ — 왼쪽 위 구석
         self._art(dino.CLOSE, *dino.CLOSE_AT, pal.title if self._close_hot else pal.faint)
-        # 점수 — 오른쪽 위 (HI 최고 · 지금)
+        # 점수 — 오른쪽 위 (HI 최고 · 지금). 100점을 넘는 순간 숫자가 한 번 커진다.
         text = f"{g.shown_score:05d}" if g.score_visible else ""
-        c.create_text(w - 12, 14, text=text, anchor="ne", fill=pal.sub,
-                      font=(NUM, 11, "bold"))
+        pop = self._pop
+        c.create_text(w - 12, 14 - (2 if pop > 6 else 0), text=text, anchor="ne",
+                      fill=pal.title if pop else pal.sub,
+                      font=(NUM, 13 if pop > 6 else 12 if pop else 11, "bold"))
         if g.best > 0 or g.state == "over":
             c.create_text(w - 70, 14, text=f"HI {g.best:05d}", anchor="ne",
-                          fill=pal.label, font=(NUM, 11))
-        # 들고 있는 보호막 — 점수 왼쪽에 작은 표시
+                          fill=pal.amber if g.new_best and g.state == "over" else pal.label,
+                          font=(NUM, 11, "bold" if g.new_best and g.state == "over" else "normal"))
+        # 들고 있는 것 — 점수 왼쪽에 작은 표시. 날개 밑에는 남은 활공.
         if g.state == "run":
             hi = self._hi_w if g.best > 0 else 0
             x = w - 70 - hi - 10
@@ -302,17 +556,31 @@ class DinoBoard:
                 self._art(dino.SHIELD, x, 7, pal.amber)
                 x -= 6
             if g.wing:
-                x -= dino.size(dino.WING)[0]
-                self._art(dino.WING, x, 4, self._item_color("wing", pal))
+                ww, wh = dino.size(dino.WING)
+                x -= ww
+                self._art(dino.WING, x, 3, self._item_color("wing", pal))
+                self._art(dino.WING_GROOVE, x, 3, col(C_GROOVE))
+                self._gauge(x, 3 + wh + 2, ww, g.glide_left, pal)
         if self.paused:
             c.create_text(w / 2, 56, text=PAUSED, fill=pal.title, font=(KR, 10, "bold"))
         elif g.state == "ready":
             c.create_text(w / 2, 56, text=HINT, fill=pal.label, font=(KR, 9))
-        elif g.state == "over":
-            c.create_text(w / 2, 50, text="G A M E   O V E R", fill=pal.title,
-                          font=(NUM, 12, "bold"))
+        elif g.state == "over" and self._freeze <= 0:
+            # 글자가 하나씩 떨어져 내려앉고, 다시 누를 수 있게 되면 화살표가 켜진다
+            k = self._over_k
+            step_x = 15
+            x0 = w / 2 - step_x * (len(OVER_TEXT) - 1) / 2
+            for i, ch in enumerate(OVER_TEXT):
+                at = k - i * 2
+                if ch == " " or at < 0:
+                    continue
+                drop = -16 * (1 - min(1.0, at / 6)) ** 2 + (2 if 6 <= at < 9 else 0)
+                c.create_text(x0 + i * step_x, 50 + round(drop), text=ch, fill=pal.title,
+                              font=(NUM, 12, "bold"))
             rw, _ = dino.size(dino.RESTART)
-            self._art(dino.RESTART, w / 2 - rw / 2, 68, pal.title)
+            ready = g.over_t >= dino.OVER_WAIT
+            lift = 2 if ready and g.over_t < dino.OVER_WAIT + 5 else 0
+            self._art(dino.RESTART, w / 2 - rw / 2, 68 - lift, pal.title if ready else pal.line)
 
     def _art(self, rows, x, y, color, flip=False) -> None:
         """도트 그림 한 장 — 줄마다 이어진 칸을 한 덩이로. 칸이 정수 픽셀에 맞게 한 번만 반올림."""
@@ -325,6 +593,29 @@ class DinoBoard:
     def _item_color(kind: str, pal) -> str:
         """보호막은 금색, 날개는 글자색. 선인장 초록과 안 헷갈리게."""
         return pal.amber if kind == "shield" else pal.title
+
+    def _gauge(self, x, y, width, left: float, pal) -> None:
+        """남은 활공 막대 — 빈 칸 위에 남은 만큼. `GLIDE_LOW` 아래면 빨갛게 깜빡인다."""
+        x, y = round(x), round(y)
+        self.c.create_rectangle(x, y, x + width, y + 3, fill=pal.gauge, width=0)
+        low = left < dino.GLIDE_LOW
+        if left > 0 and not (low and (self.game.t // 5) % 2):
+            fill = max(2, round(width * left))
+            self.c.create_rectangle(x, y, x + fill, y + 3, fill=pal.red if low else pal.title, width=0)
+
+    def _burst(self, cx, cy, k: int, color) -> None:
+        """부딪힌 자리의 섬광 — 가운데 덩이와 여덟 방향 점이 프레임마다 밖으로 번진다."""
+        u = dino.U
+        bx, by = round(cx / u) * u, round(cy / u) * u
+        if k < 4:
+            self.c.create_rectangle(bx - 2 * u, by - u, bx + 2 * u, by + u, fill=color, width=0)
+            self.c.create_rectangle(bx - u, by - 2 * u, bx + u, by + 2 * u, fill=color, width=0)
+        for i in range(8):
+            a = math.pi * i / 4
+            for r in (8 + k * 3, 14 + k * 4):
+                x = round((cx + r * math.cos(a)) / u) * u
+                y = round((cy + r * 0.8 * math.sin(a)) / u) * u
+                self.c.create_rectangle(x, y, x + u, y + u, fill=color, width=0)
 
     def _ring(self, cx, cy, r, color, turn: int) -> None:
         """도트 점선 고리 — 반지름 r, `turn` 만큼 돌려서(돌아가 보이게)."""
