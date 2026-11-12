@@ -73,7 +73,11 @@ def _trim(im, key):
 
 def main() -> None:
     key, mode, out = sys.argv[1], sys.argv[2], sys.argv[3]
-    set_palette(sys.argv[4] if len(sys.argv) > 4 else "auto")
+    # 넷째 인자는 테마(light/dark/auto) 아니면 note 문구다. 둘 다 줄 때는 테마를 다섯째에.
+    extra = sys.argv[4:]
+    theme = next((a for a in extra if a in ("light", "dark", "auto")), "auto")
+    words = [a for a in extra if a not in ("light", "dark", "auto")]
+    set_palette(theme)
 
     skin = skins.make(key)
     if skin.key != key:
@@ -95,12 +99,12 @@ def main() -> None:
         # 값은 멀쩡한데 알릴 것이 있는 상태 — 앱이 show() 바로 뒤에 notice() 를 부른다
         # 넷째 인자로 문구를 넘기면 그걸 쓴다 (새 알림 문구의 폭을 재 볼 때)
         skin.show(demo(), STAMP)
-        skin.notice(sys.argv[4] if len(sys.argv) > 4 else "20:03 핑 실패")
+        skin.notice(words[0] if words else "20:03 시작 실패")
     elif mode == "net":
         skin.show(demo(), STAMP)
         skin.show_error("연결 실패", True, STAMP)
     else:
-        skin.show_error("눌러서 다시 연결", False, STAMP)
+        skin.show_error(words[0] if words else "눌러서 다시 연결", False, STAMP)
 
     root.overrideredirect(True)
     root.update_idletasks()

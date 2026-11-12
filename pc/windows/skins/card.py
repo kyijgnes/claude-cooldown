@@ -1,6 +1,6 @@
 """
 카드형 — 여백을 두고 숫자를 크게 앞세운 기본 모양.
-위계: 숫자(24pt) > 남은시간(10pt) > 항목 이름(8pt). 게이지는 3px 선으로 절제.
+위계: 숫자(24pt) > 남은시간(10pt) > 항목 이름(9pt). 게이지는 3px 선으로 절제.
 
 주간 줄에는 '지금쯤 29% · 알맞음' 이 오른쪽에 붙고, 게이지의 그 자리에 눈금이 선다.
 """
@@ -32,15 +32,15 @@ class Section:
 
         head = tk.Frame(box, bg=P.bg)
         head.pack(fill="x")
-        tk.Label(head, text=label, bg=P.bg, fg=P.label, font=(KR, 8), anchor="w").pack(
+        tk.Label(head, text=label, bg=P.bg, fg=P.label, font=(KR, 9), anchor="w").pack(
             side="left"
         )
         # 속도 자리 — 주간에만 둔다. 5시간 창은 앞쪽에 몰아 쓰는 게 정상이라 뜻이 없다.
         self.verdict = self.due = None
         if hint:
-            self.verdict = tk.Label(head, text="", bg=P.bg, fg=P.faint, font=(KR, 8))
+            self.verdict = tk.Label(head, text="", bg=P.bg, fg=P.faint, font=(KR, 9))
             self.verdict.pack(side="right")
-            self.due = tk.Label(head, text="", bg=P.bg, fg=P.label, font=(KR, 8))
+            self.due = tk.Label(head, text="", bg=P.bg, fg=P.label, font=(KR, 9))
             self.due.pack(side="right", padx=(0, 7))
 
         row = tk.Frame(box, bg=P.bg)
@@ -50,7 +50,7 @@ class Section:
         self.left = tk.Label(row, text="", bg=P.bg, fg=P.sub, font=(KR, 10))
         self.left.pack(side="right", anchor="s", pady=(0, 9))
 
-        # 바탕은 P.bg 다 — 게이지 띠(P.track)는 안에 직접 그린다. 눈금이 띠 위아래로
+        # 바탕은 P.bg 다 — 게이지 띠(P.gauge)는 안에 직접 그린다. 눈금이 띠 위아래로
         # 조금 삐져나와야 채워진 색 위에서도 눈에 걸린다.
         self.bar = tk.Canvas(
             box, height=BAR_BOX, width=inner, bg=P.bg, highlightthickness=0, bd=0
@@ -83,7 +83,7 @@ class Section:
         measured = self.bar.winfo_width()
         width = measured if measured > 1 else self.inner
         y0, y1 = BAR_TOP, BAR_TOP + BAR_H
-        self.bar.create_rectangle(0, y0, width, y1, fill=P.track, width=0)
+        self.bar.create_rectangle(0, y0, width, y1, fill=P.gauge, width=0)
         if pct is not None:
             self.bar.create_rectangle(0, y0, width * pct / 100, y1, fill=color, width=0)
         mark_due = p.due if p is not None else due
@@ -108,18 +108,23 @@ class CardSkin(Skin):
         self.head_pad = tk.Frame(self.head, bg=P.bg)
         self.head_pad.pack(fill="x", padx=(PAD - 3, PAD), pady=(15, 9))
         self.title = tk.Label(
-            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold")
+            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold"),
+            padx=0,
         )
         self.title.pack(side="left")
+        # 기준 시각을 클로디보다 먼저 싼다. 오류 문구가 길어 머리말이 모자라면 시각이 아니라
+        # 클로디 칸이 좁아진다(`눌러서 다시 연결 · 03:07 기준` 까지는 둘 다 다 들어간다).
+        self.stamp = tk.Label(
+            self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 9), padx=0
+        )
+        self.stamp.pack(side="right")
         # 클로디 — 제목 옆 빈자리에서 논다. 축하 폭죽도 이 칸 안에서만 터진다.
         self.pet = tk.Canvas(
             self.head_pad, width=CLAUDI_W, height=CLAUDI_H, bg=P.bg,
             highlightthickness=0, bd=0,
         )
-        self.pet.pack(side="left", padx=(10, 0))
+        self.pet.pack(side="left", padx=(6, 0))
         self.claudi = Claudi(self.pet, (0, 0, CLAUDI_W, CLAUDI_H), leave=False)
-        self.stamp = tk.Label(self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 8))
-        self.stamp.pack(side="right")
         self.claudi.start()
 
         self.five = Section(parent, "5시간 한도", inner)
@@ -130,11 +135,11 @@ class CardSkin(Skin):
 
         foot = tk.Frame(parent, bg=P.bg)
         foot.pack(fill="x", padx=PAD, pady=(9, 15))
-        self.foot_label = tk.Label(foot, text="", bg=P.bg, fg=P.label, font=(KR, 8))
+        self.foot_label = tk.Label(foot, text="", bg=P.bg, fg=P.label, font=(KR, 9))
         self.foot_label.pack(side="left")
         self.foot_value = tk.Label(foot, text="", bg=P.bg, fg=P.sub, font=(KR, 9))
         self.foot_value.pack(side="left", padx=(7, 0))
-        self.note = tk.Label(foot, text="불러오는 중", bg=P.bg, fg=P.faint, font=(KR, 8))
+        self.note = tk.Label(foot, text="불러오는 중", bg=P.bg, fg=P.faint, font=(KR, 9))
         self.note.pack(side="right")
 
     # -------------------------------------------------- 클로디 (놀이는 claudi.py 에)
@@ -181,7 +186,7 @@ class CardSkin(Skin):
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
         self._head_error(text)
         if not keep_values:
-            self.stamp.config(text=stamp)
+            self.stamp.config(text=f"{stamp} 기준")
             self.five.set(None, "")
             self.week.set(None, "")
             self.foot_label.config(text="")

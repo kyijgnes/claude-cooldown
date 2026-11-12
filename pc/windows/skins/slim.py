@@ -185,7 +185,7 @@ class Cell:
             self.c.create_rectangle(
                 x + i * pitch, skin.bar_y,
                 x + i * pitch + seg_w, skin.bar_y + skin.bar_h,
-                fill=P.track, width=0,
+                fill=P.gauge, width=0,
             )
             for i in range(count)
         ]
@@ -215,7 +215,7 @@ class Cell:
         n = len(self.segs)
         filled = 0 if not pct else max(1, min(n, int(pct * n / 100)))
         for i, seg in enumerate(self.segs):
-            self.c.itemconfigure(seg, fill=color if i < filled else P.track)
+            self.c.itemconfigure(seg, fill=color if i < filled else P.gauge)
 
         if due is None:
             self.c.itemconfigure(self.mark, state="hidden")

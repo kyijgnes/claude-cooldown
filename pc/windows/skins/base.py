@@ -35,13 +35,15 @@ DARK = Palette(
     label="#8b949e",  # 5.8:1
     sub="#c2cad4",
     faint="#7d8590",  # 4.8:1
-    track="#252a32",
+    track="#252a32",  # 메인 화면 탭 바탕 등 면 색. 게이지 빈 칸은 gauge 를 쓴다
+    gauge="#323844",  # 게이지 빈 칸. 바탕 1.5:1, 채운 초록과 4.6:1 · 빨강과 3.9:1
     line="#232830",
     green="#3fb950",
     amber="#e3b341",
     red="#ff5c61",
     red_bg="#2b1418",
     red_dim="#a67c83",  # red_bg 대비 4.8:1
+    mascot="#d97757",  # 클로디 코랄. 바탕 5.7:1
     icon_text="#0d1117",  # 트레이 아이콘 숫자 (밝은 바탕 위)
 )
 
@@ -51,13 +53,15 @@ LIGHT = Palette(
     label="#57606a",  # 5.0:1
     sub="#2f3742",
     faint="#616a75",  # 4.6:1
-    track="#dce1e7",
+    track="#dce1e7",  # 메인 화면 탭 바탕 등 면 색. 게이지 빈 칸은 gauge 를 쓴다
+    gauge="#c9d0d8",  # 게이지 빈 칸. 바탕 1.4:1, 채운 초록과 3.3:1 · 빨강과 3.4:1
     line="#e3e8ed",
     green="#1a7f37",
     amber="#8a6100",
     red="#cf222e",
-    red_bg="#ffebe9",
-    red_dim="#8a5a5f",  # red_bg 대비 4.9:1
+    red_bg="#fff1ef",  # 위 초록 4.6 · 빨강 4.9 · faint 5.0:1
+    red_dim="#8a5a5f",  # red_bg 대비 5.2:1
+    mascot="#c4603f",  # 클로디 코랄을 밝은 바탕용으로 진하게. 바탕 3.8 · red_bg 3.8:1
     icon_text="#ffffff",  # 어두운 바탕 위
 )
 

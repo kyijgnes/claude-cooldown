@@ -83,9 +83,9 @@ def _ring(pct: float | None, due: float | None = None):
     ro = R_OUT * SS
     box = (c - ro, c - ro, c + ro, c + ro)
 
-    d.arc(box, START, START + SWEEP, fill=P.track, width=int(w))
-    _cap(d, c, r, START, w, P.track)
-    _cap(d, c, r, START + SWEEP, w, P.track)
+    d.arc(box, START, START + SWEEP, fill=P.gauge, width=int(w))
+    _cap(d, c, r, START, w, P.gauge)
+    _cap(d, c, r, START + SWEEP, w, P.gauge)
 
     if pct is not None:
         color = tone(pct)
@@ -142,11 +142,11 @@ class Gauge:
             self.ring = None
             self.track = canvas.create_arc(
                 *box, start=225, extent=-SWEEP, style="arc",
-                outline=P.track, width=W_ARC,
+                outline=P.gauge, width=W_ARC,
             )
             self.arc = canvas.create_arc(
                 *box, start=225, extent=-0.01, style="arc",
-                outline=P.track, width=W_ARC, state="hidden",
+                outline=P.gauge, width=W_ARC, state="hidden",
             )
             self.mark = canvas.create_line(
                 0, 0, 0, 0, fill=P.title, width=2, state="hidden"
@@ -223,6 +223,8 @@ class ArcSkin(Skin):
     def build(self, parent: tk.Misc) -> None:
         self.f_num = tkfont.Font(root=parent, font=F_NUM)
         self.f_sig = tkfont.Font(root=parent, font=F_SIG)
+        self.f_err = tkfont.Font(root=parent, font=F_ERR)
+        self.f_small = tkfont.Font(root=parent, font=F_SMALL)
 
         self.c = c = tk.Canvas(
             parent, width=self.width, height=H, bg=P.bg, highlightthickness=0, bd=0
@@ -242,7 +244,6 @@ class ArcSkin(Skin):
         self.scoped = c.create_text(
             x1, Y_FOOT, text="", anchor="e", fill=P.sub, font=F_SMALL
         )
-        self.dot = c.create_oval(0, 0, 0, 0, width=0, state="hidden")
 
         # 오류 띠 — 구분선·꼬리말과 같은 자리. 켜고 끄기만 하므로 높이가 안 변한다.
         if HAVE_PIL:
@@ -312,22 +313,15 @@ class ArcSkin(Skin):
         if not text:
             return
         self.c.itemconfigure(self.scoped, text=text, fill=P.amber)
-        self.c.itemconfigure(self.dot, state="hidden")
 
     # -------------------------------------------------- 꼬리말 두 얼굴
     def _foot(self, stamp: str, usage: Usage | None) -> None:
         c = self.c
         c.itemconfigure(self.stamp, text=f"{stamp} 기준" if stamp else "")
 
+        # 모델별 한도 앞에 색 점을 두지 않는다. 숫자 색 한 가지로 충분하다.
         text = scoped_text(usage, 1) if usage is not None else ""
-        c.itemconfigure(self.scoped, text=text)
-        pcts = [s.pct for s in usage.scoped if s.pct is not None] if usage else []
-        box = c.bbox(self.scoped) if text and pcts else None
-        if box is None:
-            c.itemconfigure(self.dot, state="hidden")
-            return
-        c.coords(self.dot, box[0] - 12, Y_FOOT - 3, box[0] - 6, Y_FOOT + 3)
-        c.itemconfigure(self.dot, fill=tone(pcts[0]), state="normal")
+        c.itemconfigure(self.scoped, text=text, fill=P.sub)
 
     def _error(self, text: str | None, stamp: str) -> None:
         c = self.c
@@ -340,6 +334,13 @@ class ArcSkin(Skin):
             c.itemconfigure(self.err_text, text=text)
             # 화면에 남은 값이 언제 것인지를 보여야 한다. 실패한 시각을 '기준' 이라고
             # 쓰면, 옛 숫자를 띄워 놓고 방금 잰 것처럼 말하는 셈이 된다.
-            shown = f"{self._ok_stamp} 기준" if self._ok_stamp else stamp
+            # 값이 하나도 없으면(로그인 막힘) 그 상태를 확인한 시각에 `기준` 을 붙인다.
+            # 띠가 모자라면(긴 오류 문구) `기준` 을, 그래도 모자라면 시각을 덜어 문구와 안 겹치게.
+            when = self._ok_stamp or stamp
+            room = (self.width - MARGIN - 10) - (MARGIN + 23) - 8 - self.f_err.measure(text)
+            shown = ""
+            for cand in ((f"{when} 기준", when) if when else ()):
+                if self.f_small.measure(cand) <= room:
+                    shown = cand
+                    break
             c.itemconfigure(self.err_stamp, text=shown)
-            c.itemconfigure(self.dot, state="hidden")

@@ -36,7 +36,8 @@ import cooldown_dino as dino
 from .base import P
 
 MASCOT_U = 2    # 도트 한 칸 (px). 팔까지 가로 11칸(22px) · 세로 8칸(16px)
-MASCOT_COLOR = "#d97757"  # 클로드 코랄 — 밝게/어둡게 양쪽에서 그대로 쓴다
+MASCOT_COLOR = "#d97757"  # 클로드 코랄 본래 색. 폰 앱 그림표(android/art)가 쓴다.
+# 위젯 화면은 테마별 색 `P.mascot` 을 쓴다(밝게는 대비 3:1 을 넘기려 조금 진하다).
 # **박자 맞히기** — 통통 튀다 **가장 아래로 내려앉는 순간** 콕 찌르면 박자가 맞은 것이다.
 # 이어 갈수록 콤보가 쌓여 더 높이 뛰고 반짝이도 화려해진다. 박자를 놓치면 처음부터.
 # ★ **깐깐하게 잡는다** — 튀는 한 주기(약 13프레임)에서 **바닥에 멎는 3프레임**(≈0.14초)
@@ -557,7 +558,7 @@ class Claudi:
                 self.cx + math.cos(a) * 5, self.cy + math.sin(a) * 4,
                 math.cos(a) * sp, math.sin(a) * sp * 0.8 - 0.2,
                 SPARK_LIFE * random.uniform(0.6, 1.0),
-                random.choice((MASCOT_COLOR, MASCOT_COLOR, P.amber)),
+                random.choice((P.mascot, P.mascot, P.amber)),
             ])
 
     @staticmethod
@@ -581,7 +582,7 @@ class Claudi:
                     self.cx + math.cos(a) * 4,
                     self.cy + self._yoff + math.sin(a) * 4,
                     math.cos(a) * 0.9, math.sin(a) * 0.7 - 0.2,
-                    SPARK_LIFE * random.uniform(0.7, 1.0), MASCOT_COLOR,
+                    SPARK_LIFE * random.uniform(0.7, 1.0), P.mascot,
                 ])
 
     def _aim(self) -> None:
@@ -600,7 +601,7 @@ class Claudi:
         else:
             fx = random.uniform(min(self.px1 - 1, self.cx + 8), self.px1)
         fy = random.uniform(self.py0 + 4, self.cy)   # 축하 범위 위쪽에서 터진다
-        color = random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title))
+        color = random.choice((P.green, P.amber, P.red, P.mascot, P.title))
         # 걸리는 시간은 **거리에서 나온다** — 먼 데는 오래 날아간다(위 ★★ 참고)
         fly = min(SHELL_MAX,
                   max(SHELL_MIN, round(math.hypot(fx - sx, fy - sy) / SHELL_SPEED)))
@@ -612,7 +613,7 @@ class Claudi:
             self._sparks.append([
                 sx, sy, math.cos(a) * sp * self._pop_side, math.sin(a) * sp,
                 SPARK_LIFE * random.uniform(0.4, 0.7),
-                random.choice((P.green, P.amber, P.red, MASCOT_COLOR, P.title)),
+                random.choice((P.green, P.amber, P.red, P.mascot, P.title)),
             ])
 
     def _step_shells(self) -> None:
@@ -679,7 +680,7 @@ class Claudi:
                     cy + random.uniform(3.0, 4.2) * MASCOT_U,
                     side * random.uniform(0.28, 0.62) * power,
                     random.uniform(-0.30, -0.08) * power,
-                    SPARK_LIFE * random.uniform(0.45, 0.75), MASCOT_COLOR,
+                    SPARK_LIFE * random.uniform(0.45, 0.75), P.mascot,
                 ])
             else:  # 머리 위 — 떠오른다
                 self._sparks.append([
@@ -687,7 +688,7 @@ class Claudi:
                     cy - random.uniform(2.5, 7.0) * MASCOT_U,
                     random.uniform(-0.22, 0.22) * power,
                     random.uniform(-0.85, -0.35) * power,
-                    SPARK_LIFE * random.uniform(0.62, 1.0), MASCOT_COLOR,
+                    SPARK_LIFE * random.uniform(0.62, 1.0), P.mascot,
                 ])
 
     def _animate(self, canvas: tk.Canvas, gen: int) -> None:
@@ -795,7 +796,7 @@ class Claudi:
                     self.cx + random.uniform(-4, 4),
                     self.cy + self._yoff + random.uniform(-4, 4),
                     random.uniform(-0.25, 0.25), random.uniform(-0.35, 0.05),
-                    SPARK_LIFE * 0.7, MASCOT_COLOR,
+                    SPARK_LIFE * 0.7, P.mascot,
                 ])
 
     # -------------------------------------------------- 심심할 때 하는 잔동작
@@ -1100,10 +1101,11 @@ class Claudi:
             c.create_rectangle(x, y, x + span * ux, y + uy,
                                fill=color, width=0, tags="mascot")
 
-        def paint(lines: tuple[str, ...], top: int, color: str = MASCOT_COLOR,
+        def paint(lines: tuple[str, ...], top: int, color: str | None = None,
                   tilt: float | None = None, dx: int = 0) -> None:
             """줄마다 이어진 칸을 **한 덩이로** 그린다 — 매 프레임 도형 수를 3분의 1로.
             경계 식이 낱칸과 같으므로 그림은 한 픽셀도 안 달라진다."""
+            color = color or P.mascot
             for r, line in enumerate(lines):
                 col = 0
                 while col < len(line):
@@ -1118,13 +1120,13 @@ class Claudi:
 
         if extra is not None:                    # 길게 뻗은 팔(타이핑) 같은 덧그림
             for col, row in extra:
-                cell(col, row, MASCOT_COLOR)
+                cell(col, row, P.mascot)
         if arms[0] is not None:                  # 왼팔
             for col, row in ARM[arms[0]]:
-                cell(col, row, MASCOT_COLOR)
+                cell(col, row, P.mascot)
         if arms[1] is not None:                  # 오른팔 — 좌우 뒤집기 (옆모습이면 안 그림)
             for col, row in ARM[arms[1]]:
-                cell(8 - col, row, MASCOT_COLOR)
+                cell(8 - col, row, P.mascot)
         paint(HEAD, 0)
         paint(legs, len(HEAD))
         for col, row in EYES[expr]:
@@ -1148,7 +1150,7 @@ class Claudi:
                 while col + run < len(line) and line[col + run] == "#":
                     run += 1
                 c.create_rectangle(x0 + col * u, y0 + r * u, x0 + (col + run) * u, y0 + (r + 1) * u,
-                                   fill=MASCOT_COLOR, width=0, tags="mascot")
+                                   fill=P.mascot, width=0, tags="mascot")
                 col += run
         bg = c.cget("bg")
         for col, row in dino.DINO_EYE["blink" if self._t % 70 < 3 else "open"]:

@@ -38,7 +38,6 @@ if __name__ == "__main__":
 
 import cooldown_dino as dino  # noqa: E402
 from skins.base import DARK, KR, LIGHT, NUM, P  # noqa: E402
-from skins.claudi import MASCOT_COLOR  # noqa: E402
 
 STEP = 1.0 / dino.FPS
 MAX_CATCH_UP = 5      # 한 번에 밟는 걸음의 상한 — 창을 끌던 사이 몇 초가 흘러도 순간이동하지 않게
@@ -273,7 +272,7 @@ class DinoBoard:
                 wx, wy = dino.WING_AT[wp]
                 self._art(dino.WING_ON[wp], dino.DINO_X + wx, g.dino_y + wy,
                           self._item_color("wing", pal))
-            self._art(dino.POSES[pose], dino.DINO_X, g.dino_y, MASCOT_COLOR)
+            self._art(dino.POSES[pose], dino.DINO_X, g.dino_y, P.mascot)
             eyes = (dino.DUCK_EYE if pose.startswith("duck") else dino.DINO_EYE)[g.eye]
             self._cells(eyes, dino.DINO_X, g.dino_y, pal.bg)
         # 들고 있는 보호막 — 공룡 둘레를 도는 점선 고리. 막아 준 순간엔 고리가 터지며 퍼진다.
