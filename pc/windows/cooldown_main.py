@@ -35,11 +35,94 @@ from cooldown_core import LoginRequired, five_due, pace
 from skins.base import KR, MARK_W, NUM, P, mark_x, tone
 
 W = 620  # 창 폭 (px)
-MIN_H = 520  # 창 최소 높이. 탭마다 내용이 달라도 창이 덜 들썩이게
+MIN_H = 520  # 창 최소 높이. 실제 높이는 모든 탭 중 가장 큰 것에 맞춰 한 번 정해 고정한다
 NAV_W = 170  # 왼쪽 탭 줄 폭
 PAD = 22  # 본문 좌우 여백
 INNER = W - NAV_W - 1 - PAD * 2  # 본문 안쪽 폭 (차트 폭)
 WATCH_MS = 1000  # 값이 바뀌었나 보는 주기
+GAP = 12  # 위젯과 메인 화면 사이 간격
+EDGE = 8  # 작업 영역 가장자리에서 띄우는 여백 (높이를 줄일 때)
+
+
+def _fits(x: int, y: int, w: int, h: int, work) -> bool:
+    return x >= work[0] and y >= work[1] and x + w <= work[2] and y + h <= work[3]
+
+
+def _overlaps(x: int, y: int, w: int, h: int, r) -> bool:
+    return x < r[0] + r[2] and x + w > r[0] and y < r[1] + r[3] and y + h > r[1]
+
+
+def main_spot(widget, work, size, gap: int = GAP) -> tuple[int, int]:
+    """메인 화면이 처음 뜰 왼쪽 위 자리. 화면·창에 기대지 않는 순수 계산(단위 테스트 대상).
+
+    widget = (x, y, 폭, 높이) 위젯 창, work = (왼, 위, 오른, 아래) 위젯이 있는 모니터의 작업 영역
+    (작업표시줄 제외), size = (폭, 높이) 메인 화면.
+    위젯 바로 옆에 붙인다: 위젯이 오른쪽 절반에 있으면 왼쪽, 왼쪽 절반이면 오른쪽, 아래 절반이면 위,
+    위 절반이면 아래. 납작하고 넓은 위젯(작업표시줄 띠 위 슬림 바 등)은 위·아래를 먼저 본다.
+    옆 자리가 작업 영역에 안 들어가면 다음 후보로 넘어가고, 어디도 안 되면 위젯과 안 겹치는 쪽으로 가둔다.
+    결과는 늘 창 전체가 작업 영역 안(작업 영역이 창보다 작으면 왼쪽 위 맞춤)이다."""
+    wx, wy, ww, wh = widget
+    left, top, right, bottom = work
+    w, h = size
+    cx, cy = wx + ww / 2, wy + wh / 2
+    side = "left" if cx > (left + right) / 2 else "right"
+    vert = "above" if cy > (top + bottom) / 2 else "below"
+    order = [side, vert, "right" if side == "left" else "left", "below" if vert == "above" else "above"]
+    if ww > wh * 2:
+        order = [vert, order[3], side, order[2]]
+
+    def raw(kind):
+        if kind == "left":
+            return wx - gap - w, wy
+        if kind == "right":
+            return wx + ww + gap, wy
+        if kind == "above":
+            return wx, wy - gap - h
+        return wx, wy + wh + gap
+
+    def clamp(x, y):
+        x = left if w >= right - left else max(left, min(x, right - w))
+        y = top if h >= bottom - top else max(top, min(y, bottom - h))
+        return x, y
+
+    for kind in order:
+        x, y = raw(kind)
+        # 붙는 축은 그대로 들어와야 하고, 나란한 축은 작업 영역 안으로 밀어도 된다
+        if kind in ("left", "right"):
+            if not (x >= left and x + w <= right):
+                continue
+        elif not (y >= top and y + h <= bottom):
+            continue
+        x, y = clamp(x, y)
+        if _fits(x, y, w, h, work) and not _overlaps(x, y, w, h, widget):
+            return x, y
+    # 어느 옆자리도 안 맞음: 작업 영역 안에 두되 위젯과 안 겹치는 후보를 먼저 찾는다
+    for kind in order:
+        x, y = clamp(*raw(kind))
+        if not _overlaps(x, y, w, h, widget):
+            return x, y
+    return clamp(*raw(order[0]))
+
+
+def work_area_at(x: int, y: int):
+    """(x, y) 가 있는 모니터의 작업 영역 (왼, 위, 오른, 아래). 못 구하면 None."""
+    try:
+        import win32api
+
+        mon = win32api.MonitorFromPoint((int(x), int(y)), 2)  # MONITOR_DEFAULTTONEAREST
+        return tuple(win32api.GetMonitorInfo(mon)["Work"])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        rect = wintypes.RECT()
+        if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+            return rect.left, rect.top, rect.right, rect.bottom
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 # (키, 이름). 이름은 메뉴와 같은 말(`Label`)을 쓴다. API 는 기록이 있는 PC 에서만 보인다.
 USAGE_TABS = ("usage", "pace", "stats", "api")
@@ -61,6 +144,12 @@ class MainScreen:
         self._sig = None
         self._theme = None
         self._watch_job = None
+        self._banner_box: tk.Frame | None = None
+        self._canvas: tk.Canvas | None = None
+        self._inner: tk.Frame | None = None
+        self._bar: tk.Frame | None = None
+        self._win = None
+        self._h = 0  # 고정 높이 (창을 지을 때 한 번 정함)
 
     # -------------------------------------------------- 열고 닫기
     def is_open(self) -> bool:
@@ -166,6 +255,19 @@ class MainScreen:
         tk.Frame(body, bg=P.line, width=1).pack(side="left", fill="y")
         self._content = tk.Frame(body, bg=P.bg)
         self._content.pack(side="left", fill="both", expand=True)
+        # 위: 띠 줄(있을 때만 서고 본문이 그만큼 줄어든다) / 아래: 넘치면 휠로 넘기는 본문
+        self._banner_box = tk.Frame(self._content, bg=P.bg)
+        self._banner_box.pack(side="top", fill="x", padx=PAD)
+        area = tk.Frame(self._content, bg=P.bg)
+        area.pack(side="top", fill="both", expand=True)
+        self._canvas = tk.Canvas(area, bg=P.bg, highlightthickness=0, bd=0)
+        self._canvas.pack(fill="both", expand=True)
+        self._inner = tk.Frame(self._canvas, bg=P.bg)
+        self._win = self._canvas.create_window((0, 0), window=self._inner, anchor="nw")
+        self._bar = tk.Frame(area, bg=P.line, width=4)
+        self._canvas.bind("<Configure>", lambda _e: self._fit())
+        self._inner.bind("<Configure>", lambda _e: self._fit())
+        top.bind("<MouseWheel>", self._wheel)
 
         self._nav.clear()
         tk.Frame(nav, bg=P.track, height=10).pack(fill="x")
@@ -178,9 +280,18 @@ class MainScreen:
         top.bind("<Up>", lambda _e: self._step(-1))
         top.bind("<Down>", lambda _e: self._step(1))
 
-        self._render()
         top.update_idletasks()
-        h = max(MIN_H, top.winfo_reqheight())
+        chrome = head.winfo_reqheight() + 1
+        saved = self.tab
+        need = self._measure()
+        self.tab = saved
+        work = self._work(spot)
+        h = max(MIN_H, chrome + need)
+        if work is not None:  # 작은 화면이면 작업 영역에 맞춰 줄이고 본문은 휠로 넘긴다
+            h = min(h, max(300, work[3] - work[1] - EDGE * 2))
+        self._h = h
+        top.geometry(f"{W}x{h}")
+        self._render()
         if spot is None:
             spot = self._place(h)
         x, y = self._clamp(spot[0], spot[1], h)
@@ -198,38 +309,81 @@ class MainScreen:
         if self.top is t:
             self.top = None
 
-    def _place(self, h: int) -> tuple[int, int]:
-        """위젯을 가리지 않는 자리 — 위젯이 화면 오른쪽에 있으면 그 왼쪽, 아니면 오른쪽."""
+    def _work(self, spot=None):
+        """위젯(없으면 spot)이 있는 모니터의 작업 영역."""
         root = self.app.root
-        wx, wy = root.winfo_x(), root.winfo_y()
-        ww = root.winfo_width()
-        screen_w = root.winfo_screenwidth()
-        if wx + ww / 2 > screen_w / 2:
-            x = wx - W - 12
-        else:
-            x = wx + ww + 12
-        return x, wy
+        if spot is not None:
+            return work_area_at(spot[0], spot[1])
+        return work_area_at(root.winfo_x() + root.winfo_width() // 2,
+                            root.winfo_y() + root.winfo_height() // 2)
+
+    def _place(self, h: int) -> tuple[int, int]:
+        """처음 뜰 자리: 위젯 바로 옆, 위젯이 있는 모니터 작업 영역 안 (`main_spot`)."""
+        root = self.app.root
+        root.update_idletasks()
+        widget = (root.winfo_x(), root.winfo_y(), root.winfo_width(), root.winfo_height())
+        work = self._work()
+        if work is None:
+            return widget[0] + widget[2] + GAP, widget[1]
+        return main_spot(widget, work, (W, h))
 
     def _clamp(self, x: int, y: int, h: int) -> tuple[int, int]:
-        return self.m.clamp_to_screen(x, y, W, h)
+        work = self._work((x + W // 2, y + h // 2))
+        if work is None:
+            return self.m.clamp_to_screen(x, y, W, h)
+        left, top, right, bottom = work
+        x = left if W >= right - left else max(left, min(x, right - W))
+        y = top if h >= bottom - top else max(top, min(y, bottom - h))
+        return x, y
 
     def _round(self, top: tk.Toplevel) -> None:
         self.m.round_corners(top)
 
     def _fit(self) -> None:
-        """본문이 바뀌면 높이를 다시 잰다. 왼쪽 위는 그대로 둔다."""
-        top = self.top
-        if top is None:
+        """창 크기는 그대로 두고 본문이 넘치는지만 다시 잰다 (넘치면 오른쪽에 가는 바가 서고 휠로 넘긴다)."""
+        cv, inner = self._canvas, self._inner
+        if cv is None or inner is None or not self.is_open():
             return
         try:
-            if not top.winfo_ismapped():
-                return
-            top.update_idletasks()
-            h = max(MIN_H, top.winfo_reqheight())
-            x, y = self._clamp(top.winfo_x(), top.winfo_y(), h)
-            top.geometry(f"{W}x{h}+{x}+{y}")
+            ch = cv.winfo_height()
+            need = inner.winfo_reqheight()
+            cv.itemconfigure(self._win, width=cv.winfo_width(), height=max(need, ch))
+            cv.configure(scrollregion=(0, 0, cv.winfo_width(), max(need, ch)))
+            if need <= ch + 1:
+                cv.yview_moveto(0)
+            self._paint_bar()
         except tk.TclError:
             pass
+
+    def _paint_bar(self) -> None:
+        cv, bar = self._canvas, self._bar
+        if cv is None or bar is None:
+            return
+        need = self._inner.winfo_reqheight()
+        ch = cv.winfo_height()
+        if need <= ch + 1 or ch <= 1:
+            bar.place_forget()
+            return
+        lo, hi = cv.yview()
+        bar.place(relx=1.0, x=-2, rely=lo, relheight=max(hi - lo, 0.05), anchor="ne")
+        bar.lift()
+
+    def _wheel(self, e) -> None:
+        cv = self._canvas
+        if cv is None or self._inner.winfo_reqheight() <= cv.winfo_height() + 1:
+            return
+        cv.yview_scroll(-3 if e.delta > 0 else 3, "units")
+        self._paint_bar()
+
+    def _measure(self) -> int:
+        """모든 탭을 한 번씩 그려 가장 큰 본문 높이를 잰다 (창 높이를 이 하나로 고정하려고)."""
+        best = 0
+        for key in self._tab_keys():
+            self.tab = key
+            wrap = self._draw_body(banners=False)
+            self.top.update_idletasks()
+            best = max(best, wrap.winfo_reqheight() + 16 + PAD)
+        return best
 
     # -------------------------------------------------- 탭 줄
     def _nav_item(self, nav: tk.Frame, key: str, name: str) -> None:
@@ -327,12 +481,21 @@ class MainScreen:
         if self.tab not in self._tab_keys():
             self.tab = "usage"
         self._paint_nav()
-        for w in self._content.winfo_children():
-            w.destroy()
-        wrap = tk.Frame(self._content, bg=P.bg)
-        wrap.pack(fill="both", expand=True, padx=PAD, pady=(16, PAD))
+        self._draw_body(banners=True)
+        self._sig = self._signature()
+        self.top.update_idletasks()
+        self._fit()
 
-        self._banners(wrap)
+    def _draw_body(self, banners: bool) -> tk.Frame:
+        """띠 줄과 본문을 지금 탭으로 다시 짓는다. 본문 틀(wrap)을 돌려준다."""
+        for w in self._banner_box.winfo_children():
+            w.destroy()
+        for w in self._inner.winfo_children():
+            w.destroy()
+        wrap = tk.Frame(self._inner, bg=P.bg)
+        wrap.pack(fill="both", expand=True, padx=PAD, pady=(16, PAD))
+        if banners:
+            self._banners(self._banner_box)
         name = dict(self._tabs())[self.tab]
         head = tk.Frame(wrap, bg=P.bg)
         head.pack(fill="x", pady=(0, 12))
@@ -355,8 +518,7 @@ class MainScreen:
             self.m.applog(f"메인 화면 그리기 오류 ({self.tab}) — {type(e).__name__}: {e}")
             tk.Label(wrap, text="이 화면을 그리지 못함", bg=P.bg, fg=P.red,
                      font=(KR, 10)).pack(anchor="w")
-        self._sig = self._signature()
-        self._fit()
+        return wrap
 
     # ---- 그럴 때만 서는 띠 (어느 탭에서나 맨 위)
     def _banners(self, wrap: tk.Frame) -> None:
@@ -376,6 +538,8 @@ class MainScreen:
             rows.append((P.green, f"쿨다운 새 버전 v{a._new_version}",
                          "지금 업데이트" if cooldown_selfupdate.can_self_update() else "받기",
                          a.update_now))
+        if rows:
+            tk.Frame(wrap, bg=P.bg, height=16).pack(fill="x")
         for color, text, btn, fn in rows:
             box = tk.Frame(wrap, bg=P.track)
             box.pack(fill="x", pady=(0, 8))
@@ -384,8 +548,6 @@ class MainScreen:
                      padx=12, pady=9).pack(side="left", fill="x", expand=True)
             b = self._button(box, btn, fn, primary=True)
             b.pack(side="right", padx=8, pady=6)
-        if rows:
-            tk.Frame(wrap, bg=P.bg, height=6).pack(fill="x")
 
     # ---- 사용량
     def _tab_usage(self, wrap: tk.Frame) -> None:
