@@ -12,7 +12,10 @@
 - 설정을 바꾸는 것도 앱의 메서드(`toggle_ping`·`switch_skin`·…)를 부를 뿐이다. 여기서 설정 파일을
   직접 쓰지 않는다.
 - **팝업과 따로 센다.** `App._close_panels` 는 팝업만 닫으므로 메인 화면에서 시각 정하기·폰 연결·
-  로그인 팝업을 열어도 메인 화면은 남는다. 설정을 바꾸는 창이라 밖을 눌러도 안 닫힌다(click_away 없음).
+  로그인 팝업을 열어도 메인 화면은 남는다.
+- **밖을 누르면 닫기는 설정**(`앱 설정 > 메인 화면 밖을 누르면 닫기`, 끔이 기본, 11-12). 켜면 팝업의
+  click_away 와 같은 방식(포커스가 빠져나가면 조금 뒤 확인)으로 닫는다. 메인 화면에서 띄운 팝업으로
+  포커스가 간 것은 밖으로 치지 않고, 그 팝업이 닫힐 때 다시 판단한다(`panel_closed`).
 - **값이 바뀌면 저절로 다시 그린다.** 1초마다 지금 값의 지문(`_signature`)을 재서 달라졌을 때만
   본문을 다시 짓는다. 트레이에서 바꾼 것·새로 받은 사용량·남은 시간까지 따라온다.
   밝기가 바뀌면 색이 위젯에 박혀 있으므로 창을 통째로 다시 짓는다.
@@ -21,6 +24,7 @@
 
 from __future__ import annotations
 
+import time
 import tkinter as tk
 from datetime import datetime
 
@@ -34,11 +38,15 @@ import skins
 from cooldown_core import LoginRequired, five_due, pace
 from skins.base import KR, MARK_W, NUM, P, mark_x, tone
 
-W = 620  # 창 폭 (px)
-MIN_H = 520  # 창 최소 높이. 실제 높이는 모든 탭 중 가장 큰 것에 맞춰 한 번 정해 고정한다
-NAV_W = 170  # 왼쪽 탭 줄 폭
-PAD = 22  # 본문 좌우 여백
+W = 580  # 창 폭 (px)
+MIN_H = 380  # 창 최소 높이. 실제 높이는 모든 탭 중 가장 큰 것에 맞춰 한 번 정해 고정한다
+NAV_W = 150  # 왼쪽 탭 줄 폭 (가장 긴 탭 이름 `클로드 모닝 스타터` 가 들어가는 만큼)
+PAD = 16  # 본문 좌우 여백
+TOP_PAD = 10  # 본문 위 여백
+BOT_PAD = 12  # 본문 아래 여백
 INNER = W - NAV_W - 1 - PAD * 2  # 본문 안쪽 폭 (차트 폭)
+AWAY_MS = 150  # 포커스가 빠져나간 뒤 자리 잡을 틈 (밖 클릭 닫기)
+REOPEN_MS = 400  # 밖 클릭으로 막 닫혔으면 이 안의 위젯 클릭으로 다시 열지 않는다
 WATCH_MS = 1000  # 값이 바뀌었나 보는 주기
 GAP = 12  # 위젯과 메인 화면 사이 간격
 EDGE = 8  # 작업 영역 가장자리에서 띄우는 여백 (높이를 줄일 때)
@@ -125,7 +133,7 @@ def work_area_at(x: int, y: int):
     return None
 
 # (키, 이름). 이름은 메뉴와 같은 말(`Label`)을 쓴다. API 는 기록이 있는 PC 에서만 보인다.
-USAGE_TABS = ("usage", "pace", "stats", "api")
+USAGE_TABS = ("usage", "pace", "daily", "stats", "api")
 
 
 class MainScreen:
@@ -150,6 +158,7 @@ class MainScreen:
         self._bar: tk.Frame | None = None
         self._win = None
         self._h = 0  # 고정 높이 (창을 지을 때 한 번 정함)
+        self._away_at = 0.0  # 밖 클릭으로 닫힌 때 (time.monotonic)
 
     # -------------------------------------------------- 열고 닫기
     def is_open(self) -> bool:
@@ -197,13 +206,88 @@ class MainScreen:
         except tk.TclError:
             pass
 
+    # -------------------------------------------------- 밖을 누르면 닫기 (설정)
+    def _away_on(self) -> bool:
+        return bool(self.app.state.get("main_click_away"))
+
+    def _away_soon(self) -> None:
+        """포커스가 빠져나갔다(밖을 눌렀거나, 안에서 다른 칸·팝업으로 옮겼거나).
+        팝업의 click_away 와 같이, 포커스가 자리 잡을 틈을 준 뒤 `_away_check` 로 판단한다."""
+        if not self._away_on() or not self.is_open():
+            return
+        try:
+            self.top.after(AWAY_MS, self._away_check)
+        except tk.TclError:
+            pass
+
+    def _ours(self) -> list:
+        """밖으로 치지 않는 창: 메인 화면과, 그 위에 띄운 팝업들."""
+        return [self.top] + [t for t in self.app._panels if t is not None]
+
+    def _away_check(self) -> None:
+        if not self._away_on() or not self.is_open():
+            return
+        try:
+            foc = self.top.focus_displayof()
+            here = foc.winfo_toplevel() if foc is not None else None
+        except (KeyError, tk.TclError):
+            here = None
+        if here is not None and here in self._ours():
+            return
+        if any(self._alive(t) for t in self.app._panels):
+            # 메인 화면에서 띄운 팝업이 아직 떠 있다. 그 팝업이 닫힐 때 다시 본다(`panel_closed`)
+            return
+        self.close_away()
+
+    def close_away(self) -> None:
+        """밖을 눌러 닫는다. 그 시각을 남겨 같은 클릭이 다시 열지 않게 한다(`just_closed`)."""
+        self._away_at = time.monotonic()
+        self.close()
+
+    @staticmethod
+    def _alive(t) -> bool:
+        try:
+            return bool(t.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def panel_closed(self, panel) -> None:
+        """메인 화면 위에 띄운 팝업이 닫혔다. 팝업 안에서 닫았으면(✕·Esc·저장) 포커스를
+        메인 화면으로 돌려 두고, 밖을 눌러 닫혔으면 메인 화면도 같은 클릭으로 닫는다."""
+        if not self._away_on() or not self.is_open():
+            return
+        try:
+            foc = panel.focus_displayof()
+            inside = foc is not None and foc.winfo_toplevel() is panel
+        except (KeyError, tk.TclError):
+            inside = False
+        if inside:
+            try:
+                self.top.after(1, self._take_focus)
+            except tk.TclError:
+                pass
+        else:
+            self._away_soon()
+
+    def _take_focus(self) -> None:
+        if self.is_open():
+            try:
+                self.top.focus_force()
+            except tk.TclError:
+                pass
+
+    def just_closed(self) -> bool:
+        """밖 클릭(위젯을 누름)으로 막 닫혔나. 같은 클릭으로 다시 열지 않으려고."""
+        return time.monotonic() - self._away_at < REOPEN_MS / 1000
+
     # -------------------------------------------------- 창 짓기
     def _tab_keys(self) -> list[str]:
         return [k for k, _n in self._tabs()]
 
     def _tabs(self) -> list[tuple[str, str]]:
         Label = self.m.Label
-        out = [("usage", "사용량"), ("pace", "이번 주 사용 속도"), ("stats", "지난 사용 기록")]
+        out = [("usage", "사용량"), ("pace", "이번 주 사용 속도"), ("daily", "일별 사용 기록"),
+               ("stats", "지난 사용 기록")]
         if cooldown_api.available():
             out.append(("api", "API 사용 요금"))
         out += [
@@ -232,7 +316,7 @@ class MainScreen:
         accent = tk.Frame(head, bg=P.green, width=3)
         accent.pack(side="left", fill="y")
         pad = tk.Frame(head, bg=P.bg)
-        pad.pack(side="left", fill="x", expand=True, padx=(PAD - 3, PAD), pady=(14, 12))
+        pad.pack(side="left", fill="x", expand=True, padx=(PAD - 3, PAD), pady=(10, 8))
         title = tk.Label(pad, text="클로드 쿨다운", bg=P.bg, fg=P.title, font=(KR, 11, "bold"))
         title.pack(side="left")
         ver = cooldown_newver.current()
@@ -270,13 +354,14 @@ class MainScreen:
         top.bind("<MouseWheel>", self._wheel)
 
         self._nav.clear()
-        tk.Frame(nav, bg=P.track, height=10).pack(fill="x")
+        tk.Frame(nav, bg=P.track, height=6).pack(fill="x")
         for key, name in self._tabs():
             if key == "look":  # 읽는 쪽(사용량)과 바꾸는 쪽(설정) 사이 한 줄
-                tk.Frame(nav, bg=P.line, height=1).pack(fill="x", padx=14, pady=8)
+                tk.Frame(nav, bg=P.line, height=1).pack(fill="x", padx=14, pady=6)
             self._nav_item(nav, key, name)
 
         top.bind("<Escape>", lambda _e: self.close())
+        top.bind("<FocusOut>", lambda _e: self._away_soon())
         top.bind("<Up>", lambda _e: self._step(-1))
         top.bind("<Down>", lambda _e: self._step(1))
 
@@ -377,12 +462,21 @@ class MainScreen:
 
     def _measure(self) -> int:
         """모든 탭을 한 번씩 그려 가장 큰 본문 높이를 잰다 (창 높이를 이 하나로 고정하려고)."""
+        a = self.app
+        saved = a._stats_period
         best = 0
-        for key in self._tab_keys():
-            self.tab = key
-            wrap = self._draw_body(banners=False)
-            self.top.update_idletasks()
-            best = max(best, wrap.winfo_reqheight() + 16 + PAD)
+        try:
+            for key in self._tab_keys():
+                self.tab = key
+                # 지난 사용 기록은 기간(주별·달별·…)마다 높이가 다르다. 다 재서 가장 큰 것을 쓴다
+                for period in (self.m.STATS_TABS if key == "stats" else (None,)):
+                    if period is not None:
+                        a._stats_period = period
+                    wrap = self._draw_body(banners=False)
+                    self.top.update_idletasks()
+                    best = max(best, wrap.winfo_reqheight() + TOP_PAD + BOT_PAD)
+        finally:
+            a._stats_period = saved
         return best
 
     # -------------------------------------------------- 탭 줄
@@ -393,7 +487,7 @@ class MainScreen:
         bar.pack(side="left", fill="y")
         lbl = tk.Label(
             row, text=name, bg=P.track, fg=P.label, font=(KR, 10), anchor="w",
-            padx=14, pady=8, cursor="hand2",
+            padx=12, pady=6, cursor="hand2",
         )
         lbl.pack(side="left", fill="x", expand=True)
         for w in (row, lbl):
@@ -450,6 +544,7 @@ class MainScreen:
             a._login_short(), a._login_state, a._revive_busy,
             a._latest, a._latest_at, a._latest_fail, a._newver_ask,
             a._selfupd_state, a._selfupd_why, a.state.get("self_update", True),
+            a.state.get("main_click_away"), a.state.get("widget_click"),
         )
 
     def _autostart(self) -> bool:
@@ -493,12 +588,12 @@ class MainScreen:
         for w in self._inner.winfo_children():
             w.destroy()
         wrap = tk.Frame(self._inner, bg=P.bg)
-        wrap.pack(fill="both", expand=True, padx=PAD, pady=(16, PAD))
+        wrap.pack(fill="both", expand=True, padx=PAD, pady=(TOP_PAD, BOT_PAD))
         if banners:
             self._banners(self._banner_box)
         name = dict(self._tabs())[self.tab]
         head = tk.Frame(wrap, bg=P.bg)
-        head.pack(fill="x", pady=(0, 12))
+        head.pack(fill="x", pady=(0, 8))
         tk.Label(head, text=name, bg=P.bg, fg=P.title, font=(KR, 14, "bold")).pack(side="left")
         if self.tab == "usage":
             self._button(head, "새로고침", self.app.refresh_now).pack(side="right")
@@ -507,6 +602,7 @@ class MainScreen:
             {
                 "usage": self._tab_usage,
                 "pace": lambda w: self.app._pace_body(w, INNER),
+                "daily": lambda w: self.app._daily_body(w, INNER),
                 "stats": lambda w: self.app._stats_body(w, INNER, self._fit),
                 "api": lambda w: self.app._api_body(w, INNER),
                 "look": self._tab_look,
@@ -539,15 +635,15 @@ class MainScreen:
                          "지금 업데이트" if cooldown_selfupdate.can_self_update() else "받기",
                          a.update_now))
         if rows:
-            tk.Frame(wrap, bg=P.bg, height=16).pack(fill="x")
+            tk.Frame(wrap, bg=P.bg, height=10).pack(fill="x")
         for color, text, btn, fn in rows:
             box = tk.Frame(wrap, bg=P.track)
-            box.pack(fill="x", pady=(0, 8))
+            box.pack(fill="x", pady=(0, 6))
             tk.Frame(box, bg=color, width=3).pack(side="left", fill="y")
             tk.Label(box, text=text, bg=P.track, fg=P.title, font=(KR, 10), anchor="w",
-                     padx=12, pady=9).pack(side="left", fill="x", expand=True)
+                     padx=12, pady=6).pack(side="left", fill="x", expand=True)
             b = self._button(box, btn, fn, primary=True)
-            b.pack(side="right", padx=8, pady=6)
+            b.pack(side="right", padx=8, pady=4)
 
     # ---- 사용량
     def _tab_usage(self, wrap: tk.Frame) -> None:
@@ -562,7 +658,7 @@ class MainScreen:
             return
         stamp = u.fetched_at.astimezone().strftime("%H:%M")
         tk.Label(wrap, text=f"기준 {stamp}", bg=P.bg, fg=P.faint, font=(KR, 8),
-                 anchor="w").pack(fill="x", pady=(0, 8))
+                 anchor="w").pack(fill="x", pady=(0, 4))
         p = pace(u)
         self._limit(wrap, "5시간 한도", u.five, five_due(u))
         self._limit(wrap, "주간 한도", u.week, p.due if p is not None else None)
@@ -573,7 +669,7 @@ class MainScreen:
 
     def _limit(self, wrap, name, limit, due, small=False) -> None:
         box = tk.Frame(wrap, bg=P.bg)
-        box.pack(fill="x", pady=(0, 10 if small else 14))
+        box.pack(fill="x", pady=(0, 6 if small else 10))
         top = tk.Frame(box, bg=P.bg)
         top.pack(fill="x")
         tk.Label(top, text=name, bg=P.bg, fg=P.title,
@@ -583,7 +679,7 @@ class MainScreen:
                  font=(NUM, 12 if small else 18, "bold")).pack(side="right")
         h = 6 if small else 10
         c = tk.Canvas(box, width=INNER, height=h + 4, bg=P.bg, highlightthickness=0, bd=0)
-        c.pack(fill="x", pady=(4, 4))
+        c.pack(fill="x", pady=(2, 2))
         c.create_rectangle(0, 2, INNER, 2 + h, fill=P.track, width=0)
         if pct:
             c.create_rectangle(0, 2, INNER * min(100.0, pct) / 100, 2 + h, fill=tone(pct), width=0)
@@ -646,7 +742,7 @@ class MainScreen:
             self._value(wrap, "기록", "아직 없음", P.faint, button=log_btn)
 
         foot = tk.Frame(wrap, bg=P.bg)
-        foot.pack(fill="x", pady=(16, 0))
+        foot.pack(fill="x", pady=(10, 0))
         if a._ping_busy:
             b = self._button(foot, "시작하는 중", lambda: None, primary=True)
             b.config(state="disabled", disabledforeground=P.bg)
@@ -693,6 +789,15 @@ class MainScreen:
             state, color = "확인 전", P.faint
         self._value(wrap, "사용량 읽기", state, color, button=("로그인 확인", a.open_login))
 
+        self._section(wrap, "메인 화면·위젯")
+        self._switch(wrap, Label.MAIN_CLICK_AWAY, bool(a.state.get("main_click_away")),
+                     a.toggle_main_click_away)
+        mode = a.state.get("widget_click") or "main"
+        self._choice(wrap, Label.WIDGET_CLICK, (
+            (Label.WIDGET_CLICK_MAIN, mode != "refresh", lambda: a.set_widget_click("main")),
+            (Label.WIDGET_CLICK_REFRESH, mode == "refresh", lambda: a.set_widget_click("refresh")),
+        ))
+
         self._section(wrap, "자동으로")
         self._switch(wrap, Label.AUTO_UPDATE, bool(a.state.get("auto_update")), a.toggle_auto_update)
         self._switch(wrap, Label.AUTOSTART, self._autostart(), a.toggle_autostart,
@@ -737,7 +842,7 @@ class MainScreen:
     @staticmethod
     def _section(wrap, title: str, first: bool = False) -> None:
         tk.Label(wrap, text=title, bg=P.bg, fg=P.label, font=(KR, 9, "bold"),
-                 anchor="w").pack(fill="x", pady=(0 if first else 16, 4))
+                 anchor="w").pack(fill="x", pady=(0 if first else 10, 2))
 
     def _button(self, parent, text, command, primary=False) -> tk.Button:
         return self.app._themed_button(parent, text, command, primary=primary, width=0)
@@ -794,17 +899,31 @@ class MainScreen:
         sw.bind("<space>", flip)
         sw.bind("<Return>", flip)
 
-    def _radio(self, wrap, label: str, on: bool, pick) -> None:
+    def _choice(self, wrap, label: str, options) -> None:
+        """이름 한 줄에 고르기 여럿을 나란히. `options` = ((이름, 골랐나, 할 일), …)."""
+        row = tk.Frame(wrap, bg=P.bg)
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text=label, bg=P.bg, fg=P.title, font=(KR, 10), anchor="w",
+                 pady=4).pack(side="left")
+        for text, on, pick in reversed(options):
+            box = tk.Frame(row, bg=P.bg)
+            box.pack(side="right", padx=(12, 0))
+            self._radio(box, text, on, pick, side="left")
+
+    def _radio(self, wrap, label: str, on: bool, pick, side: str | None = None) -> None:
         row = tk.Frame(wrap, bg=P.bg, cursor="hand2")
-        row.pack(fill="x", pady=1)
+        if side is None:
+            row.pack(fill="x", pady=1)
+        else:
+            row.pack(side=side)
         dot = tk.Canvas(row, width=18, height=18, bg=P.bg, highlightthickness=0, bd=0)
-        dot.pack(side="left", padx=(0, 10))
+        dot.pack(side="left", padx=(0, 6 if side else 10))
         dot.create_oval(2, 2, 16, 16, outline=P.green if on else P.faint, width=2 if on else 1)
         if on:
             dot.create_oval(6, 6, 12, 12, fill=P.green, outline="")
         lbl = tk.Label(row, text=label, bg=P.bg, fg=P.title if on else P.sub,
                        font=(KR, 10, "bold") if on else (KR, 10), anchor="w", pady=4)
-        lbl.pack(side="left", fill="x", expand=True)
+        lbl.pack(side="left", fill="x", expand=side is None)
 
         def go(_e=None):
             if not on:

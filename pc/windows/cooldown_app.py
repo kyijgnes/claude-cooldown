@@ -207,7 +207,8 @@ CLI_EVERY = 1800
 CLI_FIRST = 90  # 켜고 나서 처음 묻기까지 (초). 조회·원격 대기가 먼저 자리 잡게.
 CLI_TRIES = 3  # 한 버전을 몇 번까지 깔아 볼지. 안 되는 것을 30분마다 영영 되풀이하지 않는다.
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
-STATS_TABS = ("일별", "주별", "달별", "전체")  # 사용량 통계에서 볼 수 있는 기간
+STATS_TABS = ("주별", "달별", "요일·시간대", "전체")  # 지난 사용 기록에서 볼 수 있는 기간
+# 일별은 메인 화면 `일별 사용 기록` 탭으로 따로 뺐다(11-12: 창 높이를 이 하나가 끌어올렸다)
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
 THEMES = (("auto", "윈도우 설정 따라가기"), ("light", "늘 밝게"), ("dark", "늘 어둡게"))
 
@@ -244,6 +245,10 @@ class Label:
     AUTO_UPDATE = "자리 비면 클로드 업데이트 자동 적용"
     AUTOSTART = "윈도우 켤 때 자동 실행"
     DOCK = "작업표시줄에 고정"
+    MAIN_CLICK_AWAY = "메인 화면 밖을 누르면 닫기"
+    WIDGET_CLICK = "위젯을 누르면"
+    WIDGET_CLICK_MAIN = "메인 화면 열기"
+    WIDGET_CLICK_REFRESH = "새로고침만"
     QUIT = "종료"
 
 
@@ -378,6 +383,10 @@ def load_state() -> dict:
         "auto_update": False,
         # 쿨다운 자기 새 버전: 받아서 자리 비면 바꿔 켤지. **켬이 기본**(내 위젯만 갈아 끼우는 일이다)
         "self_update": True,
+        # 메인 화면 밖(다른 앱·바탕화면·위젯)을 누르면 닫을지. **끔이 기본**(설정을 바꾸는 창이다)
+        "main_click_away": False,
+        # 위젯(클로디 밖)을 누르면: "main" 메인 화면 열기(기본) · "refresh" 새로고침만
+        "widget_click": "main",
     }
     try:
         # ★ `utf-8-sig` 로 읽는다 — 손으로 고치다(메모장·파워셸 `Set-Content -Encoding utf8`)
@@ -1254,9 +1263,19 @@ class App:
                 played = self.skin.absorbed()
             except Exception:  # noqa: BLE001
                 played = False
-            if played:
+            # 앱 설정 `메인 화면 밖을 누르면 닫기` 가 켜져 있으면 위젯 클릭도 밖 클릭이다.
+            # 포커스가 위젯으로 안 넘어오는 때도 있어 여기서 직접 닫는다(같은 클릭으로 다시 열지 않음).
+            was_open = self.main.is_open()
+            if was_open and self.state.get("main_click_away"):
+                self.main.close_away()
+            #   · 앱 설정 `위젯을 누르면` 이 `새로고침만` 이면 클로디 밖도 클로디처럼 새로고침만 한다
+            #     (메인 화면은 우클릭·트레이 `메인 화면 열기` 로 연다).
+            if played or self.state.get("widget_click") == "refresh":
                 if not (isinstance(self.last_error, LoginRequired) or self._login_gone()):
                     self.refresh_now()
+                return
+            if self.main.just_closed():
+                # 메인 화면이 떠 있을 때 위젯을 눌러 `밖을 누르면 닫기` 로 막 닫혔다. 다시 열지 않는다
                 return
             self.open_main()
             return
@@ -1484,6 +1503,17 @@ class App:
         self._topmost_now = None   # 손으로 건드렸다 — 다음 tick 이 다시 맞춘다
         self.var_topmost.set(bool(self.state["topmost"]))
         save_state(self.state)
+
+    def toggle_main_click_away(self) -> None:
+        self.state["main_click_away"] = not self.state.get("main_click_away", False)
+        save_state(self.state)
+        applog(f"메인 화면 밖 클릭 닫기 → {self.state['main_click_away']}")
+
+    def set_widget_click(self, mode: str) -> None:
+        """위젯(클로디 밖)을 누를 때 할 일: "main" 메인 화면 열기 · "refresh" 새로고침만."""
+        self.state["widget_click"] = "refresh" if mode == "refresh" else "main"
+        save_state(self.state)
+        applog(f"위젯 클릭 → {self.state['widget_click']}")
 
     def toggle_autostart(self):
         want = not autostart_enabled()
@@ -3561,15 +3591,33 @@ class App:
 
     # -------------------------------------------------- 사용량 통계
     def _stats_body(self, wrap: tk.Misc, inner: int, refit) -> None:
-        """쌓아 둔 기록에서 '언제 얼마나 썼나' 를 셈해 보여 준다(메인 화면 `지난 기록`).
+        """쌓아 둔 기록에서 '언제 얼마나 썼나' 를 셈해 보여 준다(메인 화면 `지난 사용 기록`).
 
         사용량 단위는 **주간 한도 %p**: 5시간 퍼센트는 5시간마다 0으로 돌아가
         더할 수가 없고, 주간 퍼센트가 오른 만큼이 곧 그 사이에 쓴 양이다.
         셈은 전부 `cooldown_stats` 가 하고, 여기서는 그리기만 한다.
 
-        위쪽 기간 줄(일별·주별·달별·전체)로 갈아 가며 본다. 마지막에 보던 기간은
+        위쪽 기간 줄(주별·달별·요일·시간대·전체)로 갈아 가며 본다. 마지막에 보던 기간은
         `self._stats_period` 에 남아 다음에 열 때 그대로 열린다. 갈아 낀 뒤 `refit()`.
+        일별은 `_daily_body`(메인 화면 `일별 사용 기록` 탭)가 따로 그린다.
         """
+        rep = self._stats_report(wrap)
+        if rep is None:
+            return
+        bar = tk.Frame(wrap, bg=P.bg)
+        bar.pack(fill="x", pady=(0, 8))
+        content = tk.Frame(wrap, bg=P.bg)
+        content.pack(fill="both", expand=True)
+        self._build_stats_tabs(bar, content, rep, inner, refit)
+
+    def _daily_body(self, wrap: tk.Misc, inner: int) -> None:
+        """하루하루 쓴 양과 5시간 창 최고(메인 화면 `일별 사용 기록`)."""
+        rep = self._stats_report(wrap)
+        if rep is not None:
+            self._stats_daily(wrap, rep, inner)
+
+    def _stats_report(self, wrap: tk.Misc):
+        """기록을 셈하고 맨 위 단위 줄을 단다. 기록이 모자라면 빈 안내만 달고 None."""
         rep = cooldown_stats.analyze(cooldown_stats.read_samples())
         if rep.samples < 2:
             tk.Label(
@@ -3579,7 +3627,7 @@ class App:
                 wrap, text="위젯이 떠 있는 동안 5분마다 쌓임",
                 bg=P.bg, fg=P.faint, font=(KR, 9),
             ).pack(anchor="w", pady=(0, 10))
-            return
+            return None
 
         # ★ 여기 한 줄이 화면 전체의 단위를 말한다 — 없으면 '오늘 7%' 가 무엇의
         #   7% 인지 알 길이 없다(쓰는 사람이 실제로 물었다, 2026-08-20).
@@ -3589,13 +3637,8 @@ class App:
         head += " · 모든 % 는 주간 한도 기준"
         tk.Label(
             wrap, text=head, bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w",
-        ).pack(fill="x", pady=(0, 8))
-
-        bar = tk.Frame(wrap, bg=P.bg)
-        bar.pack(fill="x", pady=(0, 10))
-        content = tk.Frame(wrap, bg=P.bg)
-        content.pack(fill="both", expand=True)
-        self._build_stats_tabs(bar, content, rep, inner, refit)
+        ).pack(fill="x", pady=(0, 6))
+        return rep
 
     # -------------------------------------------------- API 사용량
     def _api_body(self, wrap: tk.Misc, inner: int) -> None:
@@ -3705,12 +3748,12 @@ class App:
 
     def _draw_stats(self, wrap, rep, inner: int, period: str) -> None:
         """고른 기간 하나를 그린다. 셈은 이미 `analyze` 가 다 해 뒀다."""
-        if period == "일별":
-            self._stats_daily(wrap, rep, inner)
-        elif period == "주별":
+        if period == "주별":
             self._stats_weekly(wrap, rep, inner)
         elif period == "달별":
             self._stats_monthly(wrap, rep, inner)
+        elif period == "요일·시간대":
+            self._stats_when(wrap, rep, inner)
         else:
             self._stats_total(wrap, rep, inner)
 
@@ -3728,15 +3771,6 @@ class App:
         if rep.busiest is not None:
             day, value = rep.busiest
             self._pair(wrap, "가장 많이 쓴 날", f"{self._day_text(day)} {value:.0f}%", P.sub)
-
-        self._rule(wrap)
-        self._section(wrap, "시간대", "0~23시")
-        self._chart_hours(wrap, rep.hours, inner)
-        if rep.peak_hour is not None:
-            self._pair(
-                wrap, "가장 많이 쓰는 때",
-                f"{rep.peak_hour:02d}~{(rep.peak_hour + 1) % 24:02d}시", P.sub,
-            )
 
         if rep.windows:
             self._rule(wrap)
@@ -3789,9 +3823,28 @@ class App:
                        f"{when.month}월 {value:.0f}%"
                        + (f" (하루 {value / span:.0f}%)" if span >= 1 else ""), P.sub)
 
+    # ---- 요일·시간대 ----
+    def _stats_when(self, wrap, rep, inner: int) -> None:
+        """쌓인 기록 전부로 본 '언제 쓰나': 어느 요일에, 몇 시에 몰리나."""
+        self._section(wrap, "요일별", "그 요일 하루 평균")
+        self._chart_weekdays(wrap, rep.weekdays, inner)
+        if rep.peak_weekday is not None:
+            self._pair(wrap, "가장 많이 쓰는 요일",
+                       f"{'월화수목금토일'[rep.peak_weekday]}요일 "
+                       f"{rep.weekdays[rep.peak_weekday]:.0f}%", P.sub)
+
+        self._rule(wrap)
+        self._section(wrap, "시간대", "0~23시")
+        self._chart_hours(wrap, rep.hours, inner)
+        if rep.peak_hour is not None:
+            self._pair(
+                wrap, "가장 많이 쓰는 때",
+                f"{rep.peak_hour:02d}~{(rep.peak_hour + 1) % 24:02d}시", P.sub,
+            )
+
     # ---- 전체 ----
     def _stats_total(self, wrap, rep, inner: int) -> None:
-        """쌓인 기록 전부를 한 장으로 — 얼마나 썼나 · 어느 요일에 몰리나 · 늘고 있나."""
+        """쌓인 기록 전부를 한 장으로: 얼마나 썼나 · 늘고 있나 · 못 센 시간."""
         self._section(wrap, "쌓인 기록 전부", self._span_text(rep))
         self._pair(wrap, "그동안 쓴 합계", f"{rep.total:.0f}%", P.title)
         self._pair(wrap, "하루 평균", f"{rep.total_avg_day:.0f}%",
@@ -3804,18 +3857,6 @@ class App:
                 P.red if rep.trend > 0.25 else (P.green if rep.trend < -0.25 else P.sub),
             )
 
-        self._rule(wrap)
-        self._section(wrap, "요일별", "그 요일 하루 평균")
-        self._chart_weekdays(wrap, rep.weekdays, inner)
-        if rep.peak_weekday is not None:
-            self._pair(wrap, "가장 많이 쓰는 요일",
-                       f"{'월화수목금토일'[rep.peak_weekday]}요일 "
-                       f"{rep.weekdays[rep.peak_weekday]:.0f}%", P.sub)
-
-        self._rule(wrap)
-        self._section(wrap, "시간대", "0~23시")
-        self._chart_hours(wrap, rep.hours, inner)
-
         # 통계는 위젯이 떠 있는 동안만 쌓인다 — 못 센 시간이 길면 위 숫자가 그만큼
         # 실제보다 적다. 그 사실을 숨기지 않되, 한 줄로만 말한다.
         self._rule(wrap)
@@ -3826,7 +3867,7 @@ class App:
     # ---- 통계 화면 조각 ----
     @staticmethod
     def _rule(parent: tk.Misc) -> None:
-        tk.Frame(parent, bg=P.line, height=1).pack(fill="x", pady=(12, 10))
+        tk.Frame(parent, bg=P.line, height=1).pack(fill="x", pady=(8, 8))
 
     @staticmethod
     def _day_text(day) -> str:
@@ -4142,6 +4183,10 @@ class App:
     def _forget_panel(self, top: tk.Toplevel) -> None:
         if top in self._panels:
             self._panels.remove(top)
+        try:
+            self.main.panel_closed(top)  # 메인 화면 `밖을 누르면 닫기` 가 이어서 판단한다
+        except Exception:  # noqa: BLE001
+            pass
 
     def _panel_focus_out(self, top: tk.Toplevel) -> None:
         """팝업이 포커스를 잃으면(밖을 누름) 닫는다. 포커스가 팝업 안에 그대로 있으면 둔다.
