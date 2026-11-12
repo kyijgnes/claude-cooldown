@@ -29,6 +29,7 @@ import cooldown_newver
 import cooldown_ping
 import cooldown_push
 import cooldown_remote
+import cooldown_selfupdate
 import skins
 from cooldown_core import LoginRequired, five_due, pace
 from skins.base import KR, MARK_W, NUM, P, mark_x, tone
@@ -293,6 +294,8 @@ class MainScreen:
             a.remote_cfg.get("enabled"), a.remote_cfg.get("folder"), a.remote_error,
             a._update_pending, a._update_busy, a._new_version, a._relogin_item,
             a._login_short(), a._login_state, a._revive_busy,
+            a._latest, a._latest_at, a._latest_fail, a._newver_ask,
+            a._selfupd_state, a._selfupd_why, a.state.get("self_update", True),
         )
 
     def _autostart(self) -> bool:
@@ -370,7 +373,9 @@ class MainScreen:
             rows.append((P.amber, f"클로드 새 버전 {a._update_pending.target} 대기",
                          "다시 켜기", a.apply_update))
         if a._new_version:
-            rows.append((P.green, f"쿨다운 새 버전 v{a._new_version}", "받기", a.open_release))
+            rows.append((P.green, f"쿨다운 새 버전 v{a._new_version}",
+                         "지금 업데이트" if cooldown_selfupdate.can_self_update() else "받기",
+                         a.update_now))
         for color, text, btn, fn in rows:
             box = tk.Frame(wrap, bg=P.track)
             box.pack(fill="x", pady=(0, 8))
@@ -531,13 +536,39 @@ class MainScreen:
         self._switch(wrap, Label.AUTOSTART, self._autostart(), a.toggle_autostart,
                      locked=a._autostart_locked)
 
-        self._section(wrap, "버전")
-        ver = cooldown_newver.current()
-        self._value(wrap, "클로드 쿨다운", f"v{ver}" if ver else "소스에서 실행", P.sub,
-                    button=(f"v{a._new_version} 받기", a.open_release, True)
-                    if a._new_version else None)
+        self._section(wrap, "쿨다운 버전")
+        ver = cooldown_newver.current() or "모름"
+        selfup = cooldown_selfupdate.can_self_update()
+        self._value(wrap, "지금 버전", ver if selfup else f"{ver} · 소스에서 실행", P.sub)
+        if a._newver_ask:
+            latest, color = "확인 중", P.faint
+        elif a._latest_fail and a._latest_at:
+            latest, color = "확인 못 함", P.amber
+        elif a._latest:
+            latest, color = a._latest, P.green if a._new_version else P.sub
+        else:
+            latest, color = "확인 전", P.faint
+        if a._latest_at and not a._newver_ask:
+            latest += datetime.fromtimestamp(a._latest_at).strftime(" · %H:%M 확인")
+        self._value(wrap, "최신 버전", latest, color, button=("업데이트 확인", a.check_now))
+        if a._new_version and selfup:
+            st = a._selfupd_state or "받을 차례"
+            if st == "받아 둠" and a.state.get("self_update", True):
+                st = "받아 둠 · 자리 비면 바꿔 켬"
+            if a._selfupd_why:
+                st += f" · {a._selfupd_why}"
+            bad = "실패" in st
+            self._value(wrap, f"{a._new_version} 업데이트", st, P.red if bad else P.amber,
+                        button=("지금 업데이트", a.update_now, True))
+        elif a._new_version:
+            self._value(wrap, f"{a._new_version} 업데이트", "릴리스 페이지에서 받기", P.amber,
+                        button=(f"v{a._new_version} 받기", a.open_release, True))
+        if selfup:
+            self._switch(wrap, Label.SELF_UPDATE, bool(a.state.get("self_update", True)),
+                         a.toggle_self_update)
         if a._update_pending is not None:
-            self._value(wrap, "클로드 앱", f"{a._update_pending.target} 대기", P.amber,
+            self._section(wrap, "클로드 앱 버전")
+            self._value(wrap, "새 버전", f"{a._update_pending.target} 대기", P.amber,
                         button=("다시 켜기", a.apply_update))
 
     # -------------------------------------------------- 부품

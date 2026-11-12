@@ -68,6 +68,7 @@ import cooldown_stats  # noqa: E402
 import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐지면 지운다
 import cooldown_leftover  # noqa: E402  [남은 식구] 클로드가 고쳐지면 지운다
 import cooldown_newver  # noqa: E402  쿨다운 자기 새 버전 알림
+import cooldown_selfupdate  # noqa: E402  쿨다운 자기 새 버전 받아 옆에 풀고 바꿔 켜기
 import cooldown_dino  # noqa: E402  클로디를 아주 오래 꾹 누르면 뜨는 공룡 점프
 import skins  # noqa: E402
 from cooldown_dino_view import DinoBoard  # noqa: E402
@@ -217,7 +218,8 @@ class Label:
 
     MAIN = "메인 화면 열기"
     UPDATE = "클로드 새 버전으로 다시 켜기"
-    NEWVER = "쿨다운 새 버전 받기"
+    NEWVER = "쿨다운 새 버전으로 업데이트"
+    SELF_UPDATE = "새 버전 나오면 자동으로 업데이트"
     RELOGIN = "클로드 다시 로그인"
     USAGE = "사용량"
     PACE = "이번 주 사용 속도…"
@@ -269,7 +271,8 @@ STATUS_BOX = 18  # 상태 점 + 새로고침 링을 담는 작은 캔버스 한 
 DOT_R = 2.0  # 상태 점 반지름 — 링(반지름 7) 안쪽에 넉넉히 들어가게 작게
 
 _MUTEX = None  # 중복 실행 판정용. 프로세스가 살아 있는 동안 붙들고 있어야 한다.
-MUTEX_NAME = "claude_cooldown_single_instance"
+# 시험용 덮어쓰기(가짜 홈으로 띄운 시험 위젯이 사용자 위젯과 안 겹치게). 사용자 PC 에서는 비어 있다.
+MUTEX_NAME = os.environ.get("CLAUDE_COOLDOWN_MUTEX") or "claude_cooldown_single_instance"
 
 
 def already_running() -> bool:
@@ -290,6 +293,20 @@ def already_running() -> bool:
         return ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
     except Exception:  # noqa: BLE001
         return False
+
+
+def release_mutex() -> None:
+    """뮤텍스를 놓는다. 새 버전으로 바꿔 켜기 직전(`cooldown_selfupdate` 3).
+    놓은 뒤 다시 잡으려면 `already_running()` 을 부른다."""
+    global _MUTEX
+    if _MUTEX:
+        try:
+            import ctypes
+
+            ctypes.WinDLL("kernel32").CloseHandle(ctypes.c_void_p(_MUTEX))
+        except Exception:  # noqa: BLE001
+            pass
+        _MUTEX = None
 
 
 def summon_running_instance() -> None:
@@ -359,6 +376,8 @@ def load_state() -> dict:
         # [업데이트 대기] 조용할 때 알아서 껐다 켤지. **끔이 기본** — 남의 프로세스를
         # 죽이는 일이라 켜는 것은 사람이 정한다.
         "auto_update": False,
+        # 쿨다운 자기 새 버전: 받아서 자리 비면 바꿔 켤지. **켬이 기본**(내 위젯만 갈아 끼우는 일이다)
+        "self_update": True,
     }
     try:
         # ★ `utf-8-sig` 로 읽는다 — 손으로 고치다(메모장·파워셸 `Set-Content -Encoding utf8`)
@@ -801,6 +820,17 @@ class App:
         # 쿨다운 자기 새 버전 — 묻는 스레드가 번호(또는 None)를 넣는다
         self.newver_out: queue.Queue = queue.Queue()
         self._new_version: str | None = None
+        # 쿨다운 자기 업데이트. 묻는 스레드가 쓰고 화면이 읽는다(값 하나씩 갈아 끼우기만)
+        self._latest: str | None = None  # 릴리스 최신 번호. 못 물어봤으면 None
+        self._latest_at: float = 0.0  # 마지막으로 물어본 때(time.time)
+        self._latest_fail = False  # 마지막 물음이 실패했나
+        self._selfupd_state = ""  # "" · 받는 중 · 받아 둠 · 받기 실패 · 바꿔 켜는 중 · 바꿔 켜기 실패
+        self._selfupd_why = ""
+        self._selfupd_now = False  # [지금 업데이트] 를 눌렀다. 조용함을 기다리지 않는다
+        self._selfupd_failed: str | None = None  # 바꿔 켜다 실패한 버전. 다시 켤 때까지 알아서는 안 함
+        self._selfupd_retry = 0.0  # 받기 실패 뒤 다시 받을 때
+        self._newver_ask = False
+        self._newver_wake = threading.Event()
         # ★ 결과도 큐로 돌려받는다. **작업 스레드에서 root.after 를 부르면 안 된다** —
         #   Tk 는 스레드 안전하지 않아 조용히 씹히거나 죽는다(실제로 씹혔다).
         self.update_done: queue.Queue = queue.Queue()
@@ -1115,7 +1145,7 @@ class App:
                 ),
                 I(
                     lambda item: f"{Label.NEWVER} ({self._new_version})",
-                    tk_(self.open_release),
+                    tk_(self.update_now),
                     visible=lambda item: bool(self._new_version),
                 ),
                 M.SEPARATOR,
@@ -1303,7 +1333,7 @@ class App:
         if self._relogin_item:
             items.append((Label.RELOGIN, self.relogin))
         if self._new_version:
-            items.append((f"{Label.NEWVER} ({self._new_version})", self.open_release))
+            items.append((f"{Label.NEWVER} ({self._new_version})", self.update_now))
         for i, (label, fn) in enumerate(items):
             self.menu.insert_command(at + i, label=label, command=fn)
         if items:
@@ -1516,7 +1546,7 @@ class App:
         if docked:
             raise_above_taskbar(self.root)
 
-    def quit(self):
+    def quit(self, why: str = "메뉴"):
         self.alive = False
         self._remember_spot()
         save_state(self.state)
@@ -1525,7 +1555,7 @@ class App:
             self.tray.stop()
         except Exception:  # noqa: BLE001
             pass
-        applog("종료 — 메뉴")
+        applog(f"종료 — {why}")
         # ★ 원격 대기(claude rc)는 **일부러 안 끈다.** 폰에서 열어 둔 세션이 돌고 있을 수
         #   있어서, 위젯을 닫았다고 그걸 죽이면 사고다. 앱을 다시 켜면 PID 파일을 보고
         #   그 놈을 이어받는다(`Remote.adopt`). 끄는 것은 메뉴에서 사람이 정한다.
@@ -1809,27 +1839,162 @@ class App:
 
     # -------------------------------------------------- 쿨다운 자기 새 버전
     def _newver_watch(self) -> None:
-        """켜고 조금 뒤 한 번, 그 뒤로 `CHECK_EVERY` 마다 릴리스 최신 번호를 묻는다."""
+        """켜고 조금 뒤 한 번, 그 뒤로 `CHECK_EVERY` 마다 릴리스를 묻고, 새 버전이면 받아 둔다.
+        받아 둔 것은 사람 입력이 `IDLE_MIN` 분 없을 때(또는 [지금 업데이트]) 바꿔 켠다.
+        ★ 여기는 작업 스레드다. 화면 일(바꿔 켜기)은 `commands` 큐로 넘긴다."""
         time.sleep(cooldown_newver.FIRST_WAIT)
-        while self.alive:
+        selfup = cooldown_selfupdate.can_self_update()
+        if selfup:
             try:
-                self.newver_out.put(cooldown_newver.check())
-            except Exception:  # noqa: BLE001  못 물어봤으면 다음 차례에
-                pass
-            time.sleep(cooldown_newver.CHECK_EVERY)
+                done, kept = cooldown_selfupdate.cleanup()
+                if done or kept:
+                    applog("옛 버전 폴더 정리 — 지움 " + (", ".join(done) or "없음")
+                           + (" · 못 지움 " + ", ".join(kept) if kept else ""))
+            except Exception as e:  # noqa: BLE001
+                applog(f"옛 버전 폴더 정리 실패 — {type(e).__name__}: {e}")
+        rel: cooldown_newver.Release | None = None
+        next_ask = 0.0
+        while self.alive:
+            now = time.time()
+            if now >= next_ask:
+                got, why = None, ""
+                try:
+                    got = cooldown_newver.release()
+                    why = cooldown_newver.last_error
+                except Exception as e:  # noqa: BLE001
+                    why = type(e).__name__
+                self._latest_at = now
+                self._latest_fail = got is None
+                if got is None:
+                    applog(f"쿨다운 새 버전 확인 실패 — {why or '모름'}")
+                if got is not None:
+                    rel = got
+                    self._latest = got.version
+                mine = cooldown_newver.current()
+                new = rel.version if rel and cooldown_newver.is_newer(rel.version, mine) else None
+                self.newver_out.put(new)
+                next_ask = now + cooldown_newver.CHECK_EVERY
+            try:
+                self._selfupd_step(rel, selfup)
+            except Exception as e:  # noqa: BLE001 — 한 번 어긋나도 감시는 이어 간다
+                applog(f"쿨다운 업데이트 오류 — {type(e).__name__}: {e}")
+            if self._newver_wake.wait(30):
+                self._newver_wake.clear()
+                if self._newver_ask:
+                    self._newver_ask = False
+                    next_ask = 0.0
+
+    def _selfupd_step(self, rel, selfup: bool) -> None:
+        """받아 둘 것이 있으면 받고, 바꿔 켤 때면 화면 쪽에 넘긴다(작업 스레드)."""
+        if not selfup or rel is None:
+            return
+        if not cooldown_newver.is_newer(rel.version, cooldown_newver.current()):
+            return
+        want_now = self._selfupd_now
+        if not (want_now or self.state.get("self_update", True)):
+            return
+        if self._selfupd_state == "바꿔 켜는 중":
+            return
+        exe = cooldown_selfupdate.ready(rel.version)
+        if exe is None:
+            if self._selfupd_state == "받기 실패" and not want_now and time.time() < self._selfupd_retry:
+                return
+            self._selfupd_state, self._selfupd_why = "받는 중", ""
+            exe, why = cooldown_selfupdate.fetch(rel)
+            if exe is None:
+                self._selfupd_state, self._selfupd_why = "받기 실패", why
+                self._selfupd_now = False
+                self._selfupd_retry = time.time() + cooldown_newver.CHECK_EVERY
+                applog(f"쿨다운 {rel.version} 받기 실패 — {why}")
+                return
+            applog(f"쿨다운 {rel.version} 받아 둠 — {os.path.dirname(exe)}")
+        if self._selfupd_state != "바꿔 켜기 실패":
+            self._selfupd_state, self._selfupd_why = "받아 둠", ""
+        if want_now:
+            self.commands.put(lambda: self._swap_to(exe, rel.version, True))
+            return
+        if self._selfupd_failed == rel.version:
+            return
+        try:
+            idle = cooldown_update.user_idle_min()
+        except Exception:  # noqa: BLE001
+            return
+        if idle >= cooldown_selfupdate.IDLE_MIN:
+            self.commands.put(lambda: self._swap_to(exe, rel.version, False))
+
+    def check_now(self) -> None:
+        """[업데이트 확인] — 바로 묻는다. 단 `MANUAL_FLOOR` 초 안에 또 누르면 안 묻는다."""
+        if time.time() - self._latest_at < cooldown_selfupdate.MANUAL_FLOOR:
+            return
+        self._latest_at = time.time()  # 연타 막기 — 묻는 스레드가 곧 제 값으로 덮는다
+        self._newver_ask = True
+        self._newver_wake.set()
+
+    def update_now(self) -> None:
+        """[지금 업데이트] — 조용함을 기다리지 않고 받아서 바꿔 켠다. 소스로 돌면 릴리스 페이지."""
+        if not cooldown_selfupdate.can_self_update():
+            self.open_release()
+            return
+        self._selfupd_now = True
+        if self._selfupd_state in ("받기 실패", "바꿔 켜기 실패"):
+            self._selfupd_state = ""
+        self._newver_wake.set()
+
+    def _swap_to(self, exe: str, ver: str, forced: bool) -> None:
+        """새 버전을 띄우고 이쪽은 끝낸다(Tk 차례). 내 뮤텍스를 먼저 놓는다(`cooldown_selfupdate` 3)."""
+        if self._selfupd_state == "바꿔 켜는 중" or not self.alive:
+            return
+        if not forced and self.main.is_open():
+            return  # 메인 화면을 보는 중 — 다음 차례에
+        self._selfupd_now = False
+        self._selfupd_state = "바꿔 켜는 중"
+        applog(f"쿨다운 {ver} 로 바꿔 켬 — {'지금 업데이트' if forced else '자리 빔'}")
+        self._remember_spot()
+        save_state(self.state)
+        release_mutex()
+        try:
+            proc = cooldown_selfupdate.launch(exe, sys.argv)
+        except OSError as e:
+            self._swap_failed(ver, f"못 띄움 {e}")
+            return
+        threading.Thread(target=self._swap_wait, args=(proc, ver), daemon=True).start()
+
+    def _swap_wait(self, proc, ver: str) -> None:
+        if cooldown_selfupdate.wait_mutex(MUTEX_NAME, proc):
+            self.commands.put(lambda: self.quit(f"새 버전 {ver} 로 바꿔 켬"))
+            return
+        code = proc.poll()
+        why = f"새 것이 끝남 {code}" if code is not None else "새 것이 안 뜸"
+        self.commands.put(lambda: self._swap_failed(ver, why))
+
+    def _swap_failed(self, ver: str, why: str) -> None:
+        if already_running():  # 그 사이 누가 잡았다(새 것이 늦게 떴다) — 그쪽에 맡긴다
+            self.quit(f"새 버전 {ver} 로 바꿔 켬 (늦게 뜸)")
+            return
+        self._selfupd_state, self._selfupd_why = "바꿔 켜기 실패", why
+        self._selfupd_failed = ver
+        applog(f"쿨다운 {ver} 로 바꿔 켜기 실패 — {why}")
 
     def _on_new_version(self, ver: str | None) -> None:
-        """메뉴 맨 위 항목을 세우고, **버전마다 한 번** 트레이로 알린다."""
+        """메뉴 맨 위 항목을 세우고, **버전마다 한 번** 트레이로 알린다.
+        알아서 바꿔 켤 것이면(exe·스위치 켬) 알리지 않는다 — 곧 바뀐다."""
         self._new_version = ver
         try:
             self.tray.update_menu()
         except Exception:  # noqa: BLE001
             pass
-        if ver and self.state.get("newver_told") != ver:
+        auto = cooldown_selfupdate.can_self_update() and self.state.get("self_update", True)
+        if ver and not auto and self.state.get("newver_told") != ver:
             self.state["newver_told"] = ver
             save_state(self.state)
             applog(f"쿨다운 새 버전 {ver} 알림")
             self._tray_say(f"클로드 쿨다운 새 버전 {ver}\n우클릭 > {Label.NEWVER}")
+
+    def toggle_self_update(self) -> None:
+        self.state["self_update"] = not self.state.get("self_update", True)
+        save_state(self.state)
+        if self.state["self_update"]:
+            self._newver_wake.set()
 
     def open_release(self) -> None:
         """릴리스 페이지를 브라우저로 연다. ★ `os.startfile` 금지(하지 말 것 절) — explorer 로 넘긴다."""
@@ -4285,6 +4450,11 @@ if __name__ == "__main__":
         summon_running_instance()
         sys.exit(0)
     install_crash_log()
+    old_pid = cooldown_selfupdate.after_update(sys.argv)
+    if old_pid:  # 옛 버전이 바꿔 켜 준 것. 옛 것이 자리·설정을 저장하고 끝날 때까지 기다린다
+        gone = cooldown_selfupdate.wait_exit(old_pid)
+        applog(f"시작 — 새 버전 {cooldown_newver.current()} 로 바뀜"
+               + ("" if gone else f" (옛 것 {old_pid} 이 안 끝남)"))
     if escaped and not in_claude:
         applog("시작 — 클로드 묶음에서 빠져나와 다시 뜸")
     elif escaped:
