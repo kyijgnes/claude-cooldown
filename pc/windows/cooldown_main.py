@@ -11,7 +11,7 @@
   그리기 몸통은 앱의 `_pace_body`·`_stats_body`·`_api_body` 를 그대로 부른다.
 - 설정을 바꾸는 것도 앱의 메서드(`toggle_ping`·`switch_skin`·…)를 부를 뿐이다. 여기서 설정 파일을
   직접 쓰지 않는다.
-- **팝업과 따로 센다.** `App._close_panels` 는 팝업만 닫으므로 메인 화면에서 시각 정하기·폰 연결·
+- **팝업과 따로 센다.** `App._close_panels` 는 팝업만 닫으므로 메인 화면에서 폰 연결·
   로그인 팝업을 열어도 메인 화면은 남는다.
 - **밖을 누르면 닫기는 설정**(`앱 설정 > 메인 화면 밖을 누르면 닫기`, 끔이 기본, 11-12). 켜면 팝업의
   click_away 와 같은 방식(포커스가 빠져나가면 조금 뒤 확인)으로 닫는다. 메인 화면에서 띄운 팝업으로
@@ -134,7 +134,9 @@ def work_area_at(x: int, y: int):
     return None
 
 # (키, 이름). 이름은 메뉴와 같은 말(`Label`)을 쓴다. API 는 기록이 있는 PC 에서만 보인다.
-USAGE_TABS = ("usage", "pace", "daily", "stats", "api")
+USAGE_TABS = ("usage", "pace", "stats", "api")
+# 옛 탭 키 → 지금 탭 (11-13: `일별 사용 기록` 은 `사용 기록` 의 일별로 들어갔다)
+OLD_TABS = {"daily": "stats"}
 
 
 class MainScreen:
@@ -160,6 +162,11 @@ class MainScreen:
         self._win = None
         self._h = 0  # 고정 높이 (창을 지을 때 한 번 정함)
         self._away_at = 0.0  # 밖 클릭으로 닫힌 때 (time.monotonic)
+        # 모닝 스타터 탭: 고치는 중인 시각([[시, 분], …], None = 저장된 그대로) · 저장 못 한 까닭 ·
+        # 이 탭에서 본 실패 (위젯 표시는 내렸어도 탭을 떠나기 전까지 카드에 남긴다)
+        self._ping_draft: list | None = None
+        self._ping_warn = ""
+        self._fail_seen = None
 
     # -------------------------------------------------- 열고 닫기
     def is_open(self) -> bool:
@@ -175,6 +182,11 @@ class MainScreen:
         return self.top.winfo_x(), self.top.winfo_y()
 
     def open(self, tab: str | None = None) -> None:
+        tab = OLD_TABS.get(tab, tab)
+        if not self.is_open():
+            # 새로 열면 사용 기록은 일별부터 (탭을 오가는 동안은 고른 기간이 그대로다)
+            self.app._stats_period = self.m.STATS_TABS[0]
+            self._ping_draft, self._ping_warn, self._fail_seen = None, "", None
         if tab in self._tab_keys():
             self.tab = tab
         elif self.tab not in self._tab_keys():
@@ -287,8 +299,7 @@ class MainScreen:
 
     def _tabs(self) -> list[tuple[str, str]]:
         Label = self.m.Label
-        out = [("usage", "사용량"), ("pace", "이번 주 사용 속도"), ("daily", "일별 사용 기록"),
-               ("stats", "지난 사용 기록")]
+        out = [("usage", "사용량"), ("pace", "이번 주 사용 속도"), ("stats", "사용 기록")]
         if cooldown_api.available():
             out.append(("api", "API 사용 요금"))
         out += [
@@ -469,7 +480,7 @@ class MainScreen:
         try:
             for key in self._tab_keys():
                 self.tab = key
-                # 지난 사용 기록은 기간(주별·달별·…)마다 높이가 다르다. 다 재서 가장 큰 것을 쓴다
+                # 사용 기록은 기간(일별·주별·…)마다 높이가 다르다. 다 재서 가장 큰 것을 쓴다
                 for period in (self.m.STATS_TABS if key == "stats" else (None,)):
                     if period is not None:
                         a._stats_period = period
@@ -514,6 +525,8 @@ class MainScreen:
     def _go(self, key: str) -> None:
         if key == self.tab:
             return
+        if self.tab == "ping":
+            self._fail_seen = None
         self.tab = key
         self._render()
 
@@ -548,6 +561,14 @@ class MainScreen:
             a.state.get("main_click_away"), a.state.get("widget_click"),
         )
 
+    def _typing(self) -> bool:
+        """시:분 칸에 손이 가 있나. 그 사이 다시 그리면 치던 칸이 사라진다. 손을 떼면 그린다."""
+        try:
+            foc = self.top.focus_get()
+        except (KeyError, tk.TclError):
+            return False
+        return isinstance(foc, tk.Entry)
+
     def _autostart(self) -> bool:
         return self.m.autostart_enabled()
 
@@ -563,7 +584,7 @@ class MainScreen:
                 self._build(spot)
                 return
             sig = self._signature()
-            if sig != self._sig:
+            if sig != self._sig and not self._typing():
                 self._render()
         except Exception:  # noqa: BLE001 — 다시 그리다 어긋나도 감시는 이어 간다
             pass
@@ -603,7 +624,6 @@ class MainScreen:
             {
                 "usage": self._tab_usage,
                 "pace": lambda w: self.app._pace_body(w, INNER),
-                "daily": lambda w: self.app._daily_body(w, INNER),
                 "stats": lambda w: self.app._stats_body(w, INNER, self._fit),
                 "api": lambda w: self.app._api_body(w, INNER),
                 "look": self._tab_look,
@@ -806,42 +826,257 @@ class MainScreen:
                  anchor="w").pack(side="left", padx=(8, 0))
 
     # ---- 클로드 모닝 스타터
+    # 한 장에 위에서 아래로: 켜기 · 다음 시작(+지금 시작) · 시작 시각(바로 고침) · 최근 시작.
+    # 11-13 다시 짬: 시각 정하기·시작 기록이 따로 뜨는 팝업이었던 것을 탭 안으로 들였다.
     def _tab_ping(self, wrap: tk.Frame) -> None:
         Label = self.m.Label
         a = self.app
         cfg = a.ping_cfg
         on = bool(cfg.get("enabled"))
-        self._switch(wrap, Label.PING_ON, on, a.toggle_ping)
         times = cooldown_ping.parse_times(cfg.get("times") or [])
-        self._value(wrap, "시작 시각", " · ".join(t.strftime("%H:%M") for t in times) or "없음",
-                    button=("시각 정하기", a.open_ping_times))
-        if on and times:
-            nxt = cooldown_ping.predict_next(datetime.now(), times, a._five_resets_local())
-            self._value(wrap, "다음 시작", a._friendly_time(nxt), P.green)
-        if a._ping_fail is not None:
-            when, why = a._ping_fail
-            self._value(wrap, "자동 시작 실패", f"{when:%H:%M} · {cooldown_ping.friendly_error(why)}", P.red)
-        if a._missed_dt is not None:
-            self._value(wrap, "자동 시작 놓침", f"{a._missed_dt:%H:%M} · 컴퓨터 꺼짐", P.amber)
+        if self._ping_draft is None:
+            self._ping_draft = [[t.hour, t.minute] for t in times] or [[5, 0]]
+        if not on:  # 끄면 실패·놓침 표시도 지운다 (`toggle_ping` 과 같은 규칙)
+            self._fail_seen = None
+        self._switch(wrap, Label.PING_ON, on, a.toggle_ping)
+        self._ping_card(wrap, on, times)
+        self._ping_times(wrap)
+        self._ping_log(wrap)
 
-        self._section(wrap, "마지막 시작")
-        last = cooldown_ping.read_log_entries(1)
-        log_btn = ("시작 기록", a.open_ping_log)
-        if last:
-            when, ok, detail = last[-1]
-            text = a._friendly_time(when) + ("" if ok else f" · {cooldown_ping.friendly_error(detail)}")
-            self._value(wrap, "실행됨" if ok else "실패", text, P.sub if ok else P.red, button=log_btn)
-        else:
-            self._value(wrap, "기록", "아직 없음", P.faint, button=log_btn)
-
-        foot = tk.Frame(wrap, bg=P.bg)
-        foot.pack(fill="x", pady=(10, 0))
+    def _ping_card(self, wrap: tk.Frame, on: bool, times) -> None:
+        """다음 시작을 크게, 그 옆에 [지금 시작]. 실패·놓침은 카드 안 아래 줄에."""
+        a = self.app
+        card = tk.Frame(wrap, bg=P.track)
+        card.pack(fill="x", pady=(6, 12))
+        tk.Frame(card, bg=P.green if on and times else P.line, width=3).pack(side="left", fill="y")
+        box = tk.Frame(card, bg=P.track)
+        box.pack(side="left", fill="x", expand=True, padx=(12, 12), pady=(8, 9))
+        row = tk.Frame(box, bg=P.track)
+        row.pack(fill="x")
         if a._ping_busy:
-            b = self._button(foot, "시작하는 중", lambda: None, primary=True)
+            b = self._button(row, "시작하는 중", lambda: None, primary=True)
             b.config(state="disabled", disabledforeground=P.bg)
         else:
-            b = self._button(foot, Label.PING_NOW, a.send_ping_now, primary=True)
-        b.pack(side="left")
+            b = self._button(row, self.m.Label.PING_NOW, a.send_ping_now, primary=True)
+        b.pack(side="right")
+        left = tk.Frame(row, bg=P.track)
+        left.pack(side="left")
+        tk.Label(left, text="다음 시작", bg=P.track, fg=P.label, font=(KR, 9)).pack(anchor="w")
+        if not on:
+            text, color = "꺼짐", P.faint
+        elif not times:
+            text, color = "시각 없음", P.faint
+        else:
+            nxt = cooldown_ping.predict_next(datetime.now(), times, a._five_resets_local())
+            text, color = a._friendly_time(nxt), P.green
+        tk.Label(left, text=text, bg=P.track, fg=color, font=(KR, 15, "bold")).pack(anchor="w")
+
+        # 실패를 여기서 봤으니 위젯의 실패 표시는 내린다 (옛 시작 기록 팝업을 열 때와 같다).
+        # 탭을 떠나기 전까지는 이 카드에 그대로 둔다.
+        if a._ping_fail is not None:
+            self._fail_seen = a._ping_fail
+            a._ping_fail = None
+            a._redraw()
+        alerts = []
+        if self._fail_seen is not None:
+            when, why = self._fail_seen
+            alerts.append((P.red, f"{when:%H:%M} 자동 시작 실패 · {cooldown_ping.friendly_error(why)}"))
+        if a._missed_dt is not None:
+            alerts.append((P.amber, f"{a._missed_dt:%H:%M} 자동 시작 놓침 · 컴퓨터 꺼짐"))
+        for color, text in alerts:
+            tk.Label(box, text=text, bg=P.track, fg=color, font=(KR, 9), anchor="w").pack(
+                fill="x", pady=(4, 0))
+
+    def _ping_times(self, wrap: tk.Frame) -> None:
+        """시작 시각을 탭 안에서 바로 고친다. 시:분 칸은 타이핑·화살표·휠 다 된다.
+        고친 것은 [저장](엔터)을 눌러야 들어간다. 간격 규칙에 걸리면 까닭을 빨갛게."""
+        data = self._ping_draft
+        self._head(wrap, "시작 시각", f"간격 5시간 1분 이상 · 하루 {cooldown_ping.MAX_TIMES}개까지")
+        grid = tk.Frame(wrap, bg=P.bg)
+        grid.pack(fill="x")
+        for c in range(2):
+            grid.columnconfigure(c, weight=1, uniform="chip")
+        foot = tk.Frame(wrap, bg=P.bg)
+        foot.pack(fill="x")
+
+        def changed():
+            self._ping_warn = ""
+            self._ping_foot(foot)
+
+        def drop(i):
+            data.pop(i)
+            self._ping_warn = ""
+            self._render()
+
+        def add():
+            data.append([12, 0])
+            self._ping_warn = ""
+            self._render()
+
+        n = len(data)
+        for i in range(n + (1 if n < cooldown_ping.MAX_TIMES else 0)):
+            r, c = divmod(i, 2)
+            cell = tk.Frame(grid, bg=P.track if i < n else P.bg,
+                            highlightthickness=0 if i < n else 1,
+                            highlightbackground=P.line)
+            cell.grid(row=r, column=c, sticky="nsew", pady=3, padx=(0, 4) if c == 0 else (4, 0))
+            if i < n:
+                self._time_chip(cell, data[i], changed, (lambda k=i: drop(k)) if n > 1 else None)
+            else:  # 빈 칸 = 하나 더 넣을 자리 (최대 개수면 이 칸이 없다)
+                plus = tk.Label(cell, text="＋ 시각 추가", bg=P.bg, fg=P.green, font=(KR, 9),
+                                cursor="hand2")
+                plus.pack(fill="both", expand=True)
+                for w in (cell, plus):
+                    w.bind("<Button-1>", lambda _e: add())
+        self._ping_foot(foot)
+
+    def _time_chip(self, cell: tk.Frame, hm: list, changed, drop) -> None:
+        """시각 한 칸: [시]:[분]  ✕. `hm` 은 [시, 분] (그 자리를 바로 고친다).
+        숫자 칸은 직접 치기·옆 ▲▼(길게 누르면 빠르게)·휠 다 된다. 윈도우 기본 스핀박스 화살표는
+        본문 색을 안 따라 흰 단추로 튀어서 ▲▼ 를 직접 그린다."""
+        def field(idx, hi):
+            box = tk.Frame(cell, bg=P.track)
+            var = tk.StringVar(value=f"{hm[idx]:02d}")
+            job = [None]
+
+            def commit(*_a):
+                try:
+                    v = int(var.get())
+                except (ValueError, TypeError):
+                    return  # 비었거나 숫자가 아니면 이전 값 그대로
+                if hm[idx] != v % (hi + 1):
+                    hm[idx] = v % (hi + 1)
+                    changed()
+
+            def step(d):
+                var.set(f"{(hm[idx] + d) % (hi + 1):02d}")
+
+            def hold(d, first=True):
+                step(d)
+                job[0] = box.after(400 if first else 60, lambda: hold(d, False))
+
+            def release(_e=None):
+                if job[0] is not None:
+                    box.after_cancel(job[0])
+                    job[0] = None
+
+            def wheel(e):
+                step(1 if e.delta > 0 else -1)
+                return "break"  # 본문까지 넘어가지 않게
+
+            def enter(_e):
+                var.set(f"{hm[idx]:02d}")
+                self._ping_save()
+
+            var.trace_add("write", commit)
+            ent = tk.Entry(
+                box, textvariable=var, width=2, justify="center", font=(NUM, 14, "bold"),
+                bg=P.track, fg=P.title, insertbackground=P.title, relief="flat", bd=0,
+                highlightthickness=0, selectbackground=P.green, selectforeground=P.bg,
+            )
+            ent.pack(side="left")
+            ent.bind("<FocusIn>", lambda _e: ent.select_range(0, "end"))
+            ent.bind("<FocusOut>", lambda _e: var.set(f"{hm[idx]:02d}"))
+            ent.bind("<Return>", enter)
+            ent.bind("<Up>", lambda _e: (step(1), "break")[1])
+            ent.bind("<Down>", lambda _e: (step(-1), "break")[1])
+            arrows = tk.Frame(box, bg=P.track)
+            arrows.pack(side="left", padx=(1, 0))
+            for text, d in (("▲", 1), ("▼", -1)):
+                arr = tk.Label(arrows, text=text, bg=P.track, fg=P.faint, font=(KR, 7),
+                               cursor="hand2", padx=2, pady=0)
+                arr.pack()
+                arr.bind("<ButtonPress-1>", lambda _e, d=d: hold(d))
+                arr.bind("<ButtonRelease-1>", release)
+                arr.bind("<Enter>", lambda _e, w=arr: w.config(fg=P.title))
+                arr.bind("<Leave>", lambda _e, w=arr: (w.config(fg=P.faint), release()))
+            for w in (box, ent, arrows):
+                w.bind("<MouseWheel>", wheel)
+            return box
+
+        field(0, 23).pack(side="left", padx=(10, 0), pady=4)
+        tk.Label(cell, text=":", bg=P.track, fg=P.faint, font=(NUM, 13, "bold")).pack(
+            side="left", padx=2)
+        field(1, 59).pack(side="left", pady=4)
+        if drop is not None:  # 하나만 남으면 못 지운다
+            x = tk.Label(cell, text="✕", bg=P.track, fg=P.faint, font=(KR, 10), cursor="hand2")
+            x.pack(side="right", padx=10)
+            x.bind("<Button-1>", lambda _e: drop())
+            x.bind("<Enter>", lambda _e: x.config(fg=P.red))
+            x.bind("<Leave>", lambda _e: x.config(fg=P.faint))
+
+    def _ping_draft_items(self) -> list[str]:
+        return sorted({f"{h:02d}:{m:02d}" for h, m in self._ping_draft or []})
+
+    def _ping_dirty(self) -> bool:
+        times = cooldown_ping.parse_times(self.app.ping_cfg.get("times") or [])
+        return self._ping_draft_items() != [f"{t:%H:%M}" for t in times]
+
+    def _ping_foot(self, foot: tk.Frame) -> None:
+        """고친 게 있을 때만 서는 줄: 왼쪽 상태(저장 전·까닭), 오른쪽 [되돌리기] [저장]."""
+        for w in foot.winfo_children():
+            w.destroy()
+        if self._ping_dirty() or self._ping_warn:
+            row = tk.Frame(foot, bg=P.bg)
+            row.pack(fill="x", pady=(4, 0))
+            self._button(row, "저장", self._ping_save, primary=True).pack(side="right")
+            self._button(row, "되돌리기", self._ping_reset).pack(side="right", padx=(0, 6))
+            text, color = (self._ping_warn, P.red) if self._ping_warn else ("저장 전", P.amber)
+            tk.Label(row, text=text, bg=P.bg, fg=color, font=(KR, 9), anchor="w",
+                     justify="left", wraplength=INNER - 150).pack(side="left", fill="x", expand=True)
+        self._fit()
+
+    def _ping_save(self) -> None:
+        msg = self.app.save_ping_times(self._ping_draft_items())
+        self._ping_warn = msg
+        if not msg:
+            self._ping_draft = None
+        self._render()
+
+    def _ping_reset(self) -> None:
+        self._ping_draft = None
+        self._ping_warn = ""
+        self._render()
+
+    def _ping_log(self, wrap: tk.Frame) -> None:
+        """최근 시작 4번을 2열로. 성공은 점과 시각만, 실패는 빨갛게 하고 가장 최근 실패의 까닭을 한 줄
+        (위 카드에 실패 줄이 이미 섰으면 같은 말이라 안 적는다)."""
+        a = self.app
+        entries = list(reversed(cooldown_ping.read_log_entries(40)))[:4]
+        fails = [e for e in entries if not e[1]]
+        note = ""
+        if entries:
+            note = f"최근 {len(entries)}번 · " + (f"실패 {len(fails)}" if fails else "모두 실행됨")
+        self._head(wrap, "최근 시작", note, top=10)
+        if not entries:
+            tk.Label(wrap, text="아직 없음", bg=P.bg, fg=P.faint, font=(KR, 9),
+                     anchor="w").pack(fill="x")
+            return
+        grid = tk.Frame(wrap, bg=P.bg)
+        grid.pack(fill="x")
+        for c in range(2):
+            grid.columnconfigure(c, weight=1, uniform="log")
+        for i, (when, ok, _d) in enumerate(entries):
+            r, c = divmod(i, 2)
+            cell = tk.Frame(grid, bg=P.bg)
+            cell.grid(row=r, column=c, sticky="w", pady=1)
+            tk.Label(cell, text="●", bg=P.bg, fg=P.green if ok else P.red,
+                     font=(KR, 7)).pack(side="left", padx=(0, 7))
+            tk.Label(cell, text=a._friendly_time(when) + ("" if ok else " 실패"), bg=P.bg,
+                     fg=P.sub if ok else P.red, font=(KR, 9)).pack(side="left")
+        if fails and self._fail_seen is None:
+            when, _ok, detail = fails[0]
+            tk.Label(wrap, text=f"{a._friendly_time(when)} 실패 · {cooldown_ping.friendly_error(detail)}",
+                     bg=P.bg, fg=P.red, font=(KR, 9), anchor="w").pack(fill="x", pady=(3, 0))
+
+    @staticmethod
+    def _head(wrap, title: str, note: str = "", top: int = 0) -> None:
+        """작은 제목 한 줄. 오른쪽에 규칙·요약을 흐리게 (설명 문단 대신)."""
+        row = tk.Frame(wrap, bg=P.bg)
+        row.pack(fill="x", pady=(top, 3))
+        tk.Label(row, text=title, bg=P.bg, fg=P.label, font=(KR, 9, "bold")).pack(side="left")
+        if note:
+            tk.Label(row, text=note, bg=P.bg, fg=P.faint, font=(KR, 8)).pack(side="right")
 
     # ---- 폰·원격
     def _tab_phone(self, wrap: tk.Frame) -> None:

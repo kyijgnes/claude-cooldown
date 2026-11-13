@@ -208,8 +208,7 @@ CLI_EVERY = 1800
 CLI_FIRST = 90  # 켜고 나서 처음 묻기까지 (초). 조회·원격 대기가 먼저 자리 잡게.
 CLI_TRIES = 3  # 한 버전을 몇 번까지 깔아 볼지. 안 되는 것을 30분마다 영영 되풀이하지 않는다.
 PANEL_PAD = 18  # 팝업창 좌우 여백 (px). 카드 스킨의 PAD 와 맞춰 위젯과 같은 결로.
-STATS_TABS = ("주별", "달별", "요일·시간대", "전체")  # 지난 사용 기록에서 볼 수 있는 기간
-# 일별은 메인 화면 `일별 사용 기록` 탭으로 따로 뺐다(11-12: 창 높이를 이 하나가 끌어올렸다)
+STATS_TABS = ("일별", "주별", "달별", "요일·시간대", "전체")  # 메인 화면 `사용 기록` 의 기간. 첫 것이 기본
 THEME_TICK = 4  # 윈도우 테마가 바뀌었는지 보는 주기 (초). 'auto' 일 때만 쓴다.
 THEMES = (("auto", "윈도우 설정 따라가기"), ("light", "늘 밝게"), ("dark", "늘 어둡게"))
 
@@ -225,7 +224,7 @@ class Label:
     RELOGIN = "클로드 다시 로그인"
     USAGE = "사용량"
     PACE = "이번 주 사용 속도…"
-    STATS = "지난 사용 기록…"
+    STATS = "사용 기록…"
     API = "API 사용 요금…"
     LOOK = "위젯 모양"
     THEME = "밝게·어둡게"
@@ -233,8 +232,6 @@ class Label:
     PING = "클로드 모닝 스타터"
     PING_ON = "정한 시각에 자동으로 시작"
     PING_NOW = "지금 시작"
-    PING_TIMES = "시작 시각 정하기…"
-    PING_LOG = "시작 기록 보기…"
     PHONE = "폰 앱"
     PUSH = "폰에 사용량 보내기"
     PAIR = "폰 연결하기…"
@@ -885,11 +882,11 @@ class App:
         self._topmost_now: bool | None = None
         self._behind = False    # 전체화면 앞에서 물러나 있는 중인가
         self._panels: list[tk.Toplevel] = []  # 열려 있는 팝업들 (한 번에 하나만 둔다)
-        # 메인 화면(사용량 세부 + 모든 설정) — 팝업과 따로 센다. 팝업(시각 정하기·폰 연결)을
+        # 메인 화면(사용량 세부 + 모든 설정) — 팝업과 따로 센다. 팝업(폰 연결·로그인)을
         # 메인 화면 위에 열어도 메인 화면은 안 닫힌다(`_close_panels` 는 팝업만 닫는다).
         self.main = MainScreen(self, sys.modules[__name__])
         self._autostart_locked = False  # 시작 폴더에 못 쓰는 PC — 메인 화면이 스위치를 잠근다
-        self._stats_period = STATS_TABS[0]  # 사용량 통계에서 마지막에 보던 기간
+        self._stats_period = STATS_TABS[0]  # 사용 기록에서 보던 기간 (메인 화면을 새로 열면 일별로)
 
         # 자동 핑(모닝 스타터) 상태 — _build_menu 가 참조하므로 그 전에 잡아 둔다
         self.ping_cfg = cooldown_ping.load_cfg()
@@ -2941,6 +2938,19 @@ class App:
         self.var_ping.set(bool(self.ping_cfg["enabled"]))
         self._redraw()
 
+    def save_ping_times(self, items) -> str:
+        """시작 시각을 저장한다(메인 화면 모닝 스타터 탭). 못 하면 까닭 한 줄, 했으면 ''.
+        시각들은 5시간 1분 이상 벌어져 있어야 한다(`cooldown_ping.gap_error`)."""
+        items = sorted(set(items))
+        if not cooldown_ping.parse_times(items):
+            return "시각을 하나 이상 남겨 주세요."
+        msg = cooldown_ping.gap_error(items)
+        if msg:
+            return msg
+        self.ping_cfg["times"] = items
+        cooldown_ping.save_cfg(self.ping_cfg)
+        return ""
+
     def send_ping_now(self):
         """지금 한 번 쏜다 (테스트/즉시 창 열기). 앵커 정렬과 무관."""
         self._start_ping(manual=True)
@@ -3617,15 +3627,14 @@ class App:
 
     # -------------------------------------------------- 사용량 통계
     def _stats_body(self, wrap: tk.Misc, inner: int, refit) -> None:
-        """쌓아 둔 기록에서 '언제 얼마나 썼나' 를 셈해 보여 준다(메인 화면 `지난 사용 기록`).
+        """쌓아 둔 기록에서 '언제 얼마나 썼나' 를 셈해 보여 준다(메인 화면 `사용 기록`).
 
         사용량 단위는 **주간 한도 %p**: 5시간 퍼센트는 5시간마다 0으로 돌아가
         더할 수가 없고, 주간 퍼센트가 오른 만큼이 곧 그 사이에 쓴 양이다.
         셈은 전부 `cooldown_stats` 가 하고, 여기서는 그리기만 한다.
 
-        위쪽 기간 줄(주별·달별·요일·시간대·전체)로 갈아 가며 본다. 마지막에 보던 기간은
-        `self._stats_period` 에 남아 다음에 열 때 그대로 열린다. 갈아 낀 뒤 `refit()`.
-        일별은 `_daily_body`(메인 화면 `일별 사용 기록` 탭)가 따로 그린다.
+        위쪽 기간 줄(일별·주별·달별·요일·시간대·전체)로 갈아 가며 본다. 고른 기간은
+        `self._stats_period` 에 남아 탭을 오가도 그대로다(메인 화면을 새로 열면 일별). 갈아 낀 뒤 `refit()`.
         """
         rep = self._stats_report(wrap)
         if rep is None:
@@ -3635,12 +3644,6 @@ class App:
         content = tk.Frame(wrap, bg=P.bg)
         content.pack(fill="both", expand=True)
         self._build_stats_tabs(bar, content, rep, inner, refit)
-
-    def _daily_body(self, wrap: tk.Misc, inner: int) -> None:
-        """하루하루 쓴 양과 5시간 창 최고(메인 화면 `일별 사용 기록`)."""
-        rep = self._stats_report(wrap)
-        if rep is not None:
-            self._stats_daily(wrap, rep, inner)
 
     def _stats_report(self, wrap: tk.Misc):
         """기록을 셈하고 맨 위 단위 줄을 단다. 기록이 모자라면 빈 안내만 달고 None."""
@@ -3774,7 +3777,9 @@ class App:
 
     def _draw_stats(self, wrap, rep, inner: int, period: str) -> None:
         """고른 기간 하나를 그린다. 셈은 이미 `analyze` 가 다 해 뒀다."""
-        if period == "주별":
+        if period == "일별":
+            self._stats_daily(wrap, rep, inner)
+        elif period == "주별":
             self._stats_weekly(wrap, rep, inner)
         elif period == "달별":
             self._stats_monthly(wrap, rep, inner)
@@ -3785,26 +3790,29 @@ class App:
 
     # ---- 일별 ----
     def _stats_daily(self, wrap, rep, inner: int) -> None:
+        """막대 밑 숫자는 2열 격자로 촘촘히 (11-13: 한 줄에 하나씩이면 창 높이를 이 탭이 끌어올렸다)."""
         self._section(wrap, "일별 사용량", "하루에 쓴 만큼")
         self._chart_days(wrap, rep.days, inner)
-        self._pair(
-            wrap, "오늘", f"{rep.today:.0f}%", pace_color(self._day_level(rep.today))
-        )
-        self._pair(wrap, "어제", f"{rep.yesterday:.0f}%", P.sub)
-        self._pair(wrap, "하루 평균 (최근 7일)", f"{rep.avg_day:.0f}%", P.sub)
-        # 차트의 점선이 무엇인지 숫자로 말해 준다 (한도를 7일에 고르게 나눈 값)
-        self._pair(wrap, "하루 적정선", f"{DAY_PP:.0f}%", P.faint)
+        cells = [
+            ("오늘", f"{rep.today:.0f}%", pace_color(self._day_level(rep.today))),
+            ("어제", f"{rep.yesterday:.0f}%", P.sub),
+            ("최근 7일 하루 평균", f"{rep.avg_day:.0f}%", P.sub),
+            # 차트의 점선이 무엇인지 숫자로 말해 준다 (한도를 7일에 고르게 나눈 값)
+            ("하루 적정선", f"{DAY_PP:.0f}%", P.faint),
+        ]
         if rep.busiest is not None:
             day, value = rep.busiest
-            self._pair(wrap, "가장 많이 쓴 날", f"{self._day_text(day)} {value:.0f}%", P.sub)
+            cells.append(("가장 많이 쓴 날", f"{self._day_text(day)} {value:.0f}%", P.sub))
+        self._grid(wrap, cells)
 
         if rep.windows:
             self._rule(wrap)
             self._section(wrap, "5시간 창 최고", f"최근 {len(rep.windows)}개")
             self._chart_windows(wrap, rep.windows, inner)
-            self._pair(wrap, "평균 최고", f"{rep.win_avg:.0f}%", tone(rep.win_avg))
-            self._pair(wrap, "90% 넘긴 창", f"{rep.win_full}개",
-                       P.red if rep.win_full else P.sub)
+            self._grid(wrap, [
+                ("평균 최고", f"{rep.win_avg:.0f}%", tone(rep.win_avg)),
+                ("90% 넘긴 창", f"{rep.win_full}개", P.red if rep.win_full else P.sub),
+            ])
 
     # ---- 주별 ----
     def _stats_weekly(self, wrap, rep, inner: int) -> None:
@@ -4099,6 +4107,21 @@ class App:
         return "고르게 쓰는 속도와 거의 같아요"
 
     @staticmethod
+    def _grid(parent: tk.Misc, cells: list, cols: int = 2, gap: int = 24) -> None:
+        """이름 · 값 칸을 `cols` 열 격자로. 칸마다 왼쪽 이름, 오른쪽 값 (`_pair` 를 접어 놓은 꼴)."""
+        box = tk.Frame(parent, bg=P.bg)
+        box.pack(fill="x", pady=(0, 2))
+        for c in range(cols):
+            box.columnconfigure(c, weight=1, uniform="cell")
+        for i, (label, value, color) in enumerate(cells):
+            r, c = divmod(i, cols)
+            cell = tk.Frame(box, bg=P.bg)
+            cell.grid(row=r, column=c, sticky="ew", pady=1,
+                      padx=(0 if c == 0 else gap // 2, gap // 2 if c < cols - 1 else 0))
+            tk.Label(cell, text=label, bg=P.bg, fg=P.label, font=(KR, 9)).pack(side="left")
+            tk.Label(cell, text=value, bg=P.bg, fg=color, font=(KR, 9, "bold")).pack(side="right")
+
+    @staticmethod
     def _pair(parent: tk.Misc, label: str, value: str, color: str) -> None:
         """왼쪽 이름 · 오른쪽 값 한 줄."""
         row = tk.Frame(parent, bg=P.bg)
@@ -4179,7 +4202,7 @@ class App:
         """내용을 다 채운 뒤 크기를 재고 위젯 옆에 띄운다."""
         top.update_idletasks()
         height = top.winfo_reqheight()
-        # 메인 화면에서 연 팝업(시각 정하기·폰 연결·로그인)은 메인 화면 위에 띄운다
+        # 메인 화면에서 연 팝업(폰 연결·로그인)은 메인 화면 위에 띄운다
         ax, ay = self.main.anchor() or (self.root.winfo_x(), self.root.winfo_y())
         x, y = clamp_to_screen(ax + 28, ay + 28, width, height)
         top.geometry(f"{width}x{height}+{x}+{y}")
@@ -4287,215 +4310,6 @@ class App:
         if (today - day).days == 1:
             return f"어제 {hm}"
         return when.strftime("%m/%d ") + hm
-
-    def open_ping_log(self):
-        """실행 기록 — 성공은 점+시각만(글자 없이), 실패만 이유를 붙여 짧게 보여 준다.
-        '실행됨'을 줄마다 반복하면 영수증처럼 늘어져 보여, 성공 줄에서는 뺀다."""
-        try:
-            entries = cooldown_ping.read_log_entries(40)
-            # 여기서 까닭까지 봤으니 위젯의 '자동 시작 실패' 표시는 내린다
-            if self._ping_fail is not None:
-                self._ping_fail = None
-                self._redraw()
-            top, body = self._open_panel("시작 기록")
-            wrap = tk.Frame(body, bg=P.bg)
-            wrap.pack(fill="both", expand=True, padx=PANEL_PAD, pady=(2, PANEL_PAD))
-
-            if not entries:
-                tk.Label(
-                    wrap, text="아직 실행된 적이 없어요.", bg=P.bg, fg=P.faint, font=(KR, 9)
-                ).pack(anchor="w", pady=16)
-                self._finalize_panel(top, 300)
-                return
-
-            shown = list(reversed(entries))[:8]  # 최근 8번만 (그 위는 접는다)
-            fails = sum(1 for _w, ok, _d in shown if not ok)
-            summary = f"최근 {len(shown)}번" + (
-                f" · 실패 {fails}" if fails else " · 모두 실행됨"
-            )
-            tk.Label(
-                wrap, text=summary, bg=P.bg, fg=P.faint, font=(KR, 8), anchor="w"
-            ).pack(fill="x", pady=(0, 7))
-
-            for when, ok, detail in shown:
-                r = tk.Frame(wrap, bg=P.bg)
-                r.pack(fill="x", pady=2)
-                tk.Label(
-                    r, text="●", bg=P.bg, fg=(P.green if ok else P.red), font=(KR, 7)
-                ).pack(side="left", padx=(0, 9))
-                tk.Label(
-                    r, text=self._friendly_time(when), bg=P.bg,
-                    fg=(P.sub if ok else P.title), font=(KR, 9), anchor="w",
-                ).pack(side="left")
-                # 성공은 시각만으로 충분하다 — 실패일 때만 이유를 붙인다
-                if not ok:
-                    tk.Label(
-                        r, text="  " + cooldown_ping.friendly_error(detail),
-                        bg=P.bg, fg=P.red, font=(KR, 9), anchor="w",
-                    ).pack(side="left")
-
-            if len(entries) > len(shown):
-                tk.Label(
-                    wrap, text=f"이전 {len(entries) - len(shown)}번 더",
-                    bg=P.bg, fg=P.faint, font=(KR, 8),
-                ).pack(anchor="w", pady=(7, 0))
-            self._finalize_panel(top, 300)
-        except Exception:  # noqa: BLE001
-            pass
-
-    def open_ping_times(self):
-        """시각 설정 — 알람처럼 시:분 스테퍼(▲▼·스크롤)로 조절, 추가/삭제(✕).
-        시각들은 5시간 1분 이상 벌어져 있어야 저장된다."""
-        W = 300
-        try:
-            top, body = self._open_panel("시작 시각 정하기", click_away=False)
-            tk.Label(
-                body,
-                text="이 시각마다 5시간 자동 시작",
-                bg=P.bg,
-                fg=P.label,
-                font=(KR, 8),
-                anchor="w",
-            ).pack(fill="x", padx=PANEL_PAD, pady=(0, 2))
-            tk.Label(
-                body,
-                text="간격은 최소 5시간 1분 · 하루 최대 4개",
-                bg=P.bg,
-                fg=P.faint,
-                font=(KR, 8),
-                anchor="w",
-            ).pack(fill="x", padx=PANEL_PAD, pady=(0, 6))
-
-            # 편집 중인 값 (원본). [[시, 분], ...] — 저장할 때만 정렬한다(편집 중 행이 안 튀게).
-            parsed = cooldown_ping.parse_times(self.ping_cfg["times"])
-            data = [[t.hour, t.minute] for t in parsed] or [[5, 0]]
-
-            editor = tk.Frame(body, bg=P.bg)
-            editor.pack(fill="x", padx=PANEL_PAD)
-            # 경고문은 자리를 잡아 두려고 구분선 앞에 붙일 수 있게 미리 만든다.
-            warn = tk.Label(
-                body, text="", bg=P.bg, fg=P.red, font=(KR, 8), anchor="w",
-                wraplength=W - PANEL_PAD * 2, justify="left",
-            )
-            sep = tk.Frame(body, bg=P.line, height=1)
-
-            def add():
-                if len(data) < cooldown_ping.MAX_TIMES:
-                    data.append([12, 0])
-                    render()
-
-            def render():
-                for w in editor.winfo_children():
-                    w.destroy()
-                for i in range(len(data)):
-                    self._build_time_row(editor, data, i, render)
-                # ＋ 버튼은 최대 개수 미만일 때만 보인다 (규칙을 버튼 유무로 알린다)
-                if len(data) < cooldown_ping.MAX_TIMES:
-                    add_btn = tk.Label(
-                        editor, text="＋ 시각 추가", bg=P.bg, fg=P.green,
-                        font=(KR, 9), cursor="hand2",
-                    )
-                    add_btn.pack(anchor="w", pady=(6, 0))
-                    add_btn.bind("<Button-1>", lambda _e: add())
-                self._refit_panel(top, W)  # 행이 늘거나 줄면 창 높이를 다시 잡는다
-
-            def warn_show(text):
-                warn.config(text=text)
-                warn.pack(fill="x", padx=PANEL_PAD, pady=(4, 0), before=sep)
-                self._refit_panel(top, W)  # 경고문이 잘리지 않게 창을 늘린다
-
-            def save(_evt=None):
-                items = sorted({f"{h:02d}:{m:02d}" for h, m in data})
-                if not cooldown_ping.parse_times(items):
-                    warn_show("시각을 하나 이상 남겨 주세요.")
-                    return
-                msg = cooldown_ping.gap_error(items)
-                if msg:
-                    warn_show(msg)
-                    return
-                self.ping_cfg["times"] = items
-                cooldown_ping.save_cfg(self.ping_cfg)
-                top.destroy()
-
-            render()
-
-            sep.pack(fill="x", padx=PANEL_PAD, pady=(12, 0))
-            foot = tk.Frame(body, bg=P.bg)
-            foot.pack(fill="x", padx=PANEL_PAD, pady=(10, 14))
-            self._themed_button(foot, "저장", save, primary=True).pack(side="right")
-            self._themed_button(foot, "취소", top.destroy).pack(side="right", padx=(0, 8))
-            top.bind("<Return>", save)  # 엔터로도 저장 (버튼이 유일 경로가 아니게)
-            self._finalize_panel(top, W, grab=True)
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _build_time_row(self, parent, data, i, render) -> None:
-        """시각 한 줄 — 시:분을 스핀박스로. 숫자를 직접 타이핑, 화살표 클릭,
-        화살표를 길게 누르면 빠르게, 숫자 위에서 스크롤 — 네 방법 다 된다."""
-        row = tk.Frame(parent, bg=P.track)
-        row.pack(fill="x", pady=3, ipady=4)
-
-        def field(idx, hi):
-            var = tk.StringVar(value=f"{data[i][idx]:02d}")
-
-            def commit(*_a):
-                # 타이핑/화살표/스크롤 무엇으로 바뀌든 data 에 반영. 범위 밖은 감는다.
-                try:
-                    v = int(var.get())
-                except (ValueError, TypeError):
-                    v = data[i][idx]  # 비었거나 숫자가 아니면 이전 값 유지
-                data[i][idx] = v % (hi + 1)
-
-            var.trace_add("write", commit)
-            sb = tk.Spinbox(
-                row,
-                from_=0,
-                to=hi,
-                wrap=True,           # 23→00, 59→00 순환
-                increment=1,
-                textvariable=var,
-                width=2,
-                format="%02.0f",     # 화살표로 바꾸면 두 자리로
-                justify="center",
-                font=(NUM, 16, "bold"),
-                bg=P.track,
-                fg=P.title,
-                buttonbackground=P.track,
-                readonlybackground=P.track,
-                disabledbackground=P.track,
-                insertbackground=P.title,  # 커서 색
-                relief="flat",
-                bd=0,
-                highlightthickness=0,
-                repeatdelay=400,     # 길게 누르면
-                repeatinterval=60,   # 이 간격으로 빠르게 반복
-            )
-
-            def reformat(_e=None):
-                var.set(f"{data[i][idx]:02d}")  # 포커스 벗어나면 두 자리로 정돈
-
-            sb.bind("<FocusOut>", reformat)
-            sb.bind("<Return>", reformat)
-            # 숫자 위에서 스크롤해도 오르내린다
-            sb.bind(
-                "<MouseWheel>",
-                lambda e: sb.invoke("buttonup" if e.delta > 0 else "buttondown"),
-            )
-            return sb
-
-        field(0, 23).pack(side="left", padx=(12, 0))
-        tk.Label(row, text=":", bg=P.track, fg=P.faint, font=(NUM, 15, "bold")).pack(
-            side="left", padx=3
-        )
-        field(1, 59).pack(side="left")
-
-        # 삭제 (한 줄만 남으면 숨긴다 — 최소 한 개는 있어야 한다)
-        if len(data) > 1:
-            x = tk.Label(row, text="✕", bg=P.track, fg=P.faint, font=(KR, 10), cursor="hand2")
-            x.pack(side="right", padx=12)
-            x.bind("<Button-1>", lambda _e: (data.pop(i), render()))
-            x.bind("<Enter>", lambda _e: x.config(fg=P.red))
-            x.bind("<Leave>", lambda _e: x.config(fg=P.faint))
 
     def run(self):
         self.show_window()
