@@ -9,6 +9,11 @@
 
 뒤에 light / dark 를 붙이면 그 테마로 그린다 (없으면 윈도우 설정을 따른다).
     python _shot_skin.py card ok out.png light
+크기 배율은 zoom=1.25 처럼 준다 (작업표시줄 바는 늘 100%).
+    python _shot_skin.py arc note out.png "새 버전 0.47" zoom=1.5
+
+★ 창을 앞으로 띄우지 않는다. 화면 안에 거의 투명(알파 0.01)하게 두고 PrintWindow 로
+  창 그림만 받아 온다(화면 밖 창은 Tk 바탕이 안 그려져 그림이 깨진다, 11-12 실측).
 """
 
 from __future__ import annotations
@@ -31,9 +36,8 @@ from datetime import datetime, timedelta, timezone  # noqa: E402
 from cooldown_core import Limit, Usage  # noqa: E402
 
 import skins  # noqa: E402
-from skins.base import P, set_palette  # noqa: E402
+from skins.base import P, set_palette, set_zoom  # noqa: E402
 
-BACKDROP = "#0b0d10"
 STAMP = "03:07"
 
 
@@ -54,21 +58,31 @@ def demo(extreme: bool = False) -> Usage:
     )
 
 
-def _trim(im, key):
-    """뒷판 색만으로 채워진 바깥 줄을 잘라낸다 (바탕화면이 섞여 들어오지 않게)."""
-    px = im.load()
-    w, h = im.size
-    top, bot = 0, h
-    while bot - top > 1 and all(px[x, bot - 1] == key for x in range(w)):
-        bot -= 1
-    while bot - top > 1 and all(px[x, top] == key for x in range(w)):
-        top += 1
-    left, right = 0, w
-    while right - left > 1 and all(px[right - 1, y] == key for y in range(top, bot)):
-        right -= 1
-    while right - left > 1 and all(px[left, y] == key for y in range(top, bot)):
-        left += 1
-    return im.crop((left, top, right, bot))
+def _grab(root: tk.Tk):
+    """창 그림을 PrintWindow 로 받는다 (앞으로 띄우지 않으므로 다른 창에 가려도 된다)."""
+    import win32gui
+    import win32ui
+    from PIL import Image
+
+    hwnd = int(root.wm_frame(), 16)
+    w, h = root.winfo_width(), root.winfo_height()
+    src = win32gui.GetWindowDC(hwnd)
+    dc = win32ui.CreateDCFromHandle(src)
+    mem = dc.CreateCompatibleDC()
+    bmp = win32ui.CreateBitmap()
+    bmp.CreateCompatibleBitmap(dc, w, h)
+    mem.SelectObject(bmp)
+    import ctypes
+
+    ctypes.windll.user32.PrintWindow(hwnd, mem.GetSafeHdc(), 2)  # PW_RENDERFULLCONTENT
+    info = bmp.GetInfo()
+    im = Image.frombuffer("RGB", (info["bmWidth"], info["bmHeight"]),
+                          bmp.GetBitmapBits(True), "raw", "BGRX", 0, 1)
+    win32gui.DeleteObject(bmp.GetHandle())
+    mem.DeleteDC()
+    dc.DeleteDC()
+    win32gui.ReleaseDC(hwnd, src)
+    return im
 
 
 def main() -> None:
@@ -76,7 +90,8 @@ def main() -> None:
     # 넷째 인자는 테마(light/dark/auto) 아니면 note 문구다. 둘 다 줄 때는 테마를 다섯째에.
     extra = sys.argv[4:]
     theme = next((a for a in extra if a in ("light", "dark", "auto")), "auto")
-    words = [a for a in extra if a not in ("light", "dark", "auto")]
+    zoom = next((float(a[5:]) for a in extra if a.startswith("zoom=")), 1.0)
+    words = [a for a in extra if a not in ("light", "dark", "auto") and not a.startswith("zoom=")]
     set_palette(theme)
 
     skin = skins.make(key)
@@ -84,6 +99,7 @@ def main() -> None:
         raise SystemExit(f"'{key}' 스킨을 찾을 수 없습니다 (있는 것: "
                          f"{[c.key for c in skins.SKINS]})")
 
+    set_zoom(1.0 if skin.dockable else zoom)
     root = tk.Tk()
     root.withdraw()
     root.configure(bg=P.bg)
@@ -107,33 +123,20 @@ def main() -> None:
         skin.show_error(words[0] if words else "눌러서 다시 연결", False, STAMP)
 
     root.overrideredirect(True)
+    root.attributes("-alpha", 0.01)
     root.update_idletasks()
     root.geometry(f"{skin.width}x{root.winfo_reqheight()}+40+40")
     root.deiconify()
-    root.update_idletasks()
-    root.update()
+    root.lower()
+    # 번갈아 칸(슬림 바)이 알림을 앉히는 움직임까지 돌게 잠깐 돌린다
+    end = time.time() + 0.9
+    while time.time() < end:
+        root.update()
+        time.sleep(0.02)
 
-    x, y = root.winfo_rootx(), root.winfo_rooty()
-    w, h = root.winfo_width(), root.winfo_height()
-
-    pad = 26
-    back = tk.Toplevel(root, bg=BACKDROP)
-    back.overrideredirect(True)
-    back.geometry(f"{w + pad * 2}x{h + pad * 2}+{x - pad}+{y - pad}")
-    back.attributes("-topmost", True)
-    back.update()
-    root.attributes("-topmost", True)
-    root.lift()
-    root.update()
-    time.sleep(0.4)
-
-    from PIL import ImageGrab
-
-    im = ImageGrab.grab(bbox=(x, y, x + w, y + h)).convert("RGB")
-    key_rgb = tuple(int(BACKDROP[i:i + 2], 16) for i in (1, 3, 5))
-    _trim(im, key_rgb).save(out)
-    print(f"{out}  {skin.width}x{h}")
-    back.destroy()
+    im = _grab(root)
+    im.save(out)
+    print(f"{out}  {root.winfo_width()}x{root.winfo_height()}")
     root.destroy()
     os._exit(0)
 

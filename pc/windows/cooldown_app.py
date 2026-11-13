@@ -78,10 +78,11 @@ from skins.base import (  # noqa: E402
     MARK_W,
     NUM,
     P,
+    ZOOMS,
     mark_x,
     pace_color,
-    set_mascot,
     set_palette,
+    set_zoom,
     tone,
 )
 
@@ -385,9 +386,9 @@ def load_state() -> dict:
         "main_click_away": False,
         # 위젯(클로디 밖)을 누르면: "main" 메인 화면 열기(기본) · "refresh" 새로고침만
         "widget_click": "main",
-        # 위젯 꾸미기(메인 화면 > 위젯 모양): 클로디 색(skins.base.MASCOTS 의 키) · 창 불투명도
-        "mascot": "coral",
+        # 위젯 꾸미기(메인 화면 > 위젯 모양): 창 불투명도 · 크기 배율(skins.base.ZOOMS)
         "alpha": ALPHA,
+        "zoom": 1.0,
     }
     try:
         # ★ `utf-8-sig` 로 읽는다 — 손으로 고치다(메모장·파워셸 `Set-Content -Encoding utf8`)
@@ -397,6 +398,8 @@ def load_state() -> dict:
             state.update(json.load(f))
     except (OSError, ValueError):
         pass
+    # 클로디 색 고르기는 없앴다(v0.47). 바꿔 둔 사람의 저장값은 버리고 기본 코랄로 그린다.
+    state.pop("mascot", None)
     return state
 
 
@@ -836,6 +839,7 @@ class App:
         self._latest_fail = False  # 마지막 물음이 실패했나
         self._selfupd_state = ""  # "" · 받는 중 · 받아 둠 · 받기 실패 · 바꿔 켜는 중 · 바꿔 켜기 실패
         self._selfupd_why = ""
+        self._selfupd_said = ""  # 위젯에 마지막으로 얹은 업데이트 문구 (`_pump_once` 가 바뀌면 다시 그린다)
         self._selfupd_now = False  # [지금 업데이트] 를 눌렀다. 조용함을 기다리지 않는다
         self._selfupd_failed: str | None = None  # 바꿔 켜다 실패한 버전. 다시 켤 때까지 알아서는 안 함
         self._selfupd_retry = 0.0  # 받기 실패 뒤 다시 받을 때
@@ -958,7 +962,6 @@ class App:
         self.root.report_callback_exception = lambda exc, val, tb: applog(
             "화면 오류\n" + "".join(traceback.format_exception(exc, val, tb)).rstrip()
         )
-        set_mascot(self.state.get("mascot") or "coral")
         self.applied_theme = set_palette(self.state["theme"])
         self.root.configure(bg=P.bg)
 
@@ -1006,6 +1009,8 @@ class App:
             self.body.destroy()
         self.body = tk.Frame(self.root, bg=P.bg)
         self.body.pack(fill="both", expand=True)
+        # 크기 배율 — 작업표시줄 바는 띠 높이를 따르므로 늘 100%
+        set_zoom(1.0 if self.skin.dockable else self._zoom())
         self.skin.build(self.body)
         # 클로디를 아주 오래 꾹 누르면 공룡으로 변신한다 — 그때 공룡 점프 판을 띄운다
         claudi = getattr(self.skin, "claudi", None)
@@ -1069,13 +1074,6 @@ class App:
         if self.last_usage is not None:
             self.tray.icon = draw_icon(self.last_usage.five.pct)
 
-    def set_mascot(self, key: str) -> None:
-        """클로디 색 (메인 화면 > 위젯 모양). 색은 그릴 때 박히므로 본체를 다시 짓는다."""
-        self.state["mascot"] = key
-        save_state(self.state)
-        set_mascot(key)
-        self._apply_theme(force=True)
-
     def _alpha(self) -> float:
         """위젯 창 불투명도. 설정 `alpha`, 이상한 값이면 기본(ALPHA)."""
         try:
@@ -1089,6 +1087,26 @@ class App:
         save_state(self.state)
         if self._dino_board is None:
             self.root.attributes("-alpha", self._alpha())
+
+    def _zoom(self) -> float:
+        """위젯 크기 배율. 설정 `zoom`, 목록(ZOOMS)에 없는 값이면 1.0."""
+        try:
+            v = float(self.state.get("zoom", 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+        return min(ZOOMS, key=lambda x: abs(x - v)) if abs(v - 1.0) > 0.005 else 1.0
+
+    def set_zoom(self, value: float) -> None:
+        """위젯 크기 (메인 화면 > 위젯 모양). 치수가 지을 때 박히므로 본체를 다시 짓는다."""
+        self.state["zoom"] = value
+        save_state(self.state)
+        if self.skin.dockable:
+            return  # 바는 늘 100% — 저장만 해 두고 다른 디자인으로 바꾸면 그때 먹는다
+        self._close_panels()
+        self._build_body()
+        self.height = 0  # 크기가 바뀌었으니 다시 잰다
+        self._replay()
+        self.show_window()
 
     def _theme_watch(self) -> None:
         """윈도우의 밝기 설정을 따라간다 ('윈도우 설정 따름' 일 때만)."""
@@ -1293,6 +1311,10 @@ class App:
                 self.main.close_away()
             #   · 앱 설정 `위젯을 누르면` 이 `새로고침만` 이면 클로디 밖도 클로디처럼 새로고침만 한다
             #     (메인 화면은 우클릭·트레이 `메인 화면 열기` 로 연다).
+            # 위젯에 뜬 `새 버전 0.47` 문구를 눌렀으면 곧바로 업데이트한다(우클릭 메뉴와 같은 일)
+            if not played and self._notice_is_update() and self._notice_hit():
+                self.update_now()
+                return
             if played or self.state.get("widget_click") == "refresh":
                 if not (isinstance(self.last_error, LoginRequired) or self._login_gone()):
                     self.refresh_now()
@@ -1685,6 +1707,12 @@ class App:
             except queue.Empty:
                 break
             self._on_new_version(ver)
+
+        # 쿨다운 자기 업데이트 상태(받는 중 등)는 작업 스레드가 값만 바꾼다 — 바뀌면 위젯 문구를 고친다
+        said = self._selfupd_notice()
+        if said != self._selfupd_said:
+            self._selfupd_said = said
+            self._redraw()
 
         # [오래 도는 작업] 세션이 돌리고 있는 것 — 재는 스레드가 넣어 둔다
         while True:
@@ -2588,7 +2616,18 @@ class App:
         # 여기서도 **까닭은 붙이지 않는다**(자리가 없다. 까닭은 트레이 알림에 있다).
         if self.remote_error:
             return "원격 연결 끊김"
-        return ""
+        # 쿨다운 자기 새 버전은 맨 뒤다 — 자리가 비면 알아서 바꿔 켠다. 이 문구를 누르면 바로 한다
+        return self._selfupd_notice()
+
+    def _selfupd_notice(self) -> str:
+        """위젯에 얹을 쿨다운 자기 업데이트 상태. 새 버전이 없으면 빈 문자열."""
+        if self._selfupd_state == "바꿔 켜는 중":
+            return "업데이트 중"
+        if not self._new_version:
+            return ""
+        if self._selfupd_state == "받는 중":
+            return "새 버전 받는 중"
+        return f"새 버전 {self._new_version}"
 
     def _apply_notice(self) -> None:
         """스킨에 알림 문구를 얹는다. 오류가 떠 있으면(자리가 겹친다) 얹지 않는다."""
@@ -2596,6 +2635,18 @@ class App:
             self.skin.notice("" if self.last_error is not None else self._notice_text())
         except Exception:  # noqa: BLE001
             pass
+
+    def _notice_is_update(self) -> bool:
+        """지금 위젯 알림 자리에 뜬 것이 쿨다운 업데이트 문구인가. 바꿔 켜는 중이면 누를 것이 없다."""
+        said = self._selfupd_notice()
+        return (bool(said) and self.last_error is None and said != "업데이트 중"
+                and self._notice_text() == said)
+
+    def _notice_hit(self) -> bool:
+        try:
+            return bool(self.skin.notice_at(self._dx, self._dy))
+        except Exception:  # noqa: BLE001
+            return False
 
     def _redraw(self) -> None:
         """마지막 값으로 화면을 다시 그리고 알림을 다시 얹는다.

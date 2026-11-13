@@ -42,6 +42,7 @@ from .base import (
     NUM,
     P,
     Skin,
+    inside,
     mark_x,
     taskbar_height,
     tone,
@@ -598,6 +599,13 @@ class SlimSkin(Skin):
             return
         self._slot_notice = (text, P.amber, False)
         self._slot_queue()
+
+    def notice_at(self, x: float, y: float) -> bool:
+        # 번갈아 칸이 **지금 알림을 띄우고 있을 때만** (모델별 한도 차례에 누른 것은 아니다)
+        slot = getattr(self, "_slot", None) or []
+        shown = slot[self._slot_i] if 0 <= self._slot_i < len(slot) else None
+        return (self._slot_notice is not None and shown == self._slot_notice
+                and inside(self.slot, x, y))
 
 
 # ---------------------------------------------------------------- 좁은 바

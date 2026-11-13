@@ -67,32 +67,38 @@ LIGHT = Palette(
 
 P = Palette(**DARK.__dict__)  # 지금 쓰는 한 벌
 
-# 클로디 색 견본: (키, 이름, 어둡게, 밝게). 메인 화면 > 위젯 모양 에서 고른다(설정 `mascot`).
-# 초록·노랑·빨강은 게이지 뜻(여유·보통·임박)과 헷갈리므로 넣지 않는다.
-# 어둡게는 바탕 #15171c 대비 5.7:1 이상, 밝게는 #f3f5f7 대비 3.8:1 이상(기본 코랄과 같은 선).
-MASCOTS = (
-    ("coral", "코랄", DARK.mascot, LIGHT.mascot),
-    ("blue", "파랑", "#58a6ff", "#0969da"),
-    ("purple", "보라", "#bc8cff", "#8250df"),
-    ("pink", "분홍", "#f778ba", "#bf3989"),
-    ("gray", "회색", "#c2cad4", "#57606a"),
-)
-_mascot = "coral"
-_picked = "dark"
+# 위젯 크기 배율 (메인 화면 > 위젯 모양 > 크기, 설정 `zoom`). 앱이 스킨을 짓기 직전에
+# `set_zoom` 으로 정하고, 크기를 고칠 수 있는 스킨(카드·아크·표)은 build 첫머리에서
+# 치수를 `z()`·글자를 `zf()` 로 키운다. 작업표시줄 바는 띠 높이를 따르므로 늘 1.0 이다.
+ZOOMS = (0.9, 1.0, 1.25, 1.5)
+_zoom = 1.0
 
 
-def mascot_color(key: str, picked: str) -> str:
-    for k, _name, dark, light in MASCOTS:
-        if k == key:
-            return light if picked == "light" else dark
-    return LIGHT.mascot if picked == "light" else DARK.mascot
+def set_zoom(value: float) -> float:
+    """배율을 정한다. 목록에 없는 값이면 1.0."""
+    global _zoom
+    _zoom = value if value in ZOOMS else 1.0
+    return _zoom
 
 
-def set_mascot(key: str) -> None:
-    """클로디 색을 바꾼다. 밝기를 다시 고를 때(`set_palette`)도 이 색이 따라간다."""
-    global _mascot
-    _mascot = key
-    P.mascot = mascot_color(key, _picked)
+def zoom() -> float:
+    return _zoom
+
+
+def z(n: float) -> int:
+    """px 치수를 배율대로."""
+    return int(round(n * _zoom))
+
+
+def zf(size: int) -> int:
+    """글자 크기(pt 는 양수, px 는 음수)를 배율대로. 부호는 그대로 둔다."""
+    out = max(6, int(round(abs(size) * _zoom)))
+    return -out if size < 0 else out
+
+
+def dot_unit(base: int = 2) -> int:
+    """클로디 도트 한 칸(px). 정수여야 도트가 고르게 찍힌다."""
+    return max(base, int(base * _zoom + 0.5))
 
 KR = "맑은 고딕"
 NUM = "Segoe UI"
@@ -115,10 +121,7 @@ def set_palette(kind: str) -> str:
     picked = kind if kind in ("light", "dark") else (
         "light" if system_prefers_light() else "dark"
     )
-    global _picked
-    _picked = picked
     P.copy_from(LIGHT if picked == "light" else DARK)
-    P.mascot = mascot_color(_mascot, picked)
     return picked
 
 
@@ -252,3 +255,22 @@ class Skin:
         네 상태의 창 높이가 같아야 하므로 **자리를 새로 만들지 말고** 이미 있는
         요소(꼬리말·제목 등)의 글자·색만 바꿔서 표현한다."""
         pass
+
+    def notice_at(self, x: float, y: float) -> bool:
+        """창 기준 (x, y) 가 지금 떠 있는 알림 문구 위인가(선택). 앱은 쿨다운 새 버전
+        문구가 떠 있을 때만 묻고, 참이면 메인 화면 대신 곧바로 업데이트한다. 기본은 거짓."""
+        return False
+
+
+def inside(widget: tk.Misc, x: float, y: float, pad: int = 4) -> bool:
+    """창 기준 (x, y) 가 `widget` 의 보이는 네모 안인가 (둘레 `pad` px 까지 봐준다)."""
+    try:
+        if not widget.winfo_ismapped():
+            return False
+        top = widget.winfo_toplevel()
+        x0 = widget.winfo_rootx() - top.winfo_rootx()
+        y0 = widget.winfo_rooty() - top.winfo_rooty()
+        return (x0 - pad <= x <= x0 + widget.winfo_width() + pad
+                and y0 - pad <= y <= y0 + widget.winfo_height() + pad)
+    except tk.TclError:
+        return False

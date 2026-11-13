@@ -11,15 +11,26 @@ import tkinter as tk
 
 from cooldown_core import Pace, Usage, five_due, pace
 
-from .base import KR, MARK_W, NUM, P, Skin, mark_x, pace_color, scoped_text, tone
+from .base import KR, MARK_W, NUM, P, Skin, dot_unit, inside, mark_x, pace_color, scoped_text, tone, z, zf
 from .claudi import Claudi
 
-PAD = 18
-# 클로디가 앉는 자리 — 머리말의 제목과 기준 시각 사이 빈 곳
-CLAUDI_W, CLAUDI_H = 52, 34
-BAR_H = 3  # 게이지 두께
-BAR_TOP = 3  # 게이지 위 여백 (눈금이 위아래로 삐져나올 자리를 캔버스 안에 둔다)
-BAR_BOX = 9  # 게이지 칸 전체 높이
+# 치수는 100% 기준이다. build 첫머리 `_rescale` 이 크기 배율(base.z)대로 다시 잡는다.
+_BASE = dict(
+    PAD=18,
+    # 클로디가 앉는 자리 — 머리말의 제목과 기준 시각 사이 빈 곳
+    CLAUDI_W=52, CLAUDI_H=34,
+    BAR_H=3,  # 게이지 두께
+    BAR_TOP=3,  # 게이지 위 여백 (눈금이 위아래로 삐져나올 자리를 캔버스 안에 둔다)
+    BAR_BOX=9,  # 게이지 칸 전체 높이
+)
+PAD = CLAUDI_W = CLAUDI_H = BAR_H = BAR_TOP = BAR_BOX = 0
+
+
+def _rescale() -> None:
+    globals().update({k: z(v) for k, v in _BASE.items()})
+
+
+_rescale()
 
 
 class Section:
@@ -32,23 +43,23 @@ class Section:
 
         head = tk.Frame(box, bg=P.bg)
         head.pack(fill="x")
-        tk.Label(head, text=label, bg=P.bg, fg=P.label, font=(KR, 9), anchor="w").pack(
+        tk.Label(head, text=label, bg=P.bg, fg=P.label, font=(KR, zf(9)), anchor="w").pack(
             side="left"
         )
         # 속도 자리 — 주간에만 둔다. 5시간 창은 앞쪽에 몰아 쓰는 게 정상이라 뜻이 없다.
         self.verdict = self.due = None
         if hint:
-            self.verdict = tk.Label(head, text="", bg=P.bg, fg=P.faint, font=(KR, 9))
+            self.verdict = tk.Label(head, text="", bg=P.bg, fg=P.faint, font=(KR, zf(9)))
             self.verdict.pack(side="right")
-            self.due = tk.Label(head, text="", bg=P.bg, fg=P.label, font=(KR, 9))
-            self.due.pack(side="right", padx=(0, 7))
+            self.due = tk.Label(head, text="", bg=P.bg, fg=P.label, font=(KR, zf(9)))
+            self.due.pack(side="right", padx=(0, z(7)))
 
         row = tk.Frame(box, bg=P.bg)
         row.pack(fill="x")
-        self.value = tk.Label(row, text="--", bg=P.bg, fg=P.faint, font=(NUM, 24, "bold"))
+        self.value = tk.Label(row, text="--", bg=P.bg, fg=P.faint, font=(NUM, zf(24), "bold"))
         self.value.pack(side="left")
-        self.left = tk.Label(row, text="", bg=P.bg, fg=P.sub, font=(KR, 10))
-        self.left.pack(side="right", anchor="s", pady=(0, 9))
+        self.left = tk.Label(row, text="", bg=P.bg, fg=P.sub, font=(KR, zf(10)))
+        self.left.pack(side="right", anchor="s", pady=(0, z(9)))
 
         # 바탕은 P.bg 다 — 게이지 띠(P.gauge)는 안에 직접 그린다. 눈금이 띠 위아래로
         # 조금 삐져나와야 채워진 색 위에서도 눈에 걸린다.
@@ -98,24 +109,26 @@ class CardSkin(Skin):
     width = 260
 
     def build(self, parent: tk.Misc) -> None:
+        _rescale()
+        self.width = z(type(self).width)
         inner = self.width - PAD * 2
 
         # 머리말 — 평소엔 제목, 오류일 땐 빨간 띠. 높이는 그대로 유지된다.
         self.head = tk.Frame(parent, bg=P.bg)
-        self.head.pack(fill="x", pady=(0, 4))
-        self.accent = tk.Frame(self.head, bg=P.bg, width=3)
+        self.head.pack(fill="x", pady=(0, z(4)))
+        self.accent = tk.Frame(self.head, bg=P.bg, width=z(3))
         self.accent.pack(side="left", fill="y")
         self.head_pad = tk.Frame(self.head, bg=P.bg)
-        self.head_pad.pack(fill="x", padx=(PAD - 3, PAD), pady=(15, 9))
+        self.head_pad.pack(fill="x", padx=(PAD - z(3), PAD), pady=(z(15), z(9)))
         self.title = tk.Label(
-            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold"),
+            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, zf(10), "bold"),
             padx=0,
         )
         self.title.pack(side="left")
         # 기준 시각을 클로디보다 먼저 싼다. 오류 문구가 길어 머리말이 모자라면 시각이 아니라
         # 클로디 칸이 좁아진다(`눌러서 다시 연결 · 03:07 기준` 까지는 둘 다 다 들어간다).
         self.stamp = tk.Label(
-            self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 9), padx=0
+            self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, zf(9)), padx=0
         )
         self.stamp.pack(side="right")
         # 클로디 — 제목 옆 빈자리에서 논다. 축하 폭죽도 이 칸 안에서만 터진다.
@@ -123,23 +136,23 @@ class CardSkin(Skin):
             self.head_pad, width=CLAUDI_W, height=CLAUDI_H, bg=P.bg,
             highlightthickness=0, bd=0,
         )
-        self.pet.pack(side="left", padx=(6, 0))
-        self.claudi = Claudi(self.pet, (0, 0, CLAUDI_W, CLAUDI_H), leave=False)
+        self.pet.pack(side="left", padx=(z(6), 0))
+        self.claudi = Claudi(self.pet, (0, 0, CLAUDI_W, CLAUDI_H), leave=False, unit=dot_unit())
         self.claudi.start()
 
         self.five = Section(parent, "5시간 한도", inner)
-        tk.Frame(parent, bg=P.bg, height=14).pack()
+        tk.Frame(parent, bg=P.bg, height=z(14)).pack()
         self.week = Section(parent, "주간 한도", inner, hint=True)
 
-        tk.Frame(parent, bg=P.line, height=1).pack(fill="x", padx=PAD, pady=(18, 0))
+        tk.Frame(parent, bg=P.line, height=1).pack(fill="x", padx=PAD, pady=(z(18), 0))
 
         foot = tk.Frame(parent, bg=P.bg)
-        foot.pack(fill="x", padx=PAD, pady=(9, 15))
-        self.foot_label = tk.Label(foot, text="", bg=P.bg, fg=P.label, font=(KR, 9))
+        foot.pack(fill="x", padx=PAD, pady=(z(9), z(15)))
+        self.foot_label = tk.Label(foot, text="", bg=P.bg, fg=P.label, font=(KR, zf(9)))
         self.foot_label.pack(side="left")
-        self.foot_value = tk.Label(foot, text="", bg=P.bg, fg=P.sub, font=(KR, 9))
-        self.foot_value.pack(side="left", padx=(7, 0))
-        self.note = tk.Label(foot, text="불러오는 중", bg=P.bg, fg=P.faint, font=(KR, 9))
+        self.foot_value = tk.Label(foot, text="", bg=P.bg, fg=P.sub, font=(KR, zf(9)))
+        self.foot_value.pack(side="left", padx=(z(7), 0))
+        self.note = tk.Label(foot, text="불러오는 중", bg=P.bg, fg=P.faint, font=(KR, zf(9)))
         self.note.pack(side="right")
 
     # -------------------------------------------------- 클로디 (놀이는 claudi.py 에)
@@ -199,3 +212,6 @@ class CardSkin(Skin):
         if not text:
             return
         self.note.config(text=text, fg=P.amber)
+
+    def notice_at(self, x: float, y: float) -> bool:
+        return bool(self.note.cget("text")) and inside(self.note, x, y)

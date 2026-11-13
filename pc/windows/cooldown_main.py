@@ -718,9 +718,10 @@ class MainScreen:
                  font=(KR, 9), anchor="w").pack(fill="x")
 
     # ---- 위젯 모양
-    # 모양은 작은 그림 카드 한 줄, 나머지(밝기·클로디 색·불투명도)는 이름 + 고르기 한 줄씩.
+    # 모양은 작은 그림 카드 한 줄, 나머지(밝기·크기·불투명도)는 이름 + 고르기 한 줄씩.
     LOOK_THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
     LOOK_ALPHAS = ((1.0, "100%"), (0.96, "96%"), (0.88, "88%"), (0.75, "75%"))
+    LOOK_ZOOMS = ((0.9, "90%"), (1.0, "100%"), (1.25, "125%"), (1.5, "150%"))
     LOOK_COLS = 5  # 카드 한 줄에 몇 개 (넘으면 다음 줄)
     THUMB_H = 46  # 카드 그림 높이
 
@@ -744,8 +745,11 @@ class MainScreen:
         theme = a.state["theme"]
         self._look_row(rows, 0, "밝기", lambda box: self._segments(box, [
             (text, theme == key, lambda k=key: a.switch_theme(k)) for key, text in self.LOOK_THEMES]))
-        mascot = a.state.get("mascot") or "coral"
-        self._look_row(rows, 1, "클로디 색", lambda box: self._swatches(box, mascot, a.set_mascot))
+        # 작업표시줄 바는 띠 높이를 따르므로 크기를 못 바꾼다 — 그때는 칸을 흐리게 둔다
+        zoom, sized = a._zoom(), not a.skin.dockable
+        self._look_row(rows, 1, "크기", lambda box: self._segments(box, [
+            (text, abs(zoom - v) < 0.005, lambda v=v: a.set_zoom(v)) for v, text in self.LOOK_ZOOMS],
+            enabled=sized), dim=not sized)
         alpha = a._alpha()
         self._look_row(rows, 2, "불투명도", lambda box: self._segments(box, [
             (text, abs(alpha - v) < 0.005, lambda v=v: a.set_alpha(v)) for v, text in self.LOOK_ALPHAS]))
@@ -778,22 +782,30 @@ class MainScreen:
         return card
 
     @staticmethod
-    def _look_row(rows: tk.Frame, r: int, label: str, build) -> None:
-        tk.Label(rows, text=label, bg=P.bg, fg=P.title, font=(KR, 10), anchor="w").grid(
+    def _look_row(rows: tk.Frame, r: int, label: str, build, dim: bool = False) -> None:
+        tk.Label(rows, text=label, bg=P.bg, fg=P.faint if dim else P.title, font=(KR, 10),
+                 anchor="w").grid(
             row=r, column=0, sticky="w", pady=4)
         box = tk.Frame(rows, bg=P.bg)
         box.grid(row=r, column=1, sticky="e", pady=4)
         build(box)
 
-    def _segments(self, box: tk.Frame, options) -> None:
-        """붙은 단추 여럿 중 하나 고르기. `options` = ((이름, 골랐나, 할 일), …)."""
+    def _segments(self, box: tk.Frame, options, enabled: bool = True) -> None:
+        """붙은 단추 여럿 중 하나 고르기. `options` = ((이름, 골랐나, 할 일), …).
+        `enabled` 가 거짓이면 흐리게 그리고 눌러도 아무 일 없다(고른 것도 초록 대신 테두리 색)."""
         frame = tk.Frame(box, bg=P.line, padx=1, pady=1)
         frame.pack(side="right")
         for i, (text, on, pick) in enumerate(options):
-            lbl = tk.Label(frame, text=text, bg=P.green if on else P.track,
-                           fg=P.bg if on else P.sub, font=(KR, 9, "bold") if on else (KR, 9),
-                           padx=10, pady=3, cursor="hand2")
+            if enabled:
+                bg, fg = (P.green, P.bg) if on else (P.track, P.sub)
+            else:
+                bg, fg = (P.line if on else P.track), P.faint
+            lbl = tk.Label(frame, text=text, bg=bg, fg=fg,
+                           font=(KR, 9, "bold") if on else (KR, 9),
+                           padx=10, pady=3, cursor="hand2" if enabled else "")
             lbl.pack(side="left", padx=(0 if i == 0 else 1, 0))
+            if not enabled:
+                continue
 
             def go(_e=None, on=on, pick=pick):
                 if not on:
@@ -801,29 +813,6 @@ class MainScreen:
                     self._render()
 
             lbl.bind("<Button-1>", go)
-
-    def _swatches(self, box: tk.Frame, picked: str, pick) -> None:
-        """클로디 색 견본 동그라미. 고른 것은 바깥 고리 + 이름."""
-        dark = self.app.applied_theme != "light"
-        name = ""
-        for key, text, dc, lc in skins.base.MASCOTS:
-            on = key == picked
-            name = text if on else name
-            c = tk.Canvas(box, width=24, height=24, bg=P.bg, highlightthickness=0, bd=0,
-                          cursor="hand2")
-            c.pack(side="left", padx=(4, 0))
-            if on:
-                c.create_oval(1, 1, 23, 23, outline=P.title, width=2)
-            c.create_oval(5, 5, 19, 19, fill=dc if dark else lc, outline="")
-
-            def go(_e=None, k=key, on=on):
-                if not on:
-                    pick(k)
-                    self._render()
-
-            c.bind("<Button-1>", go)
-        tk.Label(box, text=name or "코랄", bg=P.bg, fg=P.sub, font=(KR, 9), width=4,
-                 anchor="w").pack(side="left", padx=(8, 0))
 
     # ---- 클로드 모닝 스타터
     # 한 장에 위에서 아래로: 켜기 · 다음 시작(+지금 시작) · 시작 시각(바로 고침) · 최근 시작.

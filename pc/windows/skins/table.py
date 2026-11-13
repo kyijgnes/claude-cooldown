@@ -11,39 +11,53 @@ from tkinter import font as tkfont
 
 from cooldown_core import Usage, five_due, pace
 
-from .base import KR, MARK_W, NUM, P, Skin, mark_x, scoped_text, tone
+from .base import KR, MARK_W, NUM, P, Skin, dot_unit, inside, mark_x, scoped_text, tone, z, zf
 from .claudi import Claudi
 
-PAD = 14
-# 클로디가 앉는 자리 — 머리말의 제목과 기준 시각 사이 빈 곳
-CLAUDI_W, CLAUDI_H = 52, 34
+# 치수는 100% 기준이다. build 첫머리 `_rescale` 이 크기 배율(base.z)대로 다시 잡는다.
+_BASE = dict(
+    PAD=14,
+    # 클로디가 앉는 자리 — 머리말의 제목과 기준 시각 사이 빈 곳
+    CLAUDI_W=52, CLAUDI_H=34,
+    CHROME=6,  # 라벨이 글자 말고 더 먹는 폭
+    GAUGE_W=60, GAUGE_H=8,
+    ROW_PAD=2,
+)
 # 한도 / 사용률 / 게이지 / 초기화까지
 # 가장 긴 문자열('Claude Sonnet' · '100%' · '10시간 00분 후')을 재고 글자 상자 여백 6을
 # 더해 잡은 폭. 합 288 + 좌우 여백 28 = 316
-COL = (86, 48, 72, 82)
-CHROME = 6  # 라벨이 글자 말고 더 먹는 폭
-GAUGE_W, GAUGE_H, SEGS, GAP = 60, 8, 10, 1.5
-ROW_PAD = 2
+_COL = (86, 48, 72, 82)
+SEGS, GAP = 10, 1.5
+PAD = CLAUDI_W = CLAUDI_H = CHROME = GAUGE_W = GAUGE_H = ROW_PAD = 0
+COL = _COL
+
+
+def _rescale() -> None:
+    globals().update({k: z(v) for k, v in _BASE.items()})
+    globals()["COL"] = tuple(z(w) for w in _COL)
+
+
+_rescale()
 
 
 class Row:
     """표 한 줄 — 이름 / 사용률 / 눈금 게이지 / 초기화까지."""
 
     def __init__(self, body: tk.Misc, r: int, name: str = ""):
-        self.name = tk.Label(body, text=name, bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w")
+        self.name = tk.Label(body, text=name, bg=P.bg, fg=P.sub, font=(KR, zf(9)), anchor="w")
         self.name.grid(row=r, column=0, sticky="w", pady=ROW_PAD)
 
         self.pct = tk.Label(
-            body, text="--", bg=P.bg, fg=P.faint, font=(NUM, 12, "bold"), anchor="e"
+            body, text="--", bg=P.bg, fg=P.faint, font=(NUM, zf(12), "bold"), anchor="e"
         )
         self.pct.grid(row=r, column=1, sticky="e", pady=ROW_PAD)
 
         self.bar = tk.Canvas(
             body, width=GAUGE_W, height=GAUGE_H, bg=P.bg, highlightthickness=0, bd=0
         )
-        self.bar.grid(row=r, column=2, sticky="w", padx=(10, 0), pady=ROW_PAD)
+        self.bar.grid(row=r, column=2, sticky="w", padx=(z(10), 0), pady=ROW_PAD)
 
-        self.left = tk.Label(body, text="", bg=P.bg, fg=P.faint, font=(KR, 8), anchor="e")
+        self.left = tk.Label(body, text="", bg=P.bg, fg=P.faint, font=(KR, zf(8)), anchor="e")
         self.left.grid(row=r, column=3, sticky="e", pady=ROW_PAD)
 
     def rename(self, text: str) -> None:
@@ -87,17 +101,19 @@ class TableSkin(Skin):
     width = 316
 
     def build(self, parent: tk.Misc) -> None:
-        self._kr9 = tkfont.Font(font=(KR, 9))
+        _rescale()
+        self.width = z(type(self).width)
+        self._kr9 = tkfont.Font(font=(KR, zf(9)))
 
         # 머리말 — 평소엔 제목, 오류일 땐 같은 자리가 빨간 띠가 된다.
         self.head = tk.Frame(parent, bg=P.bg)
         self.head.pack(fill="x")
-        self.accent = tk.Frame(self.head, bg=P.bg, width=3)
+        self.accent = tk.Frame(self.head, bg=P.bg, width=z(3))
         self.accent.pack(side="left", fill="y")
         self.head_pad = tk.Frame(self.head, bg=P.bg)
-        self.head_pad.pack(fill="x", padx=(PAD - 3, PAD), pady=(13, 10))
+        self.head_pad.pack(fill="x", padx=(PAD - z(3), PAD), pady=(z(13), z(10)))
         self.title = tk.Label(
-            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, 10, "bold")
+            self.head_pad, text="클로드 사용량", bg=P.bg, fg=P.title, font=(KR, zf(10), "bold")
         )
         self.title.pack(side="left")
         # 클로디 — 제목 옆 빈자리에서 논다. 축하 폭죽도 이 칸 안에서만 터진다.
@@ -105,19 +121,19 @@ class TableSkin(Skin):
             self.head_pad, width=CLAUDI_W, height=CLAUDI_H, bg=P.bg,
             highlightthickness=0, bd=0,
         )
-        self.pet.pack(side="left", padx=(10, 0))
-        self.claudi = Claudi(self.pet, (0, 0, CLAUDI_W, CLAUDI_H), leave=False)
-        self.stamp = tk.Label(self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, 9))
+        self.pet.pack(side="left", padx=(z(10), 0))
+        self.claudi = Claudi(self.pet, (0, 0, CLAUDI_W, CLAUDI_H), leave=False, unit=dot_unit())
+        self.stamp = tk.Label(self.head_pad, text="", bg=P.bg, fg=P.faint, font=(KR, zf(9)))
         self.stamp.pack(side="right")
         self.claudi.start()
 
         body = tk.Frame(parent, bg=P.bg)
-        body.pack(fill="x", padx=PAD, pady=(0, 14))
+        body.pack(fill="x", padx=PAD, pady=(0, z(14)))
         for i, w in enumerate(COL):
             body.grid_columnconfigure(i, minsize=w)
 
         # 열 이름 — 게이지 열은 보면 아는 것이라 이름을 두지 않는다.
-        hf = (KR, 9)
+        hf = (KR, zf(9))
         tk.Label(body, text="한도", bg=P.bg, fg=P.label, font=hf).grid(
             row=0, column=0, sticky="w"
         )
@@ -128,7 +144,7 @@ class TableSkin(Skin):
             row=0, column=3, sticky="e"
         )
         tk.Frame(body, bg=P.line, height=1).grid(
-            row=1, column=0, columnspan=4, sticky="ew", pady=(3, 4)
+            row=1, column=0, columnspan=4, sticky="ew", pady=(z(3), z(4))
         )
 
         self.five = Row(body, 2, "5시간")
@@ -136,18 +152,18 @@ class TableSkin(Skin):
 
         # 모델별 한도 줄과의 구분선. 그 줄이 비면 자리(1px)는 두고 색만 지운다.
         self.model_rule = tk.Frame(body, bg=P.line, height=1)
-        self.model_rule.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(4, 4))
+        self.model_rule.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(z(4), z(4)))
 
         # 모델별 한도 — 값이 없어도 이 줄은 사라지지 않는다 (창 높이 고정).
         self.model = Row(body, 5)
         # 알림 — 모델 줄의 게이지·초기화까지 두 칸을 함께 쓴다. 알림이 뜬 동안만 게이지를
         # 걷고 그 자리에 놓는다(사용률 숫자는 그대로 남는다). 평소에는 숨겨 둔다.
-        self.note = tk.Label(body, text="", bg=P.bg, fg=P.amber, font=(KR, 9), anchor="e")
-        self.note.grid(row=5, column=2, columnspan=2, sticky="e", padx=(10, 0), pady=ROW_PAD)
+        self.note = tk.Label(body, text="", bg=P.bg, fg=P.amber, font=(KR, zf(9)), anchor="e")
+        self.note.grid(row=5, column=2, columnspan=2, sticky="e", padx=(z(10), 0), pady=ROW_PAD)
         self.note.grid_remove()
 
         # 줄 높이를 못 박아 둔다. 비어 있는 줄도 같은 높이를 차지한다.
-        cell = tkfont.Font(font=(NUM, 12, "bold")).metrics("linespace") + 4
+        cell = tkfont.Font(font=(NUM, zf(12), "bold")).metrics("linespace") + z(4)
         for r in (2, 3, 5):
             body.grid_rowconfigure(r, minsize=max(cell, GAUGE_H) + ROW_PAD * 2)
 
@@ -182,8 +198,10 @@ class TableSkin(Skin):
         self.stamp.configure(fg=P.red_dim)
 
     # -------------------------------------------------- 이름 칸에 맞춰 자르기
-    def _fit(self, text: str, px: int = COL[0] - CHROME) -> str:
+    def _fit(self, text: str, px: int | None = None) -> str:
         """긴 글자는 그 칸 안에서 잘라 넣는다 (열이 밀려나지 않게)."""
+        if px is None:
+            px = COL[0] - CHROME
         if self._kr9.measure(text) <= px:
             return text
         while text and self._kr9.measure(text + "…") > px:
@@ -234,5 +252,8 @@ class TableSkin(Skin):
             return
         self.model.bar.grid_remove()
         self.model.left.grid_remove()
-        self.note.config(text=self._fit(text, COL[2] + COL[3] - 10 - CHROME))
+        self.note.config(text=self._fit(text, COL[2] + COL[3] - z(10) - CHROME))
         self.note.grid()
+
+    def notice_at(self, x: float, y: float) -> bool:
+        return inside(self.note, x, y)

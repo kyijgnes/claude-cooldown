@@ -14,7 +14,7 @@ import tkinter.font as tkfont
 
 from cooldown_core import Usage, five_due, pace
 
-from .base import KR, NUM, P, Skin, scoped_text, tone
+from .base import KR, NUM, P, Skin, dot_unit, scoped_text, tone, z, zf
 from .claudi import Claudi
 
 try:
@@ -29,32 +29,43 @@ except Exception:  # noqa: BLE001  PIL 이 없어도 스킨은 떠야 한다
     HAVE_PIL = False
 
 # ---------------------------------------------------------------- 치수
-H = 150  # 창 세로. 네 상태 모두 이 값 그대로다.
-MARGIN = 24  # 좌우 여백 — 구분선·꼬리말·오류 띠가 함께 쓴다
-GAP_X = 72  # 가운데에서 게이지 중심까지
-
-CY = 62  # 게이지 중심 y
-R_OUT = 46  # 링 바깥 반지름
-W_ARC = 12  # 링 두께
-R_MID = R_OUT - W_ARC // 2  # 중심선 = 둥근 끝 캡이 놓이는 반지름
+# 100% 기준 값이다. build 첫머리 `_rescale` 이 크기 배율(base.z)대로 다시 잡는다.
+_BASE = dict(
+    H=150,  # 창 세로. 네 상태 모두 이 값 그대로다.
+    MARGIN=24,  # 좌우 여백 — 구분선·꼬리말·오류 띠가 함께 쓴다
+    GAP_X=72,  # 가운데에서 게이지 중심까지
+    CY=62,  # 게이지 중심 y
+    R_OUT=46,  # 링 바깥 반지름
+    W_ARC=12,  # 링 두께
+    Y_BASE=71,  # 퍼센트 숫자 베이스라인 (링 정중앙)
+    Y_LABEL=92,  # 링 아래 트인 자리에 들어가는 이름
+    Y_RESET=112,
+    Y_LINE=126,
+    Y_FOOT=138,
+    BAR_TOP=125,  # 오류 띠 — 구분선·꼬리말과 같은 자리를 덮는다
+    BAR_H=20,
+)
+H = MARGIN = GAP_X = CY = R_OUT = W_ARC = R_MID = 0
+Y_BASE = Y_LABEL = Y_RESET = Y_LINE = Y_FOOT = BAR_TOP = BAR_H = 0
+F_NUM = F_SIG = F_LABEL = F_SMALL = F_ERR = (NUM, -12)
 
 START = 135.0  # PIL 각도(시계방향, 0=3시). 135 = 왼쪽 아래
 SWEEP = 270.0  # 아래가 트인 270도
 SS = 4  # 슈퍼샘플링 배율
 
-Y_BASE = 71  # 퍼센트 숫자 베이스라인 (링 정중앙)
-Y_LABEL = 92  # 링 아래 트인 자리에 들어가는 이름
-Y_RESET = 112
-Y_LINE = 126
-Y_FOOT = 138
-BAR_TOP = 125  # 오류 띠 — 구분선·꼬리말과 같은 자리를 덮는다
-BAR_H = 20
 
-F_NUM = (NUM, -24, "bold")
-F_SIG = (NUM, -13, "bold")
-F_LABEL = (KR, -12)
-F_SMALL = (KR, -12)
-F_ERR = (KR, -13, "bold")
+def _rescale() -> None:
+    g = globals()
+    g.update({k: z(v) for k, v in _BASE.items()})
+    g["R_MID"] = g["R_OUT"] - g["W_ARC"] // 2  # 중심선 = 둥근 끝 캡이 놓이는 반지름
+    g["F_NUM"] = (NUM, zf(-24), "bold")
+    g["F_SIG"] = (NUM, zf(-13), "bold")
+    g["F_LABEL"] = (KR, zf(-12))
+    g["F_SMALL"] = (KR, zf(-12))
+    g["F_ERR"] = (KR, zf(-13), "bold")
+
+
+_rescale()
 
 
 # ---------------------------------------------------------------- 그리기
@@ -73,7 +84,7 @@ def _angle(pct: float) -> float:
 def _ring(pct: float | None, due: float | None = None):
     """링 한 개를 이미지로 그린다. PIL 의 arc 는 bbox 안쪽으로 두께를 그린다.
     `due` 를 주면 그 자리에 '지금쯤' 눈금을 링을 가로질러 긋는다."""
-    size = 2 * R_OUT + 2
+    size = 2 * R_OUT + z(2)
     s = size * SS
     img = Image.new("RGB", (s, s), P.bg)
     d = ImageDraw.Draw(img)
@@ -98,12 +109,12 @@ def _ring(pct: float | None, due: float | None = None):
     if due is not None:
         # 링 두께를 한 뼘씩 넘겨 그어야 채워진 색 위에서도 눈에 걸린다
         a = math.radians(_angle(due))
-        r0 = (R_MID - W_ARC / 2 - 1) * SS
-        r1 = (R_MID + W_ARC / 2 + 1) * SS
+        r0 = (R_MID - W_ARC / 2 - z(1)) * SS
+        r1 = (R_MID + W_ARC / 2 + z(1)) * SS
         d.line(
             (c + r0 * math.cos(a), c + r0 * math.sin(a),
              c + r1 * math.cos(a), c + r1 * math.sin(a)),
-            fill=P.title, width=int(2 * SS),
+            fill=P.title, width=int(z(2) * SS),
         )
 
     return ImageTk.PhotoImage(img.resize((size, size), RESAMPLE))
@@ -205,7 +216,7 @@ class Gauge:
         num, sig = ("--", "") if pct is None else (f"{pct:.0f}", "%")
         wn = self.f_num.measure(num)
         ws = self.f_sig.measure(sig)
-        gap = 2 if sig else 0
+        gap = z(2) if sig else 0
         x = self.cx - (wn + gap + ws) / 2
         self.c.coords(self.num, x, Y_BASE - self.f_num.metrics("ascent"))
         self.c.itemconfigure(self.num, text=num, fill=color)
@@ -221,6 +232,8 @@ class ArcSkin(Skin):
     _ok_stamp = ""  # 마지막으로 값을 받은 시각
 
     def build(self, parent: tk.Misc) -> None:
+        _rescale()
+        self.width = z(type(self).width)
         self.f_num = tkfont.Font(root=parent, font=F_NUM)
         self.f_sig = tkfont.Font(root=parent, font=F_SIG)
         self.f_err = tkfont.Font(root=parent, font=F_ERR)
@@ -247,7 +260,7 @@ class ArcSkin(Skin):
 
         # 오류 띠 — 구분선·꼬리말과 같은 자리. 켜고 끄기만 하므로 높이가 안 변한다.
         if HAVE_PIL:
-            self.band_image = _band(x1 - x0, BAR_H, 6, P.red_bg, P.red)
+            self.band_image = _band(x1 - x0, BAR_H, z(6), P.red_bg, P.red)
             self.band = c.create_image(
                 x0, BAR_TOP, anchor="nw", image=self.band_image, state="hidden"
             )
@@ -258,13 +271,13 @@ class ArcSkin(Skin):
             )
         cy = BAR_TOP + BAR_H // 2
         self.err_dot = c.create_oval(
-            x0 + 10, cy - 3, x0 + 16, cy + 3, fill=P.red, width=0, state="hidden"
+            x0 + z(10), cy - z(3), x0 + z(16), cy + z(3), fill=P.red, width=0, state="hidden"
         )
         self.err_text = c.create_text(
-            x0 + 23, cy, text="", anchor="w", fill=P.red, font=F_ERR, state="hidden"
+            x0 + z(23), cy, text="", anchor="w", fill=P.red, font=F_ERR, state="hidden"
         )
         self.err_stamp = c.create_text(
-            x1 - 10, cy, text="", anchor="e", fill=P.red_dim,
+            x1 - z(10), cy, text="", anchor="e", fill=P.red_dim,
             font=F_SMALL, state="hidden",
         )
 
@@ -272,8 +285,9 @@ class ArcSkin(Skin):
         # 맨 마지막에 켠다: 매 프레임 다시 그리므로 늘 링 위에 온다.
         gap = mid - GAP_X + R_OUT, mid + GAP_X - R_OUT      # 링 사이 빈 가로 범위
         self.claudi = Claudi(
-            c, (gap[0] + 2, CY - 28, gap[1] - 2, CY + 28),
-            party=(MARGIN, 10, self.width - MARGIN, Y_LINE - 10), leave=False,
+            c, (gap[0] + z(2), CY - z(28), gap[1] - z(2), CY + z(28)),
+            party=(MARGIN, z(10), self.width - MARGIN, Y_LINE - z(10)), leave=False,
+            unit=dot_unit(),
         )
         self.claudi.start()
 
@@ -314,6 +328,19 @@ class ArcSkin(Skin):
             return
         self.c.itemconfigure(self.scoped, text=text, fill=P.amber)
 
+    def notice_at(self, x: float, y: float) -> bool:
+        c = self.c
+        if c.itemcget(self.scoped, "state") == "hidden" or not c.itemcget(self.scoped, "text"):
+            return False
+        box = c.bbox(self.scoped)
+        if not box:
+            return False
+        top = c.winfo_toplevel()
+        x -= c.winfo_rootx() - top.winfo_rootx()
+        y -= c.winfo_rooty() - top.winfo_rooty()
+        pad = z(4)
+        return box[0] - pad <= x <= box[2] + pad and box[1] - pad <= y <= box[3] + pad
+
     # -------------------------------------------------- 꼬리말 두 얼굴
     def _foot(self, stamp: str, usage: Usage | None) -> None:
         c = self.c
@@ -337,7 +364,7 @@ class ArcSkin(Skin):
             # 값이 하나도 없으면(로그인 막힘) 그 상태를 확인한 시각에 `기준` 을 붙인다.
             # 띠가 모자라면(긴 오류 문구) `기준` 을, 그래도 모자라면 시각을 덜어 문구와 안 겹치게.
             when = self._ok_stamp or stamp
-            room = (self.width - MARGIN - 10) - (MARGIN + 23) - 8 - self.f_err.measure(text)
+            room = (self.width - MARGIN - z(10)) - (MARGIN + z(23)) - z(8) - self.f_err.measure(text)
             shown = ""
             for cand in ((f"{when} 기준", when) if when else ()):
                 if self.f_small.measure(cand) <= room:

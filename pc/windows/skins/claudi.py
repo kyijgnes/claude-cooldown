@@ -308,8 +308,13 @@ class Claudi:
 
     def __init__(self, canvas: tk.Canvas, box: tuple[float, float, float, float],
                  party: tuple[float, float, float, float] | None = None,
-                 leave: bool = True) -> None:
+                 leave: bool = True, unit: int = MASCOT_U) -> None:
         self.c = canvas
+        # 도트 한 칸(px). 위젯 크기 배율로 커질 때 스킨이 `base.dot_unit()` 을 준다.
+        # 물리(튀는 높이·용수철)는 px 그대로 두고 그림·누르는 반경만 키운다.
+        self.u = unit
+        self.sprite_h = (len(HEAD) + len(LEGS)) * unit
+        self.hit_r = HIT_R * unit / MASCOT_U
         self.set_box(box)
         # 완주 축하 폭죽이 퍼지는 범위 — 안 주면 노는 상자와 같다. 아크형처럼 **집은
         # 좁은 틈이지만 축하는 위젯 전체에** 터뜨리고 싶을 때 따로 준다.
@@ -327,14 +332,14 @@ class Claudi:
         self.cy = (self.y0 + self.y1) / 2
         self.box_h = self.y1 - self.y0
         # 자리를 비우거나 소품을 치울 때 **상자 밖으로 완전히** 나가는 거리
-        self.drop = (self.y1 - self.cy) + SPRITE_H
+        self.drop = (self.y1 - self.cy) + self.sprite_h
 
     def home(self, cx: float, cy: float | None = None) -> None:
         """집만 상자 한가운데가 아닌 곳으로 옮긴다 (슬림 바처럼 한쪽에 앉을 때)."""
         self.cx = cx
         if cy is not None:
             self.cy = cy
-            self.drop = (self.y1 - self.cy) + SPRITE_H
+            self.drop = (self.y1 - self.cy) + self.sprite_h
 
     def to_local(self, widget: tk.Misc, x: float | None, y: float | None):
         """앱이 주는 **창 기준** 좌표를 이 캔버스 기준으로 옮긴다.
@@ -413,7 +418,7 @@ class Claudi:
         """누른 자리가 마스코트 자리인가 (자리를 비웠는지는 안 본다)."""
         dx = x - self.cx
         dy = y - self.cy
-        return dx * dx + dy * dy <= HIT_R * HIT_R
+        return dx * dx + dy * dy <= self.hit_r * self.hit_r
 
     def _hit(self, x: float, y: float) -> bool:
         """누른 자리가 마스코트 위인가 (직접 콕 찌름). 자리를 비웠으면 없는 셈."""
@@ -677,7 +682,7 @@ class Claudi:
                 side = random.choice((-1, 1))
                 self._sparks.append([
                     cx + side * random.uniform(2.0, 6.0),
-                    cy + random.uniform(3.0, 4.2) * MASCOT_U,
+                    cy + random.uniform(3.0, 4.2) * self.u,
                     side * random.uniform(0.28, 0.62) * power,
                     random.uniform(-0.30, -0.08) * power,
                     SPARK_LIFE * random.uniform(0.45, 0.75), P.mascot,
@@ -685,7 +690,7 @@ class Claudi:
             else:  # 머리 위 — 떠오른다
                 self._sparks.append([
                     cx + random.uniform(-1, 1) * SPARK_SPREAD * power,
-                    cy - random.uniform(2.5, 7.0) * MASCOT_U,
+                    cy - random.uniform(2.5, 7.0) * self.u,
                     random.uniform(-0.22, 0.22) * power,
                     random.uniform(-0.85, -0.35) * power,
                     SPARK_LIFE * random.uniform(0.62, 1.0), P.mascot,
@@ -752,7 +757,7 @@ class Claudi:
             self._launch -= 1
             lift = LAUNCH_LIFT
         else:
-            lift = max(4.0, (self.box_h - SPRITE_H) / 2 - 1)
+            lift = max(4.0, (self.box_h - self.sprite_h) / 2 - 1)
         # ★ 끝에 닿으면 **속도까지 죽인다.** 위치만 가두면 연타할 때 속도가 계속 쌓여
         #   천장에 붙은 채 한참 못 내려온다 — 그게 '마비된 것 같다' 의 정체였다.
         nxt = self._yoff + self._vy
@@ -1017,8 +1022,8 @@ class Claudi:
                 arms = (-1, -1) if self._yoff < -FINALE_CHEER else (0, 0)
             # 크래커는 **겨눈 쪽 손**에 들려 있다. 팔이 오르내리면 같이 따라간다.
             if self._pop_drop < POP_DROP:
-                popper = (cx + self._pop_side * POP_HAND * MASCOT_U * sxk,
-                          cy + ((3 if arms[0] == -1 else 4) + 0.5 - 4) * MASCOT_U * syk,
+                popper = (cx + self._pop_side * POP_HAND * self.u * sxk,
+                          cy + ((3 if arms[0] == -1 else 4) + 0.5 - 4) * self.u * syk,
                           self._pop_side)
                 if self._pop_drop:  # 다 쏘고 나면 손에서 놓아 아래로 치운다
                     k = self._pop_drop / POP_DROP
@@ -1045,7 +1050,7 @@ class Claudi:
             frac = (self._t % BALL_PERIOD) / BALL_PERIOD
             ball = (
                 self.cx + math.sin(frac * math.tau) * 4.0,
-                cy - 4.4 * MASCOT_U - math.sin(frac * math.pi) * BALL_H,
+                cy - 4.4 * self.u - math.sin(frac * math.pi) * BALL_H,
             )
             self._ball_at = ball  # 접을 때 공이 여기서부터 떨어진다
             # 손을 떠나 있는 동안만 팔을 번쩍 (받는 순간엔 내린다)
@@ -1061,7 +1066,7 @@ class Claudi:
             expr, arms = "idle", (0, 0)
 
         self._sprite(expr, arms, legs, cx, cy,
-                     MASCOT_U * sxk, MASCOT_U * syk, lean, eye_dx, None, extra)
+                     self.u * sxk, self.u * syk, lean, eye_dx, None, extra)
         if lap is not None:  # 노트북은 도트가 아니라 다각형이라 스프라이트 뒤에 따로 그린다
             self._draw_laptop(c, *lap)
         if popper is not None:  # 파티 폭죽도 다각형 (손 위에 얹혀 보이게 몸보다 앞)
@@ -1069,7 +1074,7 @@ class Claudi:
         if ball is not None:
             # 공은 몸 위에 그린다(손보다 앞). **몸 색으로 그리면 몸에 붙은 혹처럼 보인다** —
             # 호박색 장난감으로 둔다(알림 색과 자리가 겹치지 않아 헷갈릴 일이 없다).
-            u = MASCOT_U * BALL_R
+            u = self.u * BALL_R
             c.create_rectangle(ball[0] - u, ball[1] - u, ball[0] + u, ball[1] + u,
                                fill=P.amber, width=0, tags="mascot")
         self._draw_sparks(c)
@@ -1139,7 +1144,7 @@ class Claudi:
         rows = dino.POSES["stand"]
         w, h = len(rows[0]) * u, len(rows) * u
         x0 = round(self.cx - w / 2)
-        y0 = round(self.cy + SPRITE_H / 2 - h + (1 if (self._t // 14) % 2 else 0))
+        y0 = round(self.cy + self.sprite_h / 2 - h + (1 if (self._t // 14) % 2 else 0))
         for r, line in enumerate(rows):
             col = 0
             while col < len(line):
@@ -1168,7 +1173,7 @@ class Claudi:
         """뿜은 반짝이 — 도트답게 작은 십자(칸 다섯)로 떠오르며 사그라든다."""
         for sx, sy, _vx, _vy, life, color in self._sparks:
             # 수명대로 작아진다 — 가루가 흩어져 사그라드는 결(폰 쪽과 같은 식)
-            u = MASCOT_U * SPARK_SIZE * (life / SPARK_LIFE)
+            u = self.u * SPARK_SIZE * (life / SPARK_LIFE)
             if u < 0.45:
                 continue
             self._cross(c, sx, sy, u, color)
@@ -1185,7 +1190,7 @@ class Claudi:
             for i in range(n):
                 t = i / n  # 0 = 머리(지금 자리), 1 = 꼬리 끝(직전 자리)
                 self._cross(c, sx - vx * t, sy - vy * t,
-                            MASCOT_U * (1.0 - 0.55 * t), color)
+                            self.u * (1.0 - 0.55 * t), color)
 
     def _draw_laptop(self, c: tk.Canvas, cx: float, cy: float) -> None:
         """노트북 — **도트가 아니라 1px 다각형**으로 그린다(위 `LAP_*` 주석 참고).
@@ -1225,7 +1230,7 @@ class Claudi:
     def _draw_zzz(self, c: tk.Canvas) -> None:
         """낮잠 z — 머리 위로 비스듬히 떠오른다. 도트 3×3 이라 이 크기에서도 z 로 읽힌다."""
         for zx, zy, life in self._zzz:
-            u = MASCOT_U * (0.7 + 0.5 * (1 - life / NAP_LIFE))  # 멀어질수록 커진다
+            u = self.u * (0.7 + 0.5 * (1 - life / NAP_LIFE))  # 멀어질수록 커진다
             for r, line in enumerate(NAP_Z):
                 for col, ch in enumerate(line):
                     if ch != "#":
@@ -1238,7 +1243,7 @@ class Claudi:
         """기절 — 크게 부풀려 주저앉고(다리가 벌어진다), X_X 눈에 팔은 축 늘어진다.
         작아서 눈이 안 보이던 걸 FAINT_SCALE 로 키워 X 를 확실히 보이게 한다."""
         t = self._t
-        u = MASCOT_U * FAINT_SCALE
+        u = self.u * FAINT_SCALE
         cy = self.cy + 2.0 + math.sin(t * 0.25) * 0.6  # 살짝 처져 흐느적
         lean = math.sin(t * 0.2) * 0.20                   # 어질어질 크게 흔들
         self._sprite("faint", (1, 1), LEGS_WIDE, cx, cy, u, u, lean)
