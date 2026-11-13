@@ -80,6 +80,7 @@ from skins.base import (  # noqa: E402
     P,
     mark_x,
     pace_color,
+    set_mascot,
     set_palette,
     tone,
 )
@@ -387,6 +388,9 @@ def load_state() -> dict:
         "main_click_away": False,
         # 위젯(클로디 밖)을 누르면: "main" 메인 화면 열기(기본) · "refresh" 새로고침만
         "widget_click": "main",
+        # 위젯 꾸미기(메인 화면 > 위젯 모양): 클로디 색(skins.base.MASCOTS 의 키) · 창 불투명도
+        "mascot": "coral",
+        "alpha": ALPHA,
     }
     try:
         # ★ `utf-8-sig` 로 읽는다 — 손으로 고치다(메모장·파워셸 `Set-Content -Encoding utf8`)
@@ -957,6 +961,7 @@ class App:
         self.root.report_callback_exception = lambda exc, val, tb: applog(
             "화면 오류\n" + "".join(traceback.format_exception(exc, val, tb)).rstrip()
         )
+        set_mascot(self.state.get("mascot") or "coral")
         self.applied_theme = set_palette(self.state["theme"])
         self.root.configure(bg=P.bg)
 
@@ -1066,6 +1071,27 @@ class App:
         self.show_window()
         if self.last_usage is not None:
             self.tray.icon = draw_icon(self.last_usage.five.pct)
+
+    def set_mascot(self, key: str) -> None:
+        """클로디 색 (메인 화면 > 위젯 모양). 색은 그릴 때 박히므로 본체를 다시 짓는다."""
+        self.state["mascot"] = key
+        save_state(self.state)
+        set_mascot(key)
+        self._apply_theme(force=True)
+
+    def _alpha(self) -> float:
+        """위젯 창 불투명도. 설정 `alpha`, 이상한 값이면 기본(ALPHA)."""
+        try:
+            return max(0.5, min(1.0, float(self.state.get("alpha", ALPHA))))
+        except (TypeError, ValueError):
+            return ALPHA
+
+    def set_alpha(self, value: float) -> None:
+        """위젯 창 불투명도 (메인 화면 > 위젯 모양). 공룡 판이 떠 있으면 닫을 때 따라간다."""
+        self.state["alpha"] = value
+        save_state(self.state)
+        if self._dino_board is None:
+            self.root.attributes("-alpha", self._alpha())
 
     def _theme_watch(self) -> None:
         """윈도우의 밝기 설정을 따라간다 ('윈도우 설정 따름' 일 때만)."""
@@ -1495,7 +1521,7 @@ class App:
             pass
 
     def _clear_busy(self):
-        self.root.attributes("-alpha", ALPHA)
+        self.root.attributes("-alpha", self._alpha())
 
     def toggle_topmost(self):
         self.state["topmost"] = not self.state["topmost"]
@@ -1555,7 +1581,7 @@ class App:
             return
         self.root.deiconify()
         self.root.overrideredirect(True)
-        self.root.attributes("-alpha", ALPHA)
+        self.root.attributes("-alpha", self._alpha())
         self.root.update_idletasks()
         self.height = self.height or self.root.winfo_reqheight()
 
