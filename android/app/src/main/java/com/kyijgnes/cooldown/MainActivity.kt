@@ -13,6 +13,9 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import com.kyijgnes.cooldown.dino.DinoView
+import com.kyijgnes.cooldown.update.NewVersion
+import com.kyijgnes.cooldown.update.UpdateWorker
+import com.kyijgnes.cooldown.update.Updater
 import com.kyijgnes.cooldown.wallpaper.WallpaperArt
 import com.kyijgnes.cooldown.work.RefreshWorker
 import com.kyijgnes.cooldown.work.ResetAlarm
@@ -63,17 +66,14 @@ class MainActivity : Activity() {
         refresh.setOnClickListener { reload() }
         findViewById<Button>(R.id.options).setOnClickListener { openOptions() }
         newVersion = findViewById(R.id.newVersion)
-        newVersion.setOnClickListener {
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(NewVersion.PAGE)))
-            } catch (e: Exception) {
-                Toast.makeText(this, "브라우저를 못 열었어요", Toast.LENGTH_SHORT).show()
-            }
-        }
+        newVersion.setOnClickListener { startUpdate() }
 
         takePairFrom(intent)
         RefreshWorker.schedule(this)
         ResetAlarm.schedule(this)
+        UpdateWorker.schedule(this)
+        // 새 버전 알림을 눌러 왔다 (화면을 돌려 다시 만들어질 때는 또 하지 않는다)
+        if (savedInstanceState == null && intent?.action == UpdateWorker.ACTION) startUpdate()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -81,6 +81,7 @@ class MainActivity : Activity() {
         setIntent(intent)
         takePairFrom(intent)
         showValues()
+        if (intent.action == UpdateWorker.ACTION) startUpdate()
     }
 
     override fun onPause() {
@@ -96,8 +97,13 @@ class MainActivity : Activity() {
         //   있을 때 배경을 바꿔도 안 따라온다(실제로 옛 그림이 남았다).
         seedWallpaper()
         showValues()
-        Thread {   // 쿨다운 새 버전 — 6시간에 한 번만 묻는다
+        Updater.resume(this)   // 「출처를 알 수 없는 앱」 허용하고 돌아왔으면 설치를 이어 간다
+        Thread {   // 쿨다운 새 버전 — 켤 때는 한 시간에 한 번만 묻는다
             if (NewVersion.refresh(this)) runOnUiThread { if (!isFinishing) showValues() }
+            if (NewVersion.pending(this) == null) {
+                Updater.cleanup(this)
+                UpdateWorker.clear(this)
+            }
         }.start()
         if (!Store.paired(this)) {
             if (!sentToPair) {
@@ -178,6 +184,13 @@ class MainActivity : Activity() {
         if (board != null) endGame() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
+    /** 새 버전 APK 를 받아 설치 화면까지 (`Updater`). */
+    private fun startUpdate() {
+        if (NewVersion.pending(this) == null) return
+        UpdateWorker.clear(this)
+        Updater.start(this) { if (!isFinishing) showValues() }
+    }
+
     private fun openOptions() {
         startActivity(Intent(this, SettingsActivity::class.java))
     }
@@ -198,7 +211,7 @@ class MainActivity : Activity() {
         status.text = statusLine()
         val ver = NewVersion.pending(this)
         newVersion.visibility = if (ver != null) View.VISIBLE else View.GONE
-        if (ver != null) newVersion.text = "쿨다운 새 버전 받기 ($ver)"
+        if (ver != null) newVersion.text = Updater.label(ver)
     }
 
     private fun drawGauge() {

@@ -167,5 +167,19 @@
             android:text="확인 중…"
             android:textColor="@color/label"
             android:textSize="13sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginVertical="24dp"
+            android:background="@color/line" />
+
+        <!-- 글자는 코드가 지금 버전을 넣어 채운다 (SettingsActivity) -->
+        <Button
+            android:id="@+id/check_update"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="새 버전 확인"
+            android:textColor="@color/title" />
     </LinearLayout>
 </ScrollView>

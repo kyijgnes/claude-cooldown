@@ -18,6 +18,8 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.kyijgnes.cooldown.notify.NotifyController
+import com.kyijgnes.cooldown.update.NewVersion
+import com.kyijgnes.cooldown.update.UpdateWorker
 import com.kyijgnes.cooldown.widget.WideWidget
 
 /**
@@ -56,6 +58,10 @@ class SettingsActivity : Activity() {
             startActivity(Intent(this, CustomizeActivity::class.java))
         }
         findViewById<Button>(R.id.widget).setOnClickListener { pinWidget() }
+        findViewById<Button>(R.id.check_update).apply {
+            text = "새 버전 확인 (지금 ${NewVersion.mine(this@SettingsActivity)})"
+            setOnClickListener { checkUpdate() }
+        }
 
         notify.setOnCheckedChangeListener { _: CompoundButton, on: Boolean ->
             Store.setNotifyOn(this, on)
@@ -176,6 +182,28 @@ class SettingsActivity : Activity() {
 
     private fun refresh() {
         Thread { Refresher.refresh(this) }.start()
+    }
+
+    // ---------------------------------------------------------------- 새 버전
+
+    /** 지금 묻는다. 새 버전이 있으면 첫 화면으로 가서 바로 받는다(`Updater`). */
+    private fun checkUpdate() {
+        Thread {
+            val ok = NewVersion.refresh(this, force = true)
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                val ver = NewVersion.pending(this)
+                when {
+                    ver != null -> startActivity(
+                        Intent(this, MainActivity::class.java)
+                            .setAction(UpdateWorker.ACTION)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    )
+                    ok -> toast("최신 버전이에요")
+                    else -> toast("확인하지 못했어요")
+                }
+            }
+        }.start()
     }
 
     // ---------------------------------------------------------------- 위젯 넣기

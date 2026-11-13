@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.kyijgnes.cooldown.Refresher
+import com.kyijgnes.cooldown.update.UpdateWorker
+import com.kyijgnes.cooldown.update.Updater
 
 /** 재부팅·앱 업데이트 뒤에도 알림과 주기 갱신을 되살린다. */
 class BootReceiver : BroadcastReceiver() {
@@ -18,5 +20,11 @@ class BootReceiver : BroadcastReceiver() {
         ResetAlarm.schedule(ctx)
         Refresher.renderAll(ctx)  // 저장해 둔 값으로 알림·위젯을 곧바로 되살린다
         RefreshWorker.once(ctx)
+        UpdateWorker.schedule(ctx)
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            // 새 버전이 깔렸다: 알림을 거두고 받아 둔 APK 를 지운다
+            UpdateWorker.clear(ctx)
+            Updater.cleanup(ctx)
+        }
     }
 }
