@@ -36,6 +36,7 @@ import cooldown_remote
 import cooldown_selfupdate
 import skins
 from cooldown_core import LoginRequired, five_due, pace
+from skins import thumbs
 from skins.base import KR, MARK_W, NUM, P, mark_x, tone
 
 W = 580  # 창 폭 (px)
@@ -697,20 +698,112 @@ class MainScreen:
                  font=(KR, 9), anchor="w").pack(fill="x")
 
     # ---- 위젯 모양
+    # 모양은 작은 그림 카드 한 줄, 나머지(밝기·클로디 색·불투명도)는 이름 + 고르기 한 줄씩.
+    LOOK_THEMES = (("auto", "윈도우 설정 따름"), ("light", "밝게"), ("dark", "어둡게"))
+    LOOK_ALPHAS = ((1.0, "100%"), (0.96, "96%"), (0.88, "88%"), (0.75, "75%"))
+    LOOK_COLS = 5  # 카드 한 줄에 몇 개 (넘으면 다음 줄)
+    THUMB_H = 46  # 카드 그림 높이
+
     def _tab_look(self, wrap: tk.Frame) -> None:
-        THEMES, Label = self.m.THEMES, self.m.Label
+        Label = self.m.Label
         a = self.app
-        self._section(wrap, "모양", first=True)
-        for cls in skins.SKINS:
-            self._radio(wrap, cls.name, a.skin.key == cls.key,
-                        lambda k=cls.key: a.switch_skin(k))
-        self._section(wrap, "밝기")
-        for key, label in THEMES:
-            self._radio(wrap, label, a.state["theme"] == key, lambda k=key: a.switch_theme(k))
-        self._section(wrap, "띄우기")
+        grid = tk.Frame(wrap, bg=P.bg)
+        grid.pack(fill="x")
+        gap = 6
+        cols = self.LOOK_COLS
+        cw = (INNER - gap * (cols - 1)) // cols
+        for i, cls in enumerate(skins.SKINS):
+            card = self._look_card(grid, cls, a.skin.key == cls.key, cw,
+                                   lambda k=cls.key: a.switch_skin(k))
+            card.grid(row=i // cols, column=i % cols, padx=(0 if i % cols == 0 else gap, 0),
+                      pady=(0 if i < cols else gap, 0))
+
+        rows = tk.Frame(wrap, bg=P.bg)
+        rows.pack(fill="x", pady=(12, 4))
+        rows.columnconfigure(1, weight=1)
+        theme = a.state["theme"]
+        self._look_row(rows, 0, "밝기", lambda box: self._segments(box, [
+            (text, theme == key, lambda k=key: a.switch_theme(k)) for key, text in self.LOOK_THEMES]))
+        mascot = a.state.get("mascot") or "coral"
+        self._look_row(rows, 1, "클로디 색", lambda box: self._swatches(box, mascot, a.set_mascot))
+        alpha = a._alpha()
+        self._look_row(rows, 2, "불투명도", lambda box: self._segments(box, [
+            (text, abs(alpha - v) < 0.005, lambda v=v: a.set_alpha(v)) for v, text in self.LOOK_ALPHAS]))
+
+        tk.Frame(wrap, bg=P.line, height=1).pack(fill="x", pady=(6, 4))
         self._switch(wrap, Label.TOPMOST, bool(a.state["topmost"]), a.toggle_topmost)
         if a.skin.dockable:
             self._switch(wrap, Label.DOCK, bool(a.state["dock"]), a._tray_toggle_dock)
+
+    def _look_card(self, parent, cls, on: bool, w: int, pick) -> tk.Frame:
+        """스킨 하나 = 작은 그림 + 짧은 이름. 고른 것은 초록 테두리."""
+        card = tk.Frame(parent, bg=P.bg, cursor="hand2", highlightthickness=2,
+                        highlightbackground=P.green if on else P.line,
+                        highlightcolor=P.green if on else P.line)
+        c = tk.Canvas(card, width=w - 4, height=self.THUMB_H, bg=P.track,
+                      highlightthickness=0, bd=0, cursor="hand2")
+        c.pack()
+        thumbs.draw(c, cls.key, w - 4, self.THUMB_H)
+        lbl = tk.Label(card, text=thumbs.short_name(cls), bg=P.bg, fg=P.title if on else P.sub,
+                       font=(KR, 9, "bold") if on else (KR, 9), pady=2, cursor="hand2")
+        lbl.pack(fill="x")
+
+        def go(_e=None):
+            # 고른 슬림 바를 다시 누르면 작업표시줄로 되붙인다(switch_skin 이 맡음)
+            pick()
+            self._render()
+
+        for x in (card, c, lbl):
+            x.bind("<Button-1>", go)
+        return card
+
+    @staticmethod
+    def _look_row(rows: tk.Frame, r: int, label: str, build) -> None:
+        tk.Label(rows, text=label, bg=P.bg, fg=P.title, font=(KR, 10), anchor="w").grid(
+            row=r, column=0, sticky="w", pady=4)
+        box = tk.Frame(rows, bg=P.bg)
+        box.grid(row=r, column=1, sticky="e", pady=4)
+        build(box)
+
+    def _segments(self, box: tk.Frame, options) -> None:
+        """붙은 단추 여럿 중 하나 고르기. `options` = ((이름, 골랐나, 할 일), …)."""
+        frame = tk.Frame(box, bg=P.line, padx=1, pady=1)
+        frame.pack(side="right")
+        for i, (text, on, pick) in enumerate(options):
+            lbl = tk.Label(frame, text=text, bg=P.green if on else P.track,
+                           fg=P.bg if on else P.sub, font=(KR, 9, "bold") if on else (KR, 9),
+                           padx=10, pady=3, cursor="hand2")
+            lbl.pack(side="left", padx=(0 if i == 0 else 1, 0))
+
+            def go(_e=None, on=on, pick=pick):
+                if not on:
+                    pick()
+                    self._render()
+
+            lbl.bind("<Button-1>", go)
+
+    def _swatches(self, box: tk.Frame, picked: str, pick) -> None:
+        """클로디 색 견본 동그라미. 고른 것은 바깥 고리 + 이름."""
+        dark = self.app.applied_theme != "light"
+        name = ""
+        for key, text, dc, lc in skins.base.MASCOTS:
+            on = key == picked
+            name = text if on else name
+            c = tk.Canvas(box, width=24, height=24, bg=P.bg, highlightthickness=0, bd=0,
+                          cursor="hand2")
+            c.pack(side="left", padx=(4, 0))
+            if on:
+                c.create_oval(1, 1, 23, 23, outline=P.title, width=2)
+            c.create_oval(5, 5, 19, 19, fill=dc if dark else lc, outline="")
+
+            def go(_e=None, k=key, on=on):
+                if not on:
+                    pick(k)
+                    self._render()
+
+            c.bind("<Button-1>", go)
+        tk.Label(box, text=name or "코랄", bg=P.bg, fg=P.sub, font=(KR, 9), width=4,
+                 anchor="w").pack(side="left", padx=(8, 0))
 
     # ---- 클로드 모닝 스타터
     def _tab_ping(self, wrap: tk.Frame) -> None:

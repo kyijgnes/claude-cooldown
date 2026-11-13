@@ -67,6 +67,33 @@ LIGHT = Palette(
 
 P = Palette(**DARK.__dict__)  # 지금 쓰는 한 벌
 
+# 클로디 색 견본: (키, 이름, 어둡게, 밝게). 메인 화면 > 위젯 모양 에서 고른다(설정 `mascot`).
+# 초록·노랑·빨강은 게이지 뜻(여유·보통·임박)과 헷갈리므로 넣지 않는다.
+# 어둡게는 바탕 #15171c 대비 5.7:1 이상, 밝게는 #f3f5f7 대비 3.8:1 이상(기본 코랄과 같은 선).
+MASCOTS = (
+    ("coral", "코랄", DARK.mascot, LIGHT.mascot),
+    ("blue", "파랑", "#58a6ff", "#0969da"),
+    ("purple", "보라", "#bc8cff", "#8250df"),
+    ("pink", "분홍", "#f778ba", "#bf3989"),
+    ("gray", "회색", "#c2cad4", "#57606a"),
+)
+_mascot = "coral"
+_picked = "dark"
+
+
+def mascot_color(key: str, picked: str) -> str:
+    for k, _name, dark, light in MASCOTS:
+        if k == key:
+            return light if picked == "light" else dark
+    return LIGHT.mascot if picked == "light" else DARK.mascot
+
+
+def set_mascot(key: str) -> None:
+    """클로디 색을 바꾼다. 밝기를 다시 고를 때(`set_palette`)도 이 색이 따라간다."""
+    global _mascot
+    _mascot = key
+    P.mascot = mascot_color(key, _picked)
+
 KR = "맑은 고딕"
 NUM = "Segoe UI"
 
@@ -88,7 +115,10 @@ def set_palette(kind: str) -> str:
     picked = kind if kind in ("light", "dark") else (
         "light" if system_prefers_light() else "dark"
     )
+    global _picked
+    _picked = picked
     P.copy_from(LIGHT if picked == "light" else DARK)
+    P.mascot = mascot_color(_mascot, picked)
     return picked
 
 
