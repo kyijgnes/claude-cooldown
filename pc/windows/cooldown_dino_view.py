@@ -9,8 +9,9 @@
 - 판을 누른 것은 **여기서 끝낸다**(`"break"`). 창에 걸린 끌기·새로고침·클로디 놀이까지
   올라가면 누를 때마다 위젯이 끌려 다닌다.
 - 닫는 길: 왼쪽 위 ✕ · Esc · 기다림/부딪힘/멈춤으로 20초(`IDLE_EXIT`) 그대로 두기.
-- **매 프레임 지우고 다시 그린다.** 도트 그림은 줄마다 이어진 칸을 한 덩이로 그리므로
-  (`cooldown_dino.runs`) 가장 붐빌 때도 도형이 300개 안쪽이다.
+- **판은 PIL 그림 한 장에 매 프레임 새로 그려 붙인다**(캔버스에는 그림 하나와 글자 몇 개뿐). 칸을
+  캔버스 도형으로 지웠다 그리면 Tk 가 도형마다 칠해 활공·보호막·이펙트가 겹치면 한 프레임에 13ms 까지
+  들었다(11-13 렉). 그림 한 장은 칸 수와 상관없이 1ms 안팎이다. 칸은 Tk 와 같은 픽셀을 칠한다(`_fill`).
 - **한 걸음은 1/60초로 고정**하고, 흐른 시간만큼 걸음을 밟은 뒤 한 번 그린다. 윈도우의 기본
   타이머는 15.6ms 눈금이라 `after(16)` 이 16ms 와 31ms 를 오간다 — 판이 떠 있는 동안만
   `timeBeginPeriod(1)` 로 눈금을 1ms 로 당긴다(닫으면 되돌린다).
@@ -35,6 +36,8 @@ import sys
 import time
 import tkinter as tk
 import tkinter.font as tkfont
+
+from PIL import Image, ImageDraw, ImageTk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if __name__ == "__main__":
@@ -62,6 +65,11 @@ C_DUST = ("label", "bg", 0.15)     # 먼지
 C_WIND = ("title", "bg", 0.6)      # 바람 줄기
 C_GROOVE = ("title", "bg", 0.5)    # 깃털 사이 결
 C_FLASH = ("bg", "title", 0.14)    # 부딪힌 순간 판 바탕
+
+
+def _px(v: float) -> int:
+    """캔버스 좌표 → 픽셀 (Tk 와 같은 반올림: 0.5 는 0 에서 먼 쪽)."""
+    return int(v + 0.5) if v > 0 else int(v - 0.5)
 
 
 def _blend(a: str, b: str, t: float) -> str:
@@ -96,6 +104,14 @@ class DinoBoard:
         self.w = width
         self.c = tk.Canvas(parent, width=width, height=dino.H, bg=P.bg,
                            highlightthickness=0, bd=0, cursor="hand2", takefocus=1)
+        # 판은 PIL 그림 한 장에 그려 캔버스에는 그림 하나만 둔다 — 칸 300개를 캔버스 도형으로 지웠다 그리면
+        #   Tk 가 도형마다 칠해 프레임마다 3~13ms 가 들었다(활공·보호막·이펙트가 겹칠 때 프레임이 밀림).
+        self._bg = P.bg
+        self._img = Image.new("RGB", (width, dino.H), P.bg)
+        self._draw = ImageDraw.Draw(self._img)
+        self._photo = ImageTk.PhotoImage(self._img, master=self.c)
+        self.c.create_image(0, 0, image=self._photo, anchor="nw")
+        self._off = (0, 0)        # 흔들릴 때 판을 미는 만큼 (px)
         self.paused = False
         self._saved_over = False
         self._alive = True
@@ -244,15 +260,25 @@ class DinoBoard:
                 n += 1
             if n == MAX_CATCH_UP:
                 self._acc = 0.0
+            if n == 0:             # 일찍 깼다 — 그릴 게 그대로니 걸음 하나가 찰 때까지 더 기다린다
+                self._again()
+                return
         if g.state == "over" and not self._saved_over:
             self._saved_over = True
             if g.new_best and self.on_best:
                 self.on_best(g.best)
         try:
             self.draw()
-            wait = max(1, int((STEP - self._acc) * 1000))
-            self.c.after(wait, self._loop)
         except tk.TclError:   # 판이 치워졌다
+            self.close()
+            return
+        self._again()
+
+    def _again(self) -> None:
+        """다음 걸음이 찰 때 다시 — 내림하면 조금 일찍 깨서 걸음 없는 헛그림이 끼므로 올림."""
+        try:
+            self.c.after(max(1, math.ceil((STEP - self._acc) * 1000)), self._loop)
+        except tk.TclError:
             self.close()
 
     # -------------------------------------------------- 이펙트
@@ -403,7 +429,7 @@ class DinoBoard:
 
     def _draw_parts(self, col, lines: bool) -> None:
         """알갱이 — 바람 줄기(`lines`)는 공룡 **뒤에**, 나머지는 앞에 그리려고 두 번에 나눠 부른다."""
-        c, u = self.c, dino.U
+        f, u = self._fill, dino.U
         for kind, x, y, _vx, _vy, life, life0, sz, color, _g in self._parts:
             if (kind == "line") != lines:
                 continue
@@ -412,22 +438,22 @@ class DinoBoard:
             if kind == "sq":
                 s = u if old else sz
                 bx, by = round(x / u) * u, round(y / u) * u
-                c.create_rectangle(bx, by, bx + s, by + s, fill=fill, width=0)
+                f(bx, by, bx + s, by + s, fill)
             elif kind == "line":
                 n = sz * life / life0
-                c.create_rectangle(x, round(y), x + n, round(y) + 1, fill=fill, width=0)
+                f(x, round(y), x + n, round(y) + 1, fill)
             elif kind == "star":            # 네 방향 반짝이 — 늙으면 가운데 점만
                 bx, by = round(x / u) * u, round(y / u) * u
                 if old:
-                    c.create_rectangle(bx, by, bx + u, by + u, fill=fill, width=0)
+                    f(bx, by, bx + u, by + u, fill)
                 else:
-                    c.create_rectangle(bx - u, by, bx + 2 * u, by + u, fill=fill, width=0)
-                    c.create_rectangle(bx, by - u, bx + u, by + 2 * u, fill=fill, width=0)
+                    f(bx - u, by, bx + 2 * u, by + u, fill)
+                    f(bx, by - u, bx + u, by + 2 * u, fill)
             else:                           # 깃털 — 좌우로 살랑이며 떨어진다
                 bx = round((x + 3 * math.sin((life + sz) * 0.22)) / u) * u
                 by = round(y / u) * u
-                c.create_rectangle(bx, by, bx + 2 * u, by + u, fill=fill, width=0)
-                c.create_rectangle(bx + 2 * u, by - u, bx + 3 * u, by, fill=fill, width=0)
+                f(bx, by, bx + 2 * u, by + u, fill)
+                f(bx + 2 * u, by - u, bx + 3 * u, by, fill)
 
     # -------------------------------------------------- 그리기
     def _colors(self):
@@ -455,25 +481,31 @@ class DinoBoard:
 
         flash = self._flash > 0 and g.state == "over"
         bg = col(C_FLASH) if flash else pal.bg
-        if c.cget("bg") != bg:
+        if bg != self._bg:
+            self._bg = bg
             c.configure(bg=bg)
-        c.delete("all")
+        c.delete("txt")
+        self._draw.rectangle((0, 0, w, dino.H), fill=bg)
+        # 흔들기 — 판(여기서 단추 앞까지)만 이만큼 밀어 그린다. 점수·단추는 가만히 둔다.
+        left, total, amp = self._shake
+        if left > 0 and self._freeze <= 0:
+            a = amp * left / total
+            self._off = (round(self._rng.uniform(-a, a)), round(self._rng.uniform(-a, a) * 0.6))
         # 밤하늘 별 — 밤이 든 만큼만 떠오르고, 제각기 깜빡인다
         mix = g.night_mix
         if mix > 0:
             star = _blend(pal.bg, pal.title, 0.55 * mix)
             for x, y, phase in self._stars:
                 if (g.t // 20 + phase) % 5:
-                    c.create_rectangle(x, y, x + 2, y + 2, fill=star, width=0)
+                    self._fill(x, y, x + 2, y + 2, star)
         # 구름 — 판보다 흐리게, 제일 뒤에
         for x, y in g.clouds:
             self._art(dino.CLOUD, x, y, pal.track)
         # 땅 — 선 하나와 흘러가는 자갈 (흔들릴 때 끝이 안 비게 양옆으로 넉넉히)
-        c.create_rectangle(-10, dino.GROUND - 1, w + 10, dino.GROUND, fill=pal.label, width=0)
+        self._fill(-10, dino.GROUND - 1, w + 10, dino.GROUND, pal.label)
         for x, depth, pw in g.pebbles:
             xi = round(x)
-            c.create_rectangle(xi, dino.GROUND + depth, xi + pw, dino.GROUND + depth + 1,
-                               fill=pal.faint, width=0)
+            self._fill(xi, dino.GROUND + depth, xi + pw, dino.GROUND + depth + 1, pal.faint)
         # 장애물
         for ob in g.obstacles:
             color = pal.label if ob.kind == "bird" else pal.green
@@ -530,11 +562,7 @@ class DinoBoard:
         # 활공 게이지 — 날개를 달고 떠 있는 동안 머리 위에. 얼마 안 남으면 빨갛게 깜빡인다.
         if g.wing and g.jumping and g.state == "run":
             self._gauge(dx + 8, dy - 9, GAUGE_W, g.glide_left, pal)
-        # 흔들기 — 여기까지 그린 것(판)만. 점수·단추는 가만히 둔다.
-        left, total, amp = self._shake
-        if left > 0 and self._freeze <= 0:
-            a = amp * left / total
-            c.move("all", round(self._rng.uniform(-a, a)), round(self._rng.uniform(-a, a) * 0.6))
+        self._off = (0, 0)   # 흔들림은 여기까지(판)만
         # 닫기 ✕ — 왼쪽 위 구석
         self._art(dino.CLOSE, *dino.CLOSE_AT, pal.title if self._close_hot else pal.faint)
         # 점수 — 오른쪽 위 (HI 최고 · 지금). 100점을 넘는 순간 숫자가 한 번 커진다.
@@ -542,11 +570,11 @@ class DinoBoard:
         pop = self._pop
         c.create_text(w - 12, 14 - (2 if pop > 6 else 0), text=text, anchor="ne",
                       fill=pal.title if pop else pal.sub,
-                      font=(NUM, 13 if pop > 6 else 12 if pop else 11, "bold"))
+                      font=(NUM, 13 if pop > 6 else 12 if pop else 11, "bold"), tags="txt")
         if g.best > 0 or g.state == "over":
             c.create_text(w - 70, 14, text=f"HI {g.best:05d}", anchor="ne",
                           fill=pal.amber if g.new_best and g.state == "over" else pal.label,
-                          font=(NUM, 11, "bold" if g.new_best and g.state == "over" else "normal"))
+                          font=(NUM, 11, "bold" if g.new_best and g.state == "over" else "normal"), tags="txt")
         # 들고 있는 것 — 점수 왼쪽에 작은 표시. 날개 밑에는 남은 활공.
         if g.state == "run":
             hi = self._hi_w if g.best > 0 else 0
@@ -562,9 +590,9 @@ class DinoBoard:
                 self._art(dino.WING_GROOVE, x, 3, col(C_GROOVE))
                 self._gauge(x, 3 + wh + 2, ww, g.glide_left, pal)
         if self.paused:
-            c.create_text(w / 2, 56, text=PAUSED, fill=pal.title, font=(KR, 10, "bold"))
+            c.create_text(w / 2, 56, text=PAUSED, fill=pal.title, font=(KR, 10, "bold"), tags="txt")
         elif g.state == "ready":
-            c.create_text(w / 2, 56, text=HINT, fill=pal.label, font=(KR, 9))
+            c.create_text(w / 2, 56, text=HINT, fill=pal.label, font=(KR, 9), tags="txt")
         elif g.state == "over" and self._freeze <= 0:
             # 글자가 하나씩 떨어져 내려앉고, 다시 누를 수 있게 되면 화살표가 켜진다
             k = self._over_k
@@ -576,18 +604,38 @@ class DinoBoard:
                     continue
                 drop = -16 * (1 - min(1.0, at / 6)) ** 2 + (2 if 6 <= at < 9 else 0)
                 c.create_text(x0 + i * step_x, 50 + round(drop), text=ch, fill=pal.title,
-                              font=(NUM, 12, "bold"))
+                              font=(NUM, 12, "bold"), tags="txt")
             rw, _ = dino.size(dino.RESTART)
             ready = g.over_t >= dino.OVER_WAIT
             lift = 2 if ready and g.over_t < dino.OVER_WAIT + 5 else 0
             self._art(dino.RESTART, w / 2 - rw / 2, 68 - lift, pal.title if ready else pal.line)
+        self._photo.paste(self._img)   # 그린 한 장을 캔버스에 (글자만 그 위의 캔버스 도형)
+
+    def _fill(self, x0, y0, x1, y1, color) -> None:
+        """칸 하나 칠하기 — 판 그림(`self._img`)에. 흔들리는 중이면 `self._off` 만큼 밀어서.
+
+        Tk 캔버스의 `create_rectangle(width=0)` 과 같은 픽셀을 칠한다: 끝점을 반올림(0.5 는 0 에서 먼 쪽)하고
+        x0 ≤ x < x1 을 칠하며, 폭이 0 이하면 1 픽셀로 둔다."""
+        ox, oy = self._off
+        x0 += ox
+        x1 += ox
+        y0 += oy
+        y1 += oy
+        if x0.__class__ is not int or x1.__class__ is not int:   # 정수(대부분)는 반올림할 것이 없다
+            x0, x1 = _px(x0), _px(x1)
+        if y0.__class__ is not int or y1.__class__ is not int:
+            y0, y1 = _px(y0), _px(y1)
+        if x1 <= x0:
+            x1 = x0 + 1
+        if y1 <= y0:
+            y1 = y0 + 1
+        self._draw.rectangle((x0, y0, x1 - 1, y1 - 1), fill=color)
 
     def _art(self, rows, x, y, color, flip=False) -> None:
         """도트 그림 한 장 — 줄마다 이어진 칸을 한 덩이로. 칸이 정수 픽셀에 맞게 한 번만 반올림."""
         bx, by = round(x), round(y)
         for rx, ry, rw, rh in dino._art_runs(rows, flip):
-            self.c.create_rectangle(bx + rx, by + ry, bx + rx + rw, by + ry + rh,
-                                    fill=color, width=0)
+            self._fill(bx + rx, by + ry, bx + rx + rw, by + ry + rh, color)
 
     @staticmethod
     def _item_color(kind: str, pal) -> str:
@@ -597,25 +645,25 @@ class DinoBoard:
     def _gauge(self, x, y, width, left: float, pal) -> None:
         """남은 활공 막대 — 빈 칸 위에 남은 만큼. `GLIDE_LOW` 아래면 빨갛게 깜빡인다."""
         x, y = round(x), round(y)
-        self.c.create_rectangle(x, y, x + width, y + 3, fill=pal.gauge, width=0)
+        self._fill(x, y, x + width, y + 3, pal.gauge)
         low = left < dino.GLIDE_LOW
         if left > 0 and not (low and (self.game.t // 5) % 2):
             fill = max(2, round(width * left))
-            self.c.create_rectangle(x, y, x + fill, y + 3, fill=pal.red if low else pal.title, width=0)
+            self._fill(x, y, x + fill, y + 3, pal.red if low else pal.title)
 
     def _burst(self, cx, cy, k: int, color) -> None:
         """부딪힌 자리의 섬광 — 가운데 덩이와 여덟 방향 점이 프레임마다 밖으로 번진다."""
         u = dino.U
         bx, by = round(cx / u) * u, round(cy / u) * u
         if k < 4:
-            self.c.create_rectangle(bx - 2 * u, by - u, bx + 2 * u, by + u, fill=color, width=0)
-            self.c.create_rectangle(bx - u, by - 2 * u, bx + u, by + 2 * u, fill=color, width=0)
+            self._fill(bx - 2 * u, by - u, bx + 2 * u, by + u, color)
+            self._fill(bx - u, by - 2 * u, bx + u, by + 2 * u, color)
         for i in range(8):
             a = math.pi * i / 4
             for r in (8 + k * 3, 14 + k * 4):
                 x = round((cx + r * math.cos(a)) / u) * u
                 y = round((cy + r * 0.8 * math.sin(a)) / u) * u
-                self.c.create_rectangle(x, y, x + u, y + u, fill=color, width=0)
+                self._fill(x, y, x + u, y + u, color)
 
     def _ring(self, cx, cy, r, color, turn: int) -> None:
         """도트 점선 고리 — 반지름 r, `turn` 만큼 돌려서(돌아가 보이게)."""
@@ -628,15 +676,14 @@ class DinoBoard:
             a = 2 * math.pi * i / n
             x = round((cx + r * math.cos(a)) / u) * u
             y = round((cy + ry * math.sin(a)) / u) * u
-            self.c.create_rectangle(x, y, x + u, y + u, fill=color, width=0)
+            self._fill(x, y, x + u, y + u, color)
 
     def _cells(self, cells, x, y, color) -> None:
         """낱칸 몇 개 (눈 파내기)."""
         bx, by = round(x), round(y)
         u = dino.U
         for col, row in cells:
-            self.c.create_rectangle(bx + col * u, by + row * u, bx + col * u + u, by + row * u + u,
-                                    fill=color, width=0)
+            self._fill(bx + col * u, by + row * u, bx + col * u + u, by + row * u + u, color)
 
 
 # ---------------------------------------------------------------- 혼자 띄워 보기
