@@ -242,18 +242,82 @@ def missed_since(
 # ---------------------------------------------------------------- 전송
 
 
-def find_claude() -> str | None:
-    """claude CLI 실행 파일 경로. npm 전역 설치면 .cmd 배치 파일이다."""
-    for name in ("claude.cmd", "claude.exe", "claude"):
-        found = shutil.which(name)
-        if found:
-            return found
+def _fresh_path() -> str:
+    """레지스트리에 적힌 **지금** PATH(사용자 + 시스템). 위젯이 뜬 뒤 클로드 코드를 깔았으면
+    내 `os.environ["PATH"]` 에는 새 자리가 없다 — 설치기는 레지스트리만 고친다."""
+    parts: list[str] = []
+    try:
+        import winreg
+
+        for root, key in (
+            (winreg.HKEY_CURRENT_USER, r"Environment"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        ):
+            try:
+                with winreg.OpenKey(root, key) as k:
+                    value = winreg.QueryValueEx(k, "Path")[0]
+                    parts.append(os.path.expandvars(str(value)))
+            except OSError:
+                pass
+    except ImportError:
+        pass
+    return os.pathsep.join(p for p in parts if p)
+
+
+def claude_usable(path: str) -> bool:
+    """찾은 `claude` 가 실제로 돌 수 있나 — **지우다 만 설치**를 걸러 낸다.
+
+    npm 전역 설치의 `claude.cmd` 는 껍데기라, 옆의 `node_modules/@anthropic-ai/claude-code` 나
+    node 가 지워져도 그대로 남는다(npm 을 지우고 네이티브로 다시 깔았거나 Node 를 지운 PC).
+    그걸 고르면 로그인 창이 `node 를 찾을 수 없음` 으로 끝나고 위젯은 왜 막혔는지 모른다.
+    """
+    if not path or not os.path.exists(path):
+        return False
+    if path.lower().endswith(".exe"):
+        return True
+    folder = os.path.dirname(path)
+    modules = os.path.join(folder, "node_modules")
+    if not os.path.isdir(modules):
+        return True  # npm 모양이 아니다 — 모르는 설치는 믿는다
+    if not os.path.isdir(os.path.join(modules, "@anthropic-ai", "claude-code")):
+        return False
+    return os.path.exists(os.path.join(folder, "node.exe")) or bool(
+        shutil.which("node") or shutil.which("node", path=_fresh_path() or None)
+    )
+
+
+def claude_candidates() -> list[str]:
+    """`claude` 가 있을 만한 자리를 차례로(겹침 없이). 쓸 수 있는지는 따지지 않는다."""
+    out: list[str] = []
+    fresh = _fresh_path()
+    for search in (None, fresh or None):
+        for name in ("claude.cmd", "claude.exe", "claude"):
+            found = shutil.which(name, path=search) if search else shutil.which(name)
+            if found:
+                out.append(found)
     appdata = os.environ.get("APPDATA", "")
-    for cand in (
+    out += [
         os.path.join(appdata, "npm", "claude.cmd"),
         os.path.join(os.path.expanduser("~"), ".local", "bin", "claude.exe"),
-    ):
-        if os.path.exists(cand):
+    ]
+    seen: set[str] = set()
+    uniq = []
+    for c in out:
+        key = os.path.normcase(os.path.abspath(c))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(c)
+    return uniq
+
+
+def find_claude() -> str | None:
+    """**돌 수 있는** claude CLI 실행 파일 경로. npm 전역 설치면 .cmd 배치 파일이다.
+
+    지우다 만 설치(`claude_usable` 이 거짓)는 건너뛴다. 하나도 없으면 None — 화면은
+    '클로드 코드 없음' 으로 보고 `설치하고 로그인` 을 내민다(깨진 것을 고칠 가장 짧은 길).
+    """
+    for cand in claude_candidates():
+        if claude_usable(cand):
             return cand
     return None
 

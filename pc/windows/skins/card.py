@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import tkinter as tk
 
-from cooldown_core import Pace, Usage, five_due, pace
+from cooldown_core import Pace, Usage, marks
 
-from .base import KR, MARK_W, NUM, P, Skin, dot_unit, inside, mark_x, pace_color, scoped_text, tone, z, zf
+from .base import KR, MARK_W, NUM, P, Skin, dot_unit, fill_w, inside, mark_x, pace_color, scoped_text, tone, z, zf
 from .claudi import Claudi
 
 # 치수는 100% 기준이다. build 첫머리 `_rescale` 이 크기 배율(base.z)대로 다시 잡는다.
@@ -96,7 +96,7 @@ class Section:
         y0, y1 = BAR_TOP, BAR_TOP + BAR_H
         self.bar.create_rectangle(0, y0, width, y1, fill=P.gauge, width=0)
         if pct is not None:
-            self.bar.create_rectangle(0, y0, width * pct / 100, y1, fill=color, width=0)
+            self.bar.create_rectangle(0, y0, fill_w(pct, width), y1, fill=color, width=0)
         mark_due = p.due if p is not None else due
         if mark_due is not None:
             x = mark_x(mark_due, width)
@@ -187,8 +187,9 @@ class CardSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._head_normal()
-        self.five.set(usage.five.pct, usage.five.left, due=five_due(usage))
-        self.week.set(usage.week.pct, usage.week.left, pace(usage))
+        m = marks(usage)
+        self.five.set(usage.five.pct, usage.five.left, due=m.five)
+        self.week.set(usage.week.pct, usage.week.left, m.week)
         self.stamp.config(text=f"{stamp} 기준")
 
         text = scoped_text(usage)

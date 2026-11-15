@@ -22,7 +22,27 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-CRED_PATH = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
+def claude_dir() -> str:
+    """클로드 코드가 로그인을 적어 두는 폴더. 기본은 `~/.claude`.
+
+    `CLAUDE_CONFIG_DIR` 을 정해 둔 PC 는 클로드 코드가 거기에 `.credentials.json` 을 쓴다 —
+    그걸 모르면 로그인을 마쳐도 위젯은 영영 '로그인 필요' 다. 위젯이 뜬 뒤에 정했을 수도 있어
+    내 환경변수에 없으면 레지스트리(사용자 환경변수)도 본다.
+    """
+    value = os.environ.get("CLAUDE_CONFIG_DIR", "")
+    if not value:
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+                value = str(winreg.QueryValueEx(k, "CLAUDE_CONFIG_DIR")[0])
+        except (ImportError, OSError):
+            value = ""
+    value = os.path.expandvars(os.path.expanduser(value.strip().strip('"')))
+    return value if value else os.path.join(os.path.expanduser("~"), ".claude")
+
+
+CRED_PATH = os.path.join(claude_dir(), ".credentials.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 MIN_INTERVAL = 300  # 초. 이보다 짧게 폴링하면 rate limit 에 걸린다.
 
@@ -282,6 +302,28 @@ def five_due(usage: Usage, now: datetime | None = None) -> float | None:
     if left <= 0 or left > span:  # 이미 풀렸거나 창 길이를 벗어난 값 — 눈금이 뜻이 없다
         return None
     return max(0.0, min(100.0, (span - left) / span * 100))
+
+
+@dataclass(frozen=True)
+class Marks:
+    """게이지 두 개의 '지금쯤' 눈금 자리. **메인 화면과 위젯 다섯 디자인이 모두 이것 하나로 센다.**
+
+    옛날엔 화면마다 `pace()`·`five_due()` 를 따로 불러 눈금을 셌다. 셈은 같아도 다시 그리는 때가
+    달라(위젯은 오류가 떠 있으면 1분 그리기를 건너뛰었다) 눈금이 서로 어긋났다(2026-11-15).
+    """
+
+    five: float | None  # 5시간 창이 흐른 비율(0~100). 없으면 눈금 숨김
+    week: Pace | None  # 주간 속도 분석. `week.due` 가 적정선
+
+    @property
+    def week_due(self) -> float | None:
+        return self.week.due if self.week is not None else None
+
+
+def marks(usage: Usage, now: datetime | None = None) -> Marks:
+    """`usage` 를 `now`(기본 지금) 기준으로 센 두 눈금. 화면은 이것만 부른다."""
+    now = now or datetime.now(timezone.utc)
+    return Marks(five_due(usage, now), pace(usage, now))
 
 
 # ---------------------------------------------------------------- 조회

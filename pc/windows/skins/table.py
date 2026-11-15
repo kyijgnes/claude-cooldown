@@ -9,9 +9,9 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import font as tkfont
 
-from cooldown_core import Usage, five_due, pace
+from cooldown_core import Usage, marks
 
-from .base import KR, MARK_W, NUM, P, Skin, dot_unit, inside, mark_x, scoped_text, tone, z, zf
+from .base import KR, MARK_W, NUM, P, Skin, dot_unit, inside, mark_x, scoped_text, seg_fills, tone, z, zf
 from .claudi import Claudi
 
 # 치수는 100% 기준이다. build 첫머리 `_rescale` 이 크기 배율(base.z)대로 다시 잡는다.
@@ -71,17 +71,14 @@ class Row:
         # 켜진 한 칸 = 이미 넘긴 10%. 내림이라 꽉 찬 게이지는 100% 뿐이다.
         # (반올림이면 95~100%가 모두 꽉 참으로 보여 한도 소진 여부를 구분 못 한다.)
         # 값이 있으면 아무리 작아도 한 칸은 켠다.
-        filled = 0
-        if pct is not None and pct > 0:
-            filled = max(1, min(SEGS, int(pct * SEGS / 100)))
+        # 걸친 칸은 걸친 만큼만 채운다 — 눈금과 같은 잣대(`seg_fills`, 메인 화면과 같은 값).
         step = GAUGE_W / SEGS
         self.bar.delete("all")
-        for i in range(SEGS):
+        for i, w in enumerate(seg_fills(pct, SEGS, step, step - GAP)):
             x0 = i * step
-            self.bar.create_rectangle(
-                x0, 0, x0 + step - GAP, GAUGE_H,
-                fill=color if i < filled else P.gauge, width=0,
-            )
+            self.bar.create_rectangle(x0, 0, x0 + step - GAP, GAUGE_H, fill=P.gauge, width=0)
+            if w > 0:
+                self.bar.create_rectangle(x0, 0, x0 + w, GAUGE_H, fill=color, width=0)
         # '지금쯤' 눈금 — 칸 사이 틈에 떨어져도 보이게 맨 위에 대비색으로 긋는다
         if due is not None:
             x = mark_x(due, GAUGE_W)
@@ -211,9 +208,9 @@ class TableSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._head_normal()
-        p = pace(usage)
-        self.five.set(usage.five.pct, usage.five.left, five_due(usage))
-        self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
+        m = marks(usage)
+        self.five.set(usage.five.pct, usage.five.left, m.five)
+        self.week.set(usage.week.pct, usage.week.left, m.week_due)
         self.stamp.config(text=f"{stamp} 기준")
         self._note_off()
 

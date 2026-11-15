@@ -171,6 +171,35 @@ def mark_x(due: float, width: float) -> float:
     return max(0.0, min(x, width - MARK_W))
 
 
+def fill_w(pct: float | None, width: float) -> float:
+    """게이지 폭 `width` 에서 `pct` 만큼 채울 길이. 눈금(`mark_x`)과 같은 잣대다 —
+    쓴 양이 적정선과 같으면 채움 끝과 눈금이 한 자리에 선다. 메인 화면도 이걸 쓴다."""
+    if not pct:
+        return 0.0
+    return width * max(0.0, min(100.0, pct)) / 100
+
+
+def seg_fills(pct: float | None, count: int, pitch: float, seg_w: float) -> list[float]:
+    """칸 게이지에서 칸마다 채울 길이(px). 칸 i 는 `i*pitch` 에서 시작해 `seg_w` 만큼이다.
+
+    ★ 옛날엔 칸을 **통째로 켜고 끄기만**(`int(pct*n/100)`) 해서, 10칸 게이지면 57% 가 50% 로
+      보였다. 눈금은 57% 자리에 서니 '적정선보다 덜 썼다' 로 읽혔다(메인 화면과 어긋남, 2026-11-15).
+      이제 걸친 칸은 걸친 만큼만 채운다 — 채움 끝이 늘 `fill_w` 와 같은 자리다.
+    지키는 것 둘: 꽉 찬 게이지는 100% 뿐(99% 는 마지막 칸 끝 1px 을 비운다),
+    값이 있으면 아무리 작아도 첫 칸에 한 뼘은 보인다.
+    """
+    out = [0.0] * count
+    if not pct or pct <= 0 or count <= 0:
+        return out
+    px = fill_w(pct, count * pitch)
+    for i in range(count):
+        out[i] = max(0.0, min(seg_w, px - i * pitch))
+    out[0] = max(out[0], min(seg_w, 2.0))
+    if pct < 100 and out[-1] >= seg_w:
+        out[-1] = max(0.0, seg_w - 1)
+    return out
+
+
 def worst(usage: Usage) -> float | None:
     """두 한도 중 더 급한 쪽 — 한 개짜리 상태 표시에 쓴다."""
     values = [x for x in (usage.five.pct, usage.week.pct) if x is not None]
