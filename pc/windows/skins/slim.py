@@ -34,7 +34,7 @@ import random
 import tkinter as tk
 from tkinter import font as tkfont
 
-from cooldown_core import Usage, five_due, pace
+from cooldown_core import Usage, marks
 
 from .base import (
     KR,
@@ -44,6 +44,7 @@ from .base import (
     Skin,
     inside,
     mark_x,
+    seg_fills,
     taskbar_height,
     tone,
     worst,
@@ -190,6 +191,12 @@ class Cell:
             )
             for i in range(count)
         ]
+        # 칸 위에 얹는 채움 — 걸친 칸은 걸친 만큼만 채운다(`seg_fills`). 바탕 칸은 늘 P.gauge.
+        self.pitch, self.seg_w = pitch, seg_w
+        self.fills = [
+            self.c.create_rectangle(0, 0, 0, 0, fill=P.gauge, width=0, state="hidden")
+            for _ in range(count)
+        ]
 
         # '지금쯤' 눈금 — 칸 사이 틈에 떨어져도 보이게 눈금들 **뒤에** 만들어(맨 위)
         # 위아래로 MARK_OUT 만큼 삐져나오게 긋는다. 안 쓸 땐 숨긴다.
@@ -213,10 +220,16 @@ class Cell:
 
         # 내림이라 꽉 찬 게이지는 100% 뿐이다. 값이 있으면 아무리 작아도 한 칸은 켠다.
         # (반올림이면 98~100%가 모두 꽉 참으로 보여 한도 소진 여부를 구분 못 한다.)
-        n = len(self.segs)
-        filled = 0 if not pct else max(1, min(n, int(pct * n / 100)))
-        for i, seg in enumerate(self.segs):
-            self.c.itemconfigure(seg, fill=color if i < filled else P.gauge)
+        y0, y1 = self.c.coords(self.segs[0])[1::2] if self.segs else (0, 0)
+        for i, (seg, fill, w) in enumerate(zip(self.segs, self.fills,
+                                               seg_fills(pct, len(self.segs), self.pitch, self.seg_w))):
+            self.c.itemconfigure(seg, fill=P.gauge)
+            if w <= 0:
+                self.c.itemconfigure(fill, state="hidden")
+                continue
+            x0 = self.x + i * self.pitch
+            self.c.coords(fill, x0, y0, x0 + w, y1)
+            self.c.itemconfigure(fill, state="normal", fill=color)
 
         if due is None:
             self.c.itemconfigure(self.mark, state="hidden")
@@ -551,13 +564,13 @@ class SlimSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._paint(P.bg, tone(worst(usage)))
-        p = pace(usage)
+        m = marks(usage)
         # 좁은 바는 남은 시간을 안 적는다 — 게이지의 '지금쯤' 눈금(┃)이 그 자리를 맡고,
         # 숫자로 보려면 메인 화면 > 이번 주 사용 속도 가 있다.
         five_left = "" if self.compact else usage.five.left
         week_left = "" if self.compact else usage.week.left
-        self.five.set(usage.five.pct, five_left, five_due(usage))
-        self.week.set(usage.week.pct, week_left, p.due if p else None)
+        self.five.set(usage.five.pct, five_left, m.five)
+        self.week.set(usage.week.pct, week_left, m.week_due)
 
         # 번갈아 칸에 띄울 것들 — 모델별 한도(Fable 7%)와 알림. **적정선은 넣지 않는다**:
         # 게이지에 눈금(┃)으로 이미 서 있어서 숫자를 또 적을 까닭이 없다.

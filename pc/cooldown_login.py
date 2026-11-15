@@ -47,7 +47,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from cooldown_ping import child_env, find_claude
+from cooldown_ping import child_env, claude_usable, find_claude
 import cooldown_core
 
 STATUS_TIMEOUT = 25  # `claude auth status` 는 로컬 확인이라 금방 끝난다 (초)
@@ -247,7 +247,7 @@ def login_cli() -> str | None:
     """다시 로그인에 쓸 CLI. **npm 전역 것을 먼저** 고른다 — 원격 대기·핑이 쓰는 것이 그것이다.
     (자격 파일은 어느 CLI 든 같은 `~/.claude/.credentials.json` 이라, 없으면 찾은 것으로 한다)"""
     npm = os.path.join(os.environ.get("APPDATA", ""), "npm", "claude.cmd")
-    return npm if os.path.exists(npm) else find_claude()
+    return npm if claude_usable(npm) else find_claude()  # 지우다 만 npm 껍데기는 건너뛴다
 
 
 def open_login_console() -> bool:

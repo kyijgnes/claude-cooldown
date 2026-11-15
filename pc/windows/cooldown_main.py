@@ -35,9 +35,9 @@ import cooldown_push
 import cooldown_remote
 import cooldown_selfupdate
 import skins
-from cooldown_core import LoginRequired, five_due, pace
+from cooldown_core import LoginRequired, marks
 from skins import thumbs
-from skins.base import KR, MARK_W, NUM, P, mark_x, tone
+from skins.base import KR, MARK_W, NUM, P, fill_w, mark_x, tone
 
 W = 580  # 창 폭 (px)
 MIN_H = 380  # 창 최소 높이. 실제 높이는 모든 탭 중 가장 큰 것에 맞춰 한 번 정해 고정한다
@@ -680,9 +680,9 @@ class MainScreen:
         stamp = u.fetched_at.astimezone().strftime("%H:%M")
         tk.Label(wrap, text=f"기준 {stamp}", bg=P.bg, fg=P.faint, font=(KR, 8),
                  anchor="w").pack(fill="x", pady=(0, 4))
-        p = pace(u)
-        self._limit(wrap, "5시간 한도", u.five, five_due(u))
-        self._limit(wrap, "주간 한도", u.week, p.due if p is not None else None)
+        m = marks(u)  # 위젯과 같은 셈(cooldown_core.marks) — 눈금이 서로 어긋나지 않는다
+        self._limit(wrap, "5시간 한도", u.five, m.five)
+        self._limit(wrap, "주간 한도", u.week, m.week_due)
         if u.scoped:
             self._section(wrap, "모델별 주간 한도")
             for s in u.scoped:
@@ -703,7 +703,7 @@ class MainScreen:
         c.pack(fill="x", pady=(2, 2))
         c.create_rectangle(0, 2, INNER, 2 + h, fill=P.track, width=0)
         if pct:
-            c.create_rectangle(0, 2, INNER * min(100.0, pct) / 100, 2 + h, fill=tone(pct), width=0)
+            c.create_rectangle(0, 2, fill_w(pct, INNER), 2 + h, fill=tone(pct), width=0)
         if due is not None:
             x = mark_x(due, INNER)
             c.create_rectangle(x, 0, x + MARK_W, h + 4, fill=P.title, width=0)

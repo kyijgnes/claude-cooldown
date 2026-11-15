@@ -12,7 +12,7 @@ import math
 import tkinter as tk
 import tkinter.font as tkfont
 
-from cooldown_core import Usage, five_due, pace
+from cooldown_core import Usage, marks
 
 from .base import KR, NUM, P, Skin, dot_unit, scoped_text, tone, z, zf
 from .claudi import Claudi
@@ -307,9 +307,9 @@ class ArcSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._ok_stamp = stamp  # 값이 언제 것인지 — 오류 띠에서도 이걸 쓴다
-        p = pace(usage)
-        self.five.set(usage.five.pct, usage.five.left, five_due(usage))
-        self.week.set(usage.week.pct, usage.week.left, p.due if p else None)
+        m = marks(usage)
+        self.five.set(usage.five.pct, usage.five.left, m.five)
+        self.week.set(usage.week.pct, usage.week.left, m.week_due)
         self._error(None, stamp)
         self._foot(stamp, usage)
 

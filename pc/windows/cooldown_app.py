@@ -51,7 +51,7 @@ from cooldown_core import (  # noqa: E402
     Usage,
     UsageError,
     fetch,
-    pace,
+    marks,
     token_expiry,
     token_stale,
 )
@@ -79,6 +79,7 @@ from skins.base import (  # noqa: E402
     NUM,
     P,
     ZOOMS,
+    fill_w,
     mark_x,
     pace_color,
     set_palette,
@@ -189,6 +190,10 @@ REVIVE_TRIES = 2  # 연달아 이만큼 실패하면 자동 시도를 멈춘다 
 # 자격 파일이 아예 없을 때만 `claude auth status` 로 로그인돼 있나 묻는 간격 (초).
 # 파일이 있으면 그것만 보고 판정하므로(공짜) CLI 를 띄울 일이 없다.
 AUTH_GAP = 1800
+# 로그인·설치 창을 연 뒤 자격 파일을 짧게 자주 본다 — 1분(`_tick`)을 기다리지 않고 곧바로 잇는다.
+# 파일 하나 읽는 것뿐이라 공짜다. 창을 열어 두고 잊었으면 CONNECT_WAIT 뒤에 그만 본다.
+CONNECT_POLL = 3  # 초
+CONNECT_WAIT = 20 * 60  # 초
 TICK = 60  # 남은 시간을 다시 그리는 주기 (초)
 # 윈도우 업데이트가 재시작을 기다리는지 보는 주기 (초). 레지스트리 두 곳을 읽는
 # 것뿐이라 1ms 안쪽이지만, 팻말은 하루에 몇 번 서지도 않으므로 1분이면 넉넉하다.
@@ -914,6 +919,9 @@ class App:
         self._login_account = ""  # 로그인된 계정 (알아냈을 때만)
         self._login_render = None  # 로그인 팝업이 떠 있으면 그걸 다시 그리는 함수
         self._setup_shown = False  # 처음 쓰는 PC 에 설치·로그인 팝업을 띄웠나 (켤 때마다 한 번)
+        self._connect_until = 0.0  # 로그인·설치 창을 열어 기다리는 중이면 그만 볼 시각(monotonic)
+        self._connect_mark = None  # 창을 열 때 자격 파일의 (수정 시각, 크기). 없으면 None
+        self._connect_job = None
         # 로그인 자체가 끝나는 날 — 리프레시 토큰은 약 한 달 뒤 **절대 만료**된다.
         # 자격 파일만 보고 1분마다 판정한다(`_expiry_tick`). 모르면 None.
         self._expiry: cooldown_login.Expiry | None = None
@@ -1839,9 +1847,16 @@ class App:
         try:
             if isinstance(self.last_error, LoginRequired) and token_stale() is False:
                 self.poller.refresh_now()
+            elif isinstance(self.last_error, LoginRequired) and self.last_usage is None:
+                self._recheck_setup()
             elif self.last_usage is not None and self.last_error is None:
                 self.skin.show(self.last_usage, self._stamp(self.last_usage))
                 self._apply_notice()
+            elif self.last_usage is not None:
+                # ★ 오류가 떠 있어도(연결 실패·토큰 낡음) 마지막 값으로 눈금·남은 시간은 계속 센다.
+                #   옛날엔 여기를 건너뛰어, 밤새 토큰이 낡아 있으면 위젯 적정선이 그 시각에 멈추고
+                #   메인 화면(1분마다 다시 셈)과 몇 %씩 벌어졌다(2026-11-15). 오류 표시는 다시 얹는다.
+                self._replay()
         except Exception:  # noqa: BLE001
             pass
         finally:
@@ -2569,6 +2584,7 @@ class App:
         로그인은 사람이 브라우저에서 한다. 끝나면 `_expiry_tick` 이 1분 안에 알아챈다."""
         if cooldown_login.open_login_console():
             applog("클로드 다시 로그인 — 로그인 창 열기")
+            self._watch_connect()
         else:
             self.install_cli()
 
@@ -2577,8 +2593,80 @@ class App:
         끝나면 자격 파일이 생기고 `_tick` 이 1분 안에 알아채 조회를 다시 한다."""
         if cooldown_login.open_install_console():
             applog("클로드 코드 설치 — 설치 창 열기")
+            self._watch_connect()
         else:
-            self._tray_say("설치 창을 못 열었습니다")
+            applog("클로드 코드 설치 — 설치 창을 못 엶")
+            self._tray_say(
+                "설치 창을 못 열었어요.\n파워셸에서 irm https://claude.ai/install.ps1 | iex 실행 뒤 "
+                "claude auth login"
+            )
+
+    # -------------------------------------------------- 로그인·설치 창이 끝나기 기다리기
+    @staticmethod
+    def _cred_mark():
+        """자격 파일의 (수정 시각, 크기). 없으면 None — 창을 연 뒤 바뀌었는지만 본다."""
+        try:
+            st = os.stat(cooldown_login.cred_path())
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+
+    def _connecting(self) -> bool:
+        """로그인·설치 창을 열어 두고 끝나기를 기다리는 중인가."""
+        return time.monotonic() < self._connect_until
+
+    def _watch_connect(self) -> None:
+        """창을 열었다 — CONNECT_POLL 마다 자격 파일을 보고, 새 로그인이 적히면 곧바로 잇는다."""
+        self._connect_until = time.monotonic() + CONNECT_WAIT
+        self._connect_mark = self._cred_mark()
+        if self._connect_job is None:
+            self._connect_job = self.root.after(CONNECT_POLL * 1000, self._connect_poll)
+        self._render_login()
+
+    def _connect_poll(self) -> None:
+        self._connect_job = None
+        try:
+            mark = self._cred_mark()
+            if mark is not None and mark != self._connect_mark and token_stale() is False:
+                # 새 로그인이 적혔다 — 판정을 다 지우고 곧바로 조회한다
+                self._connect_until = 0.0
+                self._login_state = ""
+                self._revive_fails = 0
+                self._auth_logged_in = None
+                self._expiry = cooldown_login.expiry()
+                applog("클로드 코드 연결됨 — 로그인 창에서 로그인 마침")
+                self._tray_say("클로드 코드와 연결됐어요")
+                self.poller.refresh_now()
+                self._on_expiry()
+                self._refresh_error_text()
+                self._render_login()
+                return
+            self._recheck_setup()
+        except Exception:  # noqa: BLE001  못 읽었으면 다음 차례에 다시
+            pass
+        if self.alive and self._connecting():
+            self._connect_job = self.root.after(CONNECT_POLL * 1000, self._connect_poll)
+        else:
+            self._render_login()  # 그만 본다 — 팝업 문구를 '기다리는 중' 에서 되돌린다
+
+    def _recheck_setup(self) -> None:
+        """처음 쓰는 PC 의 판정(`클로드 코드 없음`·`로그인 안 함`)을 다시 본다. CLI 를 안 부른다.
+
+        옛날엔 한 번 정하면 붙들고 있어서, 설치만 마치고 로그인 전에 창을 닫으면 위젯이 계속
+        `눌러서 클로드 코드 설치` 를 내밀었다(이미 깔렸는데 또 설치 창).
+        """
+        if self._login_state not in (cooldown_login.NO_CLI, cooldown_login.LOGGED_OUT):
+            return
+        if cooldown_ping.find_claude() is None:
+            st = cooldown_login.NO_CLI
+        elif not os.path.exists(cooldown_login.cred_path()):
+            st = cooldown_login.LOGGED_OUT
+        else:
+            st = self._login_state  # 파일이 생겼다 — 나머지는 조회·되살리기가 가른다
+        if st != self._login_state:
+            self._login_state = st
+            self._refresh_error_text()
+            self._render_login()
 
     # --------------------------------------- 클로드 코드 로그인이 끝나는 날 끝
 
@@ -2697,7 +2785,7 @@ class App:
             if limit.pct is not None:
                 parts.append(f"{limit.label} {limit.pct:.0f}%  {limit.left}")
         # 좁은 스킨(슬림 바)에는 눈금만 서므로, 숫자는 여기서도 읽을 수 있게 한다
-        p = pace(usage)
+        p = marks(usage).week
         if p is not None:
             parts.append(f"이번 주 적정선 {p.due:.0f}%  ·  {p.verdict}")
         # 위젯 알림 자리는 한 줄뿐이라 '몇 건인지'까지는 못 적는다 — 여기서 마저 말한다
@@ -3490,20 +3578,27 @@ class App:
                     tk.Label(
                         wrap,
                         text=(
-                            "클로드 코드 설치와 로그인이 필요합니다."
+                            # 창을 열어 두고 기다리는 중 — 무엇을 하면 끝나는지만 말한다
+                            "설치 창이 끝나고 브라우저에서 승인하면 저절로 이어져요."
+                            if st == cooldown_login.NO_CLI and self._connecting()
+                            else "브라우저에서 승인하고 코드를 붙여 넣으면 저절로 이어져요."
+                            if self._connecting()
+                            else "클로드 코드 설치와 로그인이 필요해요."
                             if st == cooldown_login.NO_CLI
-                            else f"{cooldown_login.login_command()} 을 실행해 주세요."
+                            else "클로드 코드 로그인이 필요해요."
                         ),
                         bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w",
                         wraplength=W - PANEL_PAD * 2, justify="left",
                     ).pack(fill="x", pady=(10, 8))
                     if st == cooldown_login.NO_CLI:
                         self._themed_button(
-                            wrap, "설치하고 로그인", self.install_cli, primary=True, width=0,
+                            wrap, "설치 창 다시 열기" if self._connecting() else "설치하고 로그인",
+                            self.install_cli, primary=not self._connecting(), width=0,
                         ).pack(anchor="e")
                     elif st == cooldown_login.LOGGED_OUT:
                         self._themed_button(
-                            wrap, "로그인 창 열기", self.relogin, primary=True, width=0,
+                            wrap, "로그인 창 다시 열기" if self._connecting() else "로그인 창 열기",
+                            self.relogin, primary=not self._connecting(), width=0,
                         ).pack(anchor="e")
                     self._refit_panel(top, W)
                     return
@@ -3622,7 +3717,7 @@ class App:
         주간 창은 달력 주가 아니라 초기화 시각에서 7일 뺀 순간부터다. 창이 흐른
         만큼이 곧 알맞은 사용률이고, 게이지의 눈금이 그 자리다.
         """
-        p = pace(self.last_usage) if self.last_usage is not None else None
+        p = marks(self.last_usage).week if self.last_usage is not None else None
         if p is None:
             tk.Label(
                 wrap, text="주간 한도 값을 아직 못 받았어요.",
@@ -3646,7 +3741,7 @@ class App:
         )
         bar.pack(fill="x", pady=(12, 12))
         bar.create_rectangle(0, 0, inner, 10, fill=P.track, width=0)
-        bar.create_rectangle(0, 0, inner * p.used / 100, 10, fill=tone(p.used), width=0)
+        bar.create_rectangle(0, 0, fill_w(p.used, inner), 10, fill=tone(p.used), width=0)
         x = mark_x(p.due, inner)
         bar.create_rectangle(x, 0, x + MARK_W, 10, fill=P.title, width=0)
 
