@@ -382,15 +382,14 @@ def load_state() -> dict:
         "dock": True,  # 슬림 바는 작업표시줄에 붙는 게 기본 (자유 위치로 끌면 꺼진다)
         "theme": "auto",  # auto(윈도우 설정 따름) / light / dark
         "skin": skins.DEFAULT,
-        # [업데이트 대기] 조용할 때 알아서 껐다 켤지. **끔이 기본** — 남의 프로세스를
-        # 죽이는 일이라 켜는 것은 사람이 정한다.
-        "auto_update": False,
+        # [업데이트 대기] 자리 비면 알아서 껐다 켤지. **켬이 기본**(11-17 지시).
+        "auto_update": True,
         # 쿨다운 자기 새 버전: 받아서 자리 비면 바꿔 켤지. **켬이 기본**(내 위젯만 갈아 끼우는 일이다)
         "self_update": True,
-        # 메인 화면 밖(다른 앱·바탕화면·위젯)을 누르면 닫을지. **끔이 기본**(설정을 바꾸는 창이다)
-        "main_click_away": False,
-        # 위젯(클로디 밖)을 누르면: "main" 메인 화면 열기(기본) · "refresh" 새로고침만
-        "widget_click": "main",
+        # 메인 화면 밖(다른 앱·바탕화면·위젯)을 누르면 닫을지. **켬이 기본**(11-17 지시)
+        "main_click_away": True,
+        # 위젯(클로디 밖)을 누르면: "main" 메인 화면 열기 · "refresh" 새로고침만(기본, 11-17 지시)
+        "widget_click": "refresh",
         # 위젯 꾸미기(메인 화면 > 위젯 모양): 창 불투명도 · 크기 배율(skins.base.ZOOMS)
         "alpha": ALPHA,
         "zoom": 1.0,
@@ -829,6 +828,8 @@ def round_corners(root: tk.Tk) -> None:
 
 class App:
     def __init__(self):
+        # 설정 파일이 없으면 처음 켠 것 — 윈도우 켤 때 자동 실행을 켜 둔다(기본 켬, 11-17 지시)
+        self._first_run = not os.path.exists(STATE_PATH)
         self.state = load_state()
         self.results: queue.Queue = queue.Queue()
         self.commands: queue.Queue = queue.Queue()
@@ -973,6 +974,8 @@ class App:
         self.applied_theme = set_palette(self.state["theme"])
         self.root.configure(bg=P.bg)
 
+        if self._first_run and getattr(sys, "frozen", False) and not autostart_enabled():
+            set_autostart(True)  # 처음 켠 exe 만. 소스 실행은 등록을 건드리지 않는다
         repair_autostart()
         cooldown_stats.trim()  # 오래된 기록 덜어내기 — 켤 때 한 번이면 된다
 

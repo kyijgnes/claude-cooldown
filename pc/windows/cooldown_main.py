@@ -1109,7 +1109,7 @@ class MainScreen:
         self._section(wrap, "메인 화면·위젯")
         self._switch(wrap, Label.MAIN_CLICK_AWAY, bool(a.state.get("main_click_away")),
                      a.toggle_main_click_away)
-        mode = a.state.get("widget_click") or "main"
+        mode = a.state.get("widget_click") or "refresh"
         self._choice(wrap, Label.WIDGET_CLICK, (
             (Label.WIDGET_CLICK_MAIN, mode != "refresh", lambda: a.set_widget_click("main")),
             (Label.WIDGET_CLICK_REFRESH, mode == "refresh", lambda: a.set_widget_click("refresh")),
