@@ -1071,6 +1071,23 @@ class App:
         self.var_theme.set(kind)
         self._apply_theme(force=True)
 
+    def open_pack_import(self) -> None:
+        """캐릭터 팩 그림 넣기 창 (메인 화면 > 위젯 모양). 그림이 바뀔 때마다 위젯을 다시 짓는다."""
+        import cooldown_pack_import
+
+        win = getattr(self, "_pack_import", None)
+        if win is not None and win.win.winfo_exists():
+            win.win.deiconify()
+            win.win.lift()
+            return
+        self._pack_import = cooldown_pack_import.PackImport(self.root, on_change=self.reload_pack)
+
+    def reload_pack(self) -> None:
+        """팩 그림이 바뀌었다 — 스킨을 다시 지어 새 그림(또는 클로디)으로 앉힌다."""
+        self._build_body()
+        self._replay()
+        self.show_window()
+
     def _apply_theme(self, force: bool = False) -> None:
         """색을 바꿔 끼우고 다시 그린다. 색은 만들 때 위젯에 박히므로 새로 그려야 한다."""
         picked = set_palette(self.state["theme"])

@@ -107,17 +107,29 @@ def load_frames(path: str, height: int, speed: float = 1.0, width: int | None = 
     움직이는 png·gif 는 프레임을 다 꺼낸다. 프레임마다 크기가 달라도(gif 부분 갱신)
     `ImageSequence` 가 덮어 그린 전체 장면을 주므로 그대로 쓴다.
     """
+    return fit_frames(read_frames(path), height, speed, width)
+
+
+def read_frames(path: str):
+    """그림 파일 → [(RGBA, ms), ...] (크기 그대로)."""
     from PIL import Image, ImageSequence
 
     out = []
     with Image.open(path) as im:
         for frame in ImageSequence.Iterator(im):
             ms = frame.info.get("duration") or im.info.get("duration") or 100
-            rgba = frame.convert("RGBA")
-            box = rgba.getbbox()  # 투명 테두리를 걷어 낸다 — 바가 낮아 한 줄도 아깝다
-            if box:
-                rgba = rgba.crop(box)
-            out.append((rgba, ms))
+            out.append((frame.convert("RGBA"), int(ms)))
+    return out
+
+
+def fit_frames(frames, height: int, speed: float = 1.0, width: int | None = None):
+    """[(RGBA, ms)] 의 투명 테두리를 걷고 높이·폭 안에 맞춘다(바닥 가운데 정렬)."""
+    from PIL import Image
+
+    out = []
+    for rgba, ms in frames:
+        box = rgba.getbbox()  # 투명 테두리를 걷어 낸다 — 바가 낮아 한 줄도 아깝다
+        out.append((rgba.crop(box) if box else rgba, ms))
     if not out:
         return []
     # 프레임마다 걷어 낸 크기가 다르면 들썩이므로, 가장 큰 것에 맞춰 바닥 가운데로 다시 앉힌다
@@ -134,6 +146,98 @@ def load_frames(path: str, height: int, speed: float = 1.0, width: int | None = 
         result.append((canvas.resize((tw, th), Image.LANCZOS), max(20, int(ms / max(0.1, speed)))))
     return result
 
+
+# ---------------------------------------------------------------- 그림 넣기 도구가 쓰는 것
+# ★ 한 장씩 골라 넣는 도구다. 묶음째 받거나 다른 프로그램 저장 파일을 뒤지는 기능은 넣지 않는다.
+MAX_PER_STATE = 6  # 상태 하나에 넣을 수 있는 그림 수
+SENTINEL = (1, 254, 3)  # 배경 칠하기 표시 색 (그림에 거의 없는 색)
+
+
+def remove_bg(img, tol: int):
+    """가장자리에서 이어진 바탕(채팅방 바탕색 등)을 투명하게. tol=0 이면 그대로.
+
+    가장자리 점마다 바탕색과 비슷하면 거기서 물들이기(floodfill)를 해서, **안쪽의
+    같은 색(캐릭터 흰 몸)은 안 지운다** — 테두리로 둘러싸여 이어지지 않기 때문.
+    """
+    from PIL import Image, ImageChops, ImageDraw
+
+    rgba = img.convert("RGBA")
+    if tol <= 0:
+        return rgba
+    rgb = rgba.convert("RGB")
+    w, h = rgb.size
+    edge = [(x, 0) for x in range(0, w, 3)] + [(x, h - 1) for x in range(0, w, 3)]
+    edge += [(0, y) for y in range(0, h, 3)] + [(w - 1, y) for y in range(0, h, 3)]
+    colors = [rgb.getpixel(p) for p in edge]
+    bg = max(set(colors), key=colors.count)  # 가장자리에 가장 많은 색 = 바탕
+
+    def near(c):
+        return max(abs(a - b) for a, b in zip(c, bg)) <= tol
+
+    for p, c in zip(edge, colors):
+        if near(c) and rgb.getpixel(p) != SENTINEL:
+            ImageDraw.floodfill(rgb, p, SENTINEL, thresh=tol)
+    diff = ImageChops.difference(rgb, Image.new("RGB", rgb.size, SENTINEL))
+    r, g, b = diff.split()
+    keep = ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 255 if v else 0)
+    rgba.putalpha(ImageChops.multiply(rgba.getchannel("A"), keep))
+    return rgba
+
+
+def tidy(frames):
+    """[(RGBA, ms)] 를 모든 프레임에 걸친 한 네모로 잘라 맞춘다(움직여도 자리가 안 흔들리게)."""
+    boxes = [f.getbbox() for f, _ in frames]
+    boxes = [b for b in boxes if b]
+    if not boxes:
+        return frames
+    box = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+           max(b[2] for b in boxes), max(b[3] for b in boxes))
+    return [(f.crop(box), ms) for f, ms in frames]
+
+
+def dedupe(frames):
+    """잇달아 똑같은 프레임은 하나로 합치고 시간을 더한다(화면에서 담으면 같은 장면이 겹친다)."""
+    from PIL import ImageChops
+
+    out = []
+    for f, ms in frames:
+        if out and ImageChops.difference(out[-1][0], f).getbbox() is None:
+            out[-1] = (out[-1][0], out[-1][1] + ms)
+        else:
+            out.append((f, ms))
+    return out
+
+
+def room_left(state: str, root: str = PACK_DIR) -> int:
+    return max(0, MAX_PER_STATE - len(clips(state, root)))
+
+
+def save_clip(state: str, frames, root: str = PACK_DIR) -> str:
+    """상태 폴더에 그림 하나 저장. 여러 장이면 움직이는 png. 저장한 경로를 돌려준다."""
+    import time
+
+    if state not in STATES:
+        raise ValueError(state)
+    if room_left(state, root) <= 0:
+        raise ValueError(f"{state} 은 {MAX_PER_STATE}장까지")
+    frames = tidy(frames)
+    folder = os.path.join(root, state)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, time.strftime("%m%d_%H%M%S") + ".png")
+    first, *rest = [f for f, _ in frames]
+    if rest:
+        first.save(path, save_all=True, append_images=rest,
+                   duration=[ms for _, ms in frames], loop=0, disposal=1)
+    else:
+        first.save(path)
+    return path
+
+
+def delete_clip(path: str, root: str = PACK_DIR) -> None:
+    """팩 폴더 안의 그림만 지운다(밖을 가리키면 아무것도 안 함)."""
+    real = os.path.realpath(path)
+    if real.startswith(os.path.realpath(root) + os.sep) and os.path.isfile(real):
+        os.remove(real)
 
 if __name__ == "__main__":
     # 팩 점검: 상태마다 무엇을 틀지 보여 준다

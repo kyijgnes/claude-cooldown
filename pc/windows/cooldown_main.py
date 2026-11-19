@@ -29,6 +29,7 @@ import tkinter as tk
 from datetime import datetime
 
 import cooldown_api
+import cooldown_pack
 import cooldown_newver
 import cooldown_ping
 import cooldown_push
@@ -758,6 +759,12 @@ class MainScreen:
         self._switch(wrap, Label.TOPMOST, bool(a.state["topmost"]), a.toggle_topmost)
         if a.skin.dockable:
             self._switch(wrap, Label.DOCK, bool(a.state["dock"]), a._tray_toggle_dock)
+            # 캐릭터 팩: 바의 클로디 자리에 내 그림 (그림은 내 PC 폴더에만, cooldown_pack)
+            pack_row = tk.Frame(wrap, bg=P.bg)
+            pack_row.pack(fill="x", pady=(6, 0))
+            tk.Label(pack_row, text="캐릭터 팩" + (" · 켜짐" if cooldown_pack.present() else ""),
+                     bg=P.bg, fg=P.title, font=(KR, 10), anchor="w").pack(side="left")
+            a._themed_button(pack_row, "그림 넣기", a.open_pack_import, width=0).pack(side="right")
 
     def _look_card(self, parent, cls, on: bool, w: int, pick) -> tk.Frame:
         """스킨 하나 = 작은 그림 + 짧은 이름. 고른 것은 초록 테두리."""
