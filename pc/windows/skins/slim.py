@@ -405,7 +405,6 @@ class SlimSkin(Skin):
         else:
             self.claudi = Claudi(self.c, (x1, 0, box_r, self.h))
         self.claudi.home(mascot_cx)
-        self._last_five = None  # 초기화(크게 떨어짐) 알아보기용
         self._slot_init()
         self.claudi.start()  # 코랄 도트 마스코트 — 통통 튀고 눌리면 폴짝
 
@@ -617,11 +616,7 @@ class SlimSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._paint(P.bg, tone(worst(usage)))
-        if isinstance(self.claudi, Buddy):
-            self.claudi.set_mood(cooldown_pack.mood(usage.five.pct, usage.week.pct))
-            if cooldown_pack.was_reset(self._last_five, usage.five.pct):
-                self.claudi.celebrate()
-        self._last_five = usage.five.pct
+        self.feel(usage)  # 사용량 → 캐릭터 기분 (클로디·바 캐릭터 같이, base.feel)
         m = marks(usage)
         # 좁은 바는 남은 시간을 안 적는다 — 게이지의 '지금쯤' 눈금(┃)이 그 자리를 맡고,
         # 숫자로 보려면 메인 화면 > 이번 주 사용 속도 가 있다.
@@ -645,8 +640,7 @@ class SlimSkin(Skin):
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
         self._paint(P.red_bg, P.red)
-        if isinstance(self.claudi, Buddy):
-            self.claudi.set_mood("오류")
+        self.feel_error()
         # 오류가 번갈아 칸을 통째로 쓴다 (굵게·빨강 한 가지만). 길면 훑어서 다 보여 준다.
         self._slot_cancel()  # 조회 성공으로 예약해 뒀던 반영이 오류를 덮지 않게
         self._slot_base = []

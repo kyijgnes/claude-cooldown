@@ -207,6 +207,7 @@ class TableSkin(Skin):
 
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
+        self.feel(usage)  # 사용량 → 클로디 기분 (base.feel)
         self._head_normal()
         m = marks(usage)
         self.five.set(usage.five.pct, usage.five.left, m.five)
@@ -227,6 +228,7 @@ class TableSkin(Skin):
             self.model_rule.configure(bg=P.bg)
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
+        self.feel_error()
         self._head_error(text)
         if not keep_values:
             self.stamp.config(text=f"{stamp} 기준")

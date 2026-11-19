@@ -19,6 +19,10 @@
 - 그림은 도트 표(HEAD/LEGS/ARM/EYES)에 `#` 로 찍어 두고 `_sprite` 한 곳에서만 픽셀로 옮긴다.
   ★ **폰 앱(`android/art/make_claudi_icon.py`)이 이 표를 그대로 읽어 간다** —
   모양을 고쳤으면 그 스크립트를 다시 돌려 폰과 어긋나지 않게 한다.
+- 바 캐릭터(`buddy.py`)와 같은 상호작용 약속(11-20): **잡아 끌면 위젯 안에서 따라오고**
+  (`catch`·`drag`·`drop`, 놓으면 떨어져 통통 튀며 제자리로 달려간다), **PC 를 5분 안 쓰면 졸다가**
+  돌아오면 손 흔들어 반기고(`set_away`), 사용량이 한도면 졸고 80% 넘으면 자주 폴짝(`set_mood`),
+  5시간 한도가 풀리면 폭죽 축하(`celebrate`). 기절은 원래 있던 것(작정하고 두드려야 뻗음) 그대로.
 - `leave=False` 면 **자리를 비우지 않는다** — 슬림 바는 작업표시줄 아래로 쏙 내려가면
   되지만, 카드·아크·표는 위젯 한가운데라 내려갈 곳이 없다(허공에서 사라진 꼴이 된다).
 
@@ -207,6 +211,10 @@ NAP_LIFE = 36         # z 가 떠 있는 프레임
 BALL_PERIOD = 26      # 공을 던졌다 받는 주기 (프레임)
 BALL_H = 13.0         # 공이 오르는 높이 (px)
 BALL_R = 1.6          # 공 반지름 (도트 칸)
+# 상호작용 약속(11-20)
+SLEEPY_WAIT = 40      # 졸릴 때(자리비움·한도) 누르고 나서 이만큼 지나면 다시 존다
+BACK_MIN = 1.2        # 놓은 뒤 제자리로 달려가는 가장 느린 걸음 (px/프레임)
+BACK_RATE = 0.12      # 남은 거리의 이만큼씩 다가간다
 
 
 # ---------------------------------------------------------------- 마스코트 도트 그림
@@ -324,6 +332,8 @@ class Claudi:
         # 공룡으로 변신했을 때 부를 것 — 앱이 build 뒤에 위젯을 공룡 점프 판으로 바꾸는 것을 걸어 둔다.
         # 없으면(스킨 그림 뽑기 도구 등) 변신만 하고 누를 때까지 공룡으로 서 있다.
         self.on_morph = None
+        self._mood = "여유"   # 사용량 기분 (`set_mood`): 여유·보통·허둥·잠·오류
+        self._pc_away = False  # PC 입력이 한참 없다 (`set_away`)
 
     def set_box(self, box: tuple[float, float, float, float]) -> None:
         """놀 자리를 정한다(고쳐 잡을 수도 있다). 집은 상자 한가운데."""
@@ -410,6 +420,9 @@ class Claudi:
         self._dino = False            # 공룡으로 변신해 있다 (위젯이 공룡 점프 판인 동안)
         self._morph_open = 0          # 판을 띄우기까지 남은 프레임
         self._next_gesture = random.randint(20, 60)
+        self._grabbed = False         # 잡혀 끌리는 중
+        self._goff = (0.0, 0.0)       # 잡은 자리와 몸 한가운데의 차이
+        self._bx = self._by = 0.0     # 끌려 간 만큼 (놓으면 _bx 는 걸어서, _by 는 용수철로 0 이 된다)
         self._anim_gen = getattr(self, "_anim_gen", 0) + 1
         self._draw_mascot()  # 첫 프레임은 바로 그린다
         self.c.after(FRAME_MS, lambda c=self.c, g=self._anim_gen: self._animate(c, g))
@@ -434,6 +447,7 @@ class Claudi:
         **딴 데 클릭은 잔잔히 통통만 하고 기절엔 안 쌓인다.**
         딴짓 중이었으면 그만두고 돌아온다."""
         self._quiet = 0
+        self._pc_away = False  # 누른 사람이 곧 돌아온 사람이다
         self._end_act()  # 하던 딴짓은 곧바로 지우지 않고 접는다 (한 프레임에 안 갈리게)
         # 마스코트를 누른 것이면 '논 것' 이지 새로고침 요청이 아니다 (absorbed 참고)
         self._played = x is not None and self._near(x, y)
@@ -532,6 +546,97 @@ class Claudi:
             # 일부러 만든 순간이라 쿨다운과 무관하게 터뜨린다
             self._spark_cool = 0
             self._burst(SPARK_POKE + int(8 * press), 1.2 + press * 0.8)
+
+    # -------------------------------------------------- 끌기 (11-20)
+    def _area(self) -> tuple[float, float]:
+        try:
+            w, h = self.c.winfo_width(), self.c.winfo_height()
+            if w <= 1:
+                w, h = int(float(self.c.cget("width"))), int(float(self.c.cget("height")))
+            return float(w), float(h)
+        except (tk.TclError, ValueError):
+            return self.x1, self.y1
+
+    def catch(self, x: float | None, y: float | None) -> bool:
+        """누른 자리가 클로디 위인가 (끌면 창 대신 클로디가 따라온다). 자리를 비웠으면 없는 셈."""
+        if x is None or y is None or self._away > 0 or not self._near(x, y):
+            return False
+        self._goff = (self.cx + self._bx - x, self.cy + self._by - y)
+        return True
+
+    def drag(self, x: float | None, y: float | None) -> None:
+        """잡혀 끌린다. 위젯(캔버스) 안에 통째로 남게 가두고, 발은 버둥버둥."""
+        if x is None or y is None or self._faint > 0 or self._party or self._dino:
+            return
+        if not self._grabbed:
+            self._grabbed = True
+            self._pressed = False
+            self._press = 0.0
+            self._morph_hold = 0
+            self._end_act()
+            self._wave = 0
+            self._played = True
+        self._quiet = 0
+        cw, ch = self._area()
+        hw, hh = 5.5 * self.u, self.sprite_h / 2
+        tx = min(max(x + self._goff[0], hw), max(hw, cw - hw))
+        ty = min(max(y + self._goff[1], hh), max(hh, ch - hh))
+        self._bx, self._by = tx - self.cx, ty - self.cy
+        self._vy = self._yoff = 0.0
+
+    def put_down(self) -> None:
+        """놓았다. 떨어져 통통 튀고(높이는 용수철) 제자리로 달려간다(가로는 `_step_sparks`)."""
+        if not self._grabbed:
+            return
+        self._grabbed = False
+        self._yoff, self._by, self._vy = self._by, 0.0, 0.0
+        self._launch = LAUNCH_FRAMES  # 높이 끌어 올렸으면 그만큼 떨어지게 가둠을 잠깐 푼다
+        self._surprise = SURPRISE_FRAMES * 2
+
+    # -------------------------------------------------- 자리비움·사용량 (11-20)
+    def _sleepy(self) -> bool:
+        return self._pc_away or self._mood == "잠"
+
+    def set_away(self, away: bool) -> None:
+        """PC 입력이 한참 없다(참): 존다. 돌아왔다(거짓): 깨어 폴짝, 손 흔들어 반긴다."""
+        if away:
+            self._pc_away = True
+            if not (self._act or self._faint or self._party or self._dino or self._grabbed
+                    or self._away > 0):
+                self._act, self._act_left = "nap", ACT_MAX
+            return
+        if not self._pc_away:
+            return
+        self._pc_away = False
+        self._quiet = 0
+        if self._act == "nap":
+            self._end_act()
+        if self._faint or self._dino or self._grabbed:
+            return
+        self._boost(JUMP_IMPULSE * 1.4)
+        self._surprise = SURPRISE_FRAMES * 2
+        self._wave = 24
+        self._wave_dir = random.choice((-1, 1))
+
+    def set_mood(self, mood: str) -> None:
+        """사용량 기분. 잠(한도)이면 졸고, 허둥(80% 넘음)이면 자주 폴짝인다."""
+        if mood == self._mood:
+            return
+        was_sleepy = self._sleepy()
+        self._mood = mood
+        if was_sleepy and not self._sleepy() and self._act == "nap":
+            self._end_act()
+
+    def celebrate(self) -> None:
+        """5시간 한도가 풀렸다. 콤보 완주 때와 같은 폭죽 축하."""
+        if self._faint or self._party or self._dino or self._grabbed or self._away > 0:
+            return
+        self._end_act()
+        self._finale = FINALE_FRAMES
+        self._party = True
+        self._pop_drop = 0
+        self._aim()
+        self._hop_in = 1
 
     def _morph(self) -> None:
         """펑 — 공룡이 된다. `MORPH_OPEN` 뒤에 앱이 위젯을 공룡 점프 판으로 바꾼다(`on_morph`)."""
@@ -700,9 +805,12 @@ class Claudi:
         if gen != self._anim_gen:  # 새 build 가 시작됐다 — 이 루프는 은퇴
             return
         self._t += 1
-        self._step_physics()
-        if self._faint == 0 and not self._dino:
-            self._idle_step()
+        if self._grabbed:  # 잡혀 있는 동안은 용수철·잔동작을 멈춘다 (손을 따라갈 뿐)
+            self._step_sparks()
+        else:
+            self._step_physics()
+            if self._faint == 0 and not self._dino:
+                self._idle_step()
         if self._morph_open > 0:  # 변신했다 — 조금 뒤에 판이 된다
             self._morph_open -= 1
             if self._morph_open == 0 and self._dino and self.on_morph is not None:
@@ -724,6 +832,9 @@ class Claudi:
         for z in self._zzz:  # z 는 비스듬히 떠오른다 (옆 칸을 침범하지 않게 조금만)
             z[0] += 0.13; z[1] -= 0.28; z[2] -= 1
         self._zzz = [z for z in self._zzz if z[2] > 0]
+        if self._bx and not self._grabbed:  # 놓은 뒤: 제자리로 달려간다
+            stride = max(BACK_MIN, abs(self._bx) * BACK_RATE)
+            self._bx = 0.0 if abs(self._bx) <= stride else self._bx - math.copysign(stride, self._bx)
         if self._running > 0:  # 달려오는 중 — 왼쪽에서 제자리로
             self._running -= 1
             self._runx = -RUN_DIST * (self._running / RUN_FRAMES) ** 1.6
@@ -825,6 +936,8 @@ class Claudi:
             return
         if self._act:  # 뭔가에 열중하는 중 — 잔동작을 겹치지 않는다
             self._act_left -= 1
+            if self._act == "nap" and self._sleepy() and self._act_left <= 1:
+                self._act_left += ACT_MIN  # 졸린 동안(자리비움·한도)은 계속 존다
             if self._act == "nap" and self._act_left % NAP_EVERY == 0:
                 self._zzz.append([self.cx + 3.0, self.cy - 9.0, NAP_LIFE])
             if self._act_left <= 0:
@@ -838,7 +951,12 @@ class Claudi:
                 setattr(self, key, v - 1)
         busy = (self._blink or self._look or self._tilt or self._stretch
                 or self._wiggle or self._wave or self._exit or self._party)
-        moving = abs(self._vy) + abs(self._yoff) > 0.8
+        moving = abs(self._vy) + abs(self._yoff) > 0.8 or abs(self._bx) > 0.5
+        if self._sleepy() and self._quiet > SLEEPY_WAIT and not busy and not moving:
+            self._act, self._act_left = "nap", ACT_MAX  # 졸린 때는 딴짓 대신 곧바로 존다
+            return
+        if self._mood == "허둥":  # 80% 넘음: 잔동작이 두 배로 잦다 (주로 폴짝)
+            self._next_gesture -= 1
         if self._quiet > DEEP_IDLE and not busy and not moving:
             self._begin_absorbed()
             return
@@ -888,6 +1006,9 @@ class Claudi:
         return 1.0
 
     def _begin_gesture(self) -> None:
+        if self._mood == "허둥" and random.random() < 0.5:
+            self._vy -= JUMP_IMPULSE * 0.9  # 허둥지둥: 동동거리며 폴짝
+            return
         # '부르르(wiggle)' 는 뺐다 — 좌우로 떠는 움직임은 안 예뻤다
         g = random.choice(
             ("blink", "blink", "wave", "wave", "look", "tilt",
@@ -964,7 +1085,8 @@ class Claudi:
         syk *= spring_scale * breathe
         cy = self.cy + math.sin(t * 0.12) * 1.1 + self._yoff   # 잔잔한 통통 + 용수철
         cy += sink * self.drop                                 # 자리 비우러 내려가는 중
-        cx = self.cx + self._runx                          # 달려오는 중이면 왼쪽에서
+        cy += self._by                                         # 끌려 간 높이
+        cx = self.cx + self._runx + self._bx                          # 달려오는 중이면 왼쪽에서
         # 좌우 기울임은 **고개 갸웃할 때만.** 늘 살랑거리게 두지 말 것(산만하다).
         lean = tilt
         speed = abs(self._vy) + abs(self._yoff)                   # 출렁이는 중이면 신났다
@@ -972,14 +1094,17 @@ class Claudi:
         # 표정과 팔 — 콕 찔리면 놀라 만세, 출렁이면 눈웃음, 기지개도 만세
         lap = ball = extra = popper = None
         legs = LEGS
-        if self._pressed:  # 눌리는 중 — 눈을 질끈 감고 납작해진다
+        if self._grabbed:  # 잡혀 끌리는 중: 놀란 눈으로 만세, 발은 버둥버둥
+            expr, arms = "surprise", (-1, -1)
+            legs = LEGS if (self._t // 3) % 2 == 0 else LEGS_RUN
+        elif self._pressed:  # 눌리는 중 — 눈을 질끈 감고 납작해진다
             expr, arms = "blink", (0, 0)
             sxk *= 1 + PRESS_FLAT * 0.75 * self._press
             syk *= 1 - PRESS_FLAT * self._press
             cy += 3.2 * self._press
             if self._morph_hold > 0:  # 변신 직전 — 점점 세게 부르르 떤다
                 cx += MORPH_SHAKE * (self._morph_hold / MORPH_HOLD) * (1 if self._t % 2 else -1)
-        elif self._running > 0 or self._rushing:  # 달려오는 중 (불려서 올라오는 동안부터)
+        elif self._running > 0 or self._rushing or abs(self._bx) > 0.5:  # 달려오는 중 (불려서 올라오는 동안부터)
             # ★ 발 박자는 `_t` 로 센다 — **올라오는 중과 달리는 중이 같은 걸음으로 이어진다**
             #   (`_running` 으로 세면 땅에 닿는 순간 걸음이 처음으로 되감긴다).
             expr = "surprise" if self._surprise > 0 else "grin"

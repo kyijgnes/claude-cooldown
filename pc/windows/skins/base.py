@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
+import cooldown_pack
 from cooldown_core import Usage
 
 # ---------------------------------------------------------------- 색
@@ -275,6 +276,54 @@ class Skin:
         """`hold()` 뒤에 손을 뗐을 때(선택). 끌기로 접힐 때도 불린다."""
         pass
 
+    # ---------------------------------------------- 바 캐릭터 상호작용 (11-20)
+    # 캐릭터(클로디·팩 캐릭터)가 있는 스킨은 `self.claudi` 를 두면 아래가 그대로 넘긴다.
+    # 캐릭터 없는 스킨은 전부 아무 일 없음(`catch` 거짓 = 끌면 창이 움직인다).
+    def _char(self):
+        return getattr(self, "claudi", None)
+
+    def catch(self, x: float, y: float) -> bool:
+        """창 기준 (x, y) 를 누른 것이 캐릭터 위인가. 참이면 앱은 끌 때 **창 대신 캐릭터**를 끈다."""
+        ch = self._char()
+        if ch is None or not hasattr(ch, "catch"):
+            return False
+        return bool(ch.catch(*ch.to_local(self, x, y)))
+
+    def drag(self, x: float, y: float) -> None:
+        """캐릭터를 끄는 중. 창 기준 마우스 자리(앱이 끌 때마다 부른다)."""
+        ch = self._char()
+        if ch is not None and hasattr(ch, "drag"):
+            ch.drag(*ch.to_local(self, x, y))
+
+    def put_down(self) -> None:
+        """끌던 캐릭터를 놓았다. 캐릭터가 제자리로 돌아간다."""
+        ch = self._char()
+        if ch is not None and hasattr(ch, "put_down"):
+            ch.put_down()
+
+    def set_away(self, away: bool) -> None:
+        """PC 입력이 한참 없다(참) / 돌아왔다(거짓). 앱의 `AwayWatch` 가 바뀔 때만 부른다."""
+        ch = self._char()
+        if ch is not None and hasattr(ch, "set_away"):
+            ch.set_away(away)
+
+    def feel(self, usage: Usage) -> None:
+        """사용량을 캐릭터 기분으로 넘긴다(스킨의 `show` 가 부른다). 5시간 한도가 풀렸으면 축하."""
+        ch = self._char()
+        if ch is None or not hasattr(ch, "set_mood"):
+            return
+        ch.set_mood(char_mood(usage.five.pct, usage.week.pct))
+        before = getattr(self, "_feel_five", None)
+        if cooldown_pack.was_reset(before, usage.five.pct) and hasattr(ch, "celebrate"):
+            ch.celebrate()
+        self._feel_five = usage.five.pct
+
+    def feel_error(self) -> None:
+        """조회 오류를 캐릭터 기분으로(스킨의 `show_error` 가 부른다)."""
+        ch = self._char()
+        if ch is not None and hasattr(ch, "set_mood"):
+            ch.set_mood("오류")
+
     def notice(self, text: str) -> None:
         """값은 멀쩡한데 알릴 것(예: 자동 시작 놓침)을 표시(선택). 기본은 no-op.
 
@@ -303,3 +352,71 @@ def inside(widget: tk.Misc, x: float, y: float, pad: int = 4) -> bool:
                 and y0 - pad <= y <= y0 + widget.winfo_height() + pad)
     except tk.TclError:
         return False
+
+
+# ---------------------------------------------------------------- 캐릭터 공용 셈
+CALM_AT = 50.0      # 이보다 낮으면 「여유」, 넘으면 「보통」 (80 넘으면 허둥, 한도면 잠)
+FAINT_TAPS = 6      # 캐릭터를 FAINT_WINDOW 초 안에 이만큼 누르면 기절 (5번 넘게)
+FAINT_WINDOW = 2.0
+AWAY_AFTER = 300.0  # PC 입력이 이만큼(초) 없으면 자리비움
+
+
+def char_mood(five: float | None, week: float | None) -> str:
+    """사용량 → 캐릭터 기분 네 단계: 여유 · 보통 · 허둥 · 잠."""
+    m = cooldown_pack.mood(five, week)
+    worst = max((p for p in (five, week) if p is not None), default=0.0)
+    if m == "여유" and worst >= CALM_AT:
+        return "보통"
+    return m
+
+
+class TapCount:
+    """짧은 시간 안에 몇 번 눌렀나 (연타 → 기절). 시계는 바깥에서 받는다(시험용)."""
+
+    def __init__(self, n: int = FAINT_TAPS, window: float = FAINT_WINDOW):
+        self.n, self.window = n, window
+        self.times: list[float] = []
+
+    def tap(self, now: float) -> bool:
+        """한 번 눌렀다. 이번 것으로 연타가 됐으면 참(그리고 센 것을 비운다)."""
+        self.times = [t for t in self.times if now - t <= self.window] + [now]
+        if len(self.times) >= self.n:
+            self.times = []
+            return True
+        return False
+
+
+def idle_seconds() -> float:
+    """윈도우에서 마지막 키보드·마우스 입력 뒤 흐른 초 (`GetLastInputInfo`). 못 재면 0."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+        info = LASTINPUTINFO()
+        info.cbSize = ctypes.sizeof(info)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return 0.0
+        now = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+        return ((now - info.dwTime) & 0xFFFFFFFF) / 1000.0
+    except Exception:  # noqa: BLE001  윈도우가 아니거나 막혀 있으면 자리비움을 안 쓴다
+        return 0.0
+
+
+class AwayWatch:
+    """PC 입력이 `after` 초 넘게 없으면 자리비움. `poll()` 은 바뀐 순간에만 새 값을, 아니면 None."""
+
+    def __init__(self, idle_fn=idle_seconds, after: float = AWAY_AFTER):
+        self.idle_fn = idle_fn
+        self.after = after
+        self.away = False
+
+    def poll(self) -> bool | None:
+        now_away = self.idle_fn() >= self.after
+        if now_away == self.away:
+            return None
+        self.away = now_away
+        return now_away
+
