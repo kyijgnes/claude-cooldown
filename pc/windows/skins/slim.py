@@ -50,6 +50,9 @@ from .base import (
     worst,
 )
 from .claudi import Claudi
+from .packpet import PackPet
+
+import cooldown_pack
 
 # ---------------------------------------------------------------- 치수
 # 세로 배치는 작업표시줄 높이에서 계산한다 (build 참고). 가로만 여기서 고정.
@@ -365,8 +368,16 @@ class SlimSkin(Skin):
         # 그 자리에 뛰어들면 앱이 얹은 네모에 가려 사라진 것처럼 보인다.
         # **맨 마지막에 켠다** — 매 프레임 다시 그리므로 늘 맨 위에 온다.
         box_r = week_end if self.compact else self.width - PAD_R
-        self.claudi = Claudi(self.c, (x1, 0, box_r, self.h))
+        # 내 PC 에 캐릭터 팩(`~/.claude_cooldown_pack/`)이 있으면 클로디 대신 그 그림이 앉는다.
+        # 이름은 그대로 `self.claudi` — 앱·아래 메서드가 같은 약속으로 부른다(packpet.py 머리).
+        if cooldown_pack.present():
+            # 폭은 틈 안에서만 — 넘으면 옆 숫자·번갈아 칸을 덮는다(시험 팩으로 겪음)
+            gap = MGAP_C - 4 if self.compact else MGAP - 9
+            self.claudi = PackPet(self.c, (x1, 0, box_r, self.h), width=gap)
+        else:
+            self.claudi = Claudi(self.c, (x1, 0, box_r, self.h))
         self.claudi.home(mascot_cx)
+        self._last_five = None  # 초기화(크게 떨어짐) 알아보기용
         self._slot_init()
         self.claudi.start()  # 코랄 도트 마스코트 — 통통 튀고 눌리면 폴짝
 
@@ -564,6 +575,11 @@ class SlimSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._paint(P.bg, tone(worst(usage)))
+        if isinstance(self.claudi, PackPet):
+            self.claudi.set_mood(cooldown_pack.mood(usage.five.pct, usage.week.pct))
+            if cooldown_pack.was_reset(self._last_five, usage.five.pct):
+                self.claudi.celebrate()
+        self._last_five = usage.five.pct
         m = marks(usage)
         # 좁은 바는 남은 시간을 안 적는다 — 게이지의 '지금쯤' 눈금(┃)이 그 자리를 맡고,
         # 숫자로 보려면 메인 화면 > 이번 주 사용 속도 가 있다.
@@ -587,6 +603,8 @@ class SlimSkin(Skin):
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
         self._paint(P.red_bg, P.red)
+        if isinstance(self.claudi, PackPet):
+            self.claudi.set_mood("오류")
         # 오류가 번갈아 칸을 통째로 쓴다 (굵게·빨강 한 가지만). 길면 훑어서 다 보여 준다.
         self._slot_cancel()  # 조회 성공으로 예약해 뒀던 반영이 오류를 덮지 않게
         self._slot_base = []
