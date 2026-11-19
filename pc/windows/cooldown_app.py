@@ -1081,6 +1081,26 @@ class App:
             win.win.lift()
             return
         self._pack_import = cooldown_pack_import.PackImport(self.root, on_change=self.reload_pack)
+        self._place_beside_main(self._pack_import.win)
+
+    def _place_beside_main(self, win: tk.Toplevel) -> None:
+        """메인 화면 바로 오른쪽에 붙인다(자리가 없으면 왼쪽). 메인 화면이 없으면 위젯 옆.
+        그냥 두면 윈도우가 화면 왼쪽 위 아무 데나 띄워 메인 화면과 멀리 떨어진다(11-20 지적)."""
+        win.withdraw()
+        win.update_idletasks()
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+        if self.main.is_open():
+            top = self.main.top
+            mx, my, mw = top.winfo_x(), top.winfo_y(), top.winfo_width()
+            gap = 8
+            x, y = clamp_to_screen(mx + mw + gap, my, w, h)
+            if x < mx + mw:  # 오른쪽이 모자라 메인 화면 위로 밀려 들어왔다 → 왼쪽에
+                x, y = clamp_to_screen(mx - w - gap, my, w, h)
+        else:
+            x, y = clamp_to_screen(self.root.winfo_x(), self.root.winfo_y() - h - 8, w, h)
+        win.geometry(f"+{x}+{y}")
+        win.deiconify()
+        win.lift()
 
     def reload_pack(self) -> None:
         """팩 그림이 바뀌었다 — 스킨을 다시 지어 새 그림(또는 클로디)으로 앉힌다."""

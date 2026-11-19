@@ -235,8 +235,14 @@ class MainScreen:
             pass
 
     def _ours(self) -> list:
-        """밖으로 치지 않는 창: 메인 화면과, 그 위에 띄운 팝업들."""
-        return [self.top] + [t for t in self.app._panels if t is not None]
+        """밖으로 치지 않는 창: 메인 화면과, 그 위에 띄운 팝업들, 캐릭터 마당 그림 넣기 창
+        (그 창과 거기서 띄운 새 캐릭터·미리 보기 창까지)."""
+        ours = [self.top] + [t for t in self.app._panels if t is not None]
+        pack = getattr(self.app, "_pack_import", None)
+        if pack is not None and self._alive(pack.win):
+            ours.append(pack.win)
+            ours += [t for t in pack.win.winfo_children() if isinstance(t, tk.Toplevel)]
+        return ours
 
     def _away_check(self) -> None:
         if not self._away_on() or not self.is_open():
