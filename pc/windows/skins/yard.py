@@ -260,10 +260,27 @@ class Yard:
         if self._mood == "허둥" and hi > lo:  # 허둥댈 땐 서 있지 않고 계속 뛰어다닌다
             a.target = random.uniform(lo, hi)
             return
-        if random.random() < 0.6 and hi > lo:
-            a.target = random.uniform(lo, hi)
+        if hi > lo and (random.random() < 0.6 or self._crowded(a)):
+            a.target = self._free_spot(a)  # 남이 서 있는 자리에 겹쳐 서 있지 않게 비켜 간다
         else:
             a.play("서기", random.uniform(IDLE_MIN, IDLE_MAX))
+
+    def _others(self, a: Actor) -> list[float]:
+        """남들이 있는 곳(걸어가는 중이면 가는 곳)."""
+        return [b.target if b.target is not None else b.x for b in self.actors if b is not a]
+
+    def _crowded(self, a: Actor) -> bool:
+        """남과 몸의 절반 넘게 겹쳐 서 있나."""
+        return any(abs(x - a.x) < a.w * 0.5 for x in self._others(a))
+
+    def _free_spot(self, a: Actor) -> float:
+        """마당에서 남들과 가장 덜 겹치는 곳 (몇 군데 뽑아 남과 가장 먼 곳)."""
+        lo, hi = self._bounds(a)
+        others = self._others(a)
+        tries = [random.uniform(lo, hi) for _ in range(10)]
+        if not others:
+            return tries[0]
+        return max(tries, key=lambda x: min(abs(x - o) for o in others))
 
     def _sleep_spot(self, a: Actor) -> float:
         """한도가 차면 가운데로 모여 나란히 잔다."""

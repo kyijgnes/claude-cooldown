@@ -69,6 +69,7 @@ import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐�
 import cooldown_leftover  # noqa: E402  [남은 식구] 클로드가 고쳐지면 지운다
 import cooldown_newver  # noqa: E402  쿨다운 자기 새 버전 알림
 import cooldown_selfupdate  # noqa: E402  쿨다운 자기 새 버전 받아 옆에 풀고 바꿔 켜기
+import cooldown_pack  # noqa: E402  캐릭터 마당 그림 폴더(바뀌면 다시 그림)
 import cooldown_dino  # noqa: E402  클로디를 아주 오래 꾹 누르면 뜨는 공룡 점프
 import skins  # noqa: E402
 from cooldown_dino_view import DinoBoard  # noqa: E402
@@ -1104,9 +1105,67 @@ class App:
 
     def reload_pack(self) -> None:
         """팩 그림이 바뀌었다 — 스킨을 다시 지어 새 그림(또는 클로디)으로 앉힌다."""
+        self._pack_sig = cooldown_pack.signature()
         self._build_body()
         self._replay()
         self.show_window()
+
+    def _pack_watch(self) -> None:
+        """캐릭터 마당 폴더를 밖에서(탐색기·다른 프로그램) 고쳐도 껐다 켤 것 없이 반영한다.
+        3초마다 폴더 지문만 잰다(파일 이름·크기·고친 시각). 공룡 판이 떠 있으면 미룬다."""
+        try:
+            if self.alive and self._dino_board is None:
+                sig = cooldown_pack.signature()
+                if getattr(self, "_pack_sig", None) is None:
+                    self._pack_sig = sig
+                elif sig != self._pack_sig:
+                    applog("캐릭터 마당 폴더가 바뀜 — 다시 그림")
+                    self.reload_pack()
+        except Exception:  # noqa: BLE001  지켜보기 하나 때문에 앱이 서면 안 된다
+            pass
+        finally:
+            if self.alive:
+                self.root.after(3000, self._pack_watch)
+
+    def restart(self) -> None:
+        """앱 다시 시작 (메인 화면 > 앱 설정). 새로 하나 띄우고, 그쪽이 뮤텍스를 잡으면 이쪽이 끝난다.
+        새 버전 바꿔 켜기(`_swap_to`)와 같은 순서: 자리·설정 저장 → 뮤텍스 놓기 → 띄우기 → 기다리기."""
+        import subprocess
+
+        if getattr(self, "_restarting", False) or not self.alive:
+            return
+        self._restarting = True
+        applog("다시 시작 — 앱 설정")
+        self._remember_spot()
+        save_state(self.state)
+        exe, args, cwd = launch_command()
+        argv = [exe] + ([args.strip('"')] if args else [])
+        argv += [cooldown_selfupdate.ARG, str(os.getpid())]  # 새 것이 이쪽이 끝나길 기다린다
+        if cooldown_job.MARK in sys.argv[1:]:
+            argv.append(cooldown_job.MARK)
+        release_mutex()
+        try:
+            proc = subprocess.Popen(argv, cwd=cwd, env=cooldown_env.clean_env(), close_fds=True,
+                                    creationflags=cooldown_selfupdate._DETACHED)
+        except OSError as e:
+            applog(f"다시 시작 실패 — 못 띄움 {e}")
+            already_running()  # 놓았던 뮤텍스를 다시 잡는다
+            self._restarting = False
+            return
+
+        def wait():
+            if cooldown_selfupdate.wait_mutex(MUTEX_NAME, proc):
+                self.commands.put(lambda: self.quit("다시 시작"))
+            else:
+                def failed():
+                    if already_running():  # 늦게라도 떴다
+                        self.quit("다시 시작 (늦게 뜸)")
+                    else:
+                        applog("다시 시작 실패 — 새 것이 안 뜸")
+                        self._restarting = False
+                self.commands.put(failed)
+
+        threading.Thread(target=wait, daemon=True).start()
 
     def _apply_theme(self, force: bool = False) -> None:
         """색을 바꿔 끼우고 다시 그린다. 색은 만들 때 위젯에 박히므로 새로 그려야 한다."""
@@ -4499,6 +4558,7 @@ class App:
 
     def run(self):
         self.show_window()
+        self.root.after(3000, self._pack_watch)
         self.root.mainloop()
 
 

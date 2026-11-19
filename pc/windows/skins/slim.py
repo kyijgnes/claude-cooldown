@@ -256,6 +256,10 @@ class SlimSkin(Skin):
     compact = False
 
     def build(self, parent: tk.Misc) -> None:
+        # ★ 같은 스킨을 다시 지을 때(마당 폭·밝기 바꾸기) 지난번에 마당을 더한 폭이 남아 있다.
+        #   그 위에 또 더하면 바가 끝없이 늘고 한도 칸까지 벌어진다(11-20 실제로 겪음).
+        #   넓은 바는 늘 클래스에 적힌 폭에서, 좁은 바는 아래에서 글꼴로 다시 잰다.
+        self.width = type(self).width
         self.f_label = tkfont.Font(parent, family=KR, size=9)
         self.f_value = tkfont.Font(parent, family=NUM, size=13, weight="bold")
         self.f_small = tkfont.Font(parent, family=KR, size=8)

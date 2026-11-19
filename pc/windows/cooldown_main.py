@@ -1150,6 +1150,7 @@ class MainScreen:
                      locked=a._autostart_locked)
 
         self._section(wrap, "쿨다운 버전")
+        self._value(wrap, "앱", "켜져 있음", P.sub, button=("다시 시작", a.restart))
         ver = cooldown_newver.current() or "모름"
         selfup = cooldown_selfupdate.can_self_update()
         self._value(wrap, "지금 버전", ver if selfup else f"{ver} · 소스에서 실행", P.sub)

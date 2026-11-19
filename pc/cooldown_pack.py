@@ -129,6 +129,23 @@ def characters(root: str = PACK_DIR) -> list[str]:
     return [c for c in all_characters(root) if any(clips(c, m, root) for m in MOTIONS)][:MAX_CHARS]
 
 
+def signature(root: str = PACK_DIR) -> tuple:
+    """팩 폴더 지문(파일 경로·크기·고친 시각). 바뀌었는지만 볼 때 쓴다(앱이 3초마다)."""
+    out = []
+    if not os.path.isdir(root):
+        return ()
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(("_", ".")))
+        for name in sorted(filenames):
+            p = os.path.join(dirpath, name)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            out.append((p, st.st_size, int(st.st_mtime)))
+    return tuple(out)
+
+
 def present(root: str = PACK_DIR) -> bool:
     return bool(characters(root))
 
