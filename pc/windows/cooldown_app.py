@@ -76,6 +76,7 @@ from cooldown_dino_view import DinoBoard  # noqa: E402
 from cooldown_main import MainScreen  # noqa: E402  메인 화면(사용량 세부 + 모든 설정)
 from skins.base import (  # noqa: E402
     KR,
+    AwayWatch,
     MARK_W,
     NUM,
     P,
@@ -276,6 +277,7 @@ class _Tray(pystray.Icon):
 STAY_TICK = 250  # 붙어 있을 때 다시 맨 앞으로 올리는 주기 (ms). 가려지는 시간이 곧 이 값.
 ALPHA = 0.96  # 평소 창 불투명도
 BUSY_ALPHA = 0.78  # 새로고침 누른 직후
+AWAY_TICK = 5000  # PC 입력이 끊겼는지 이만큼(ms)마다 본다 (캐릭터 자리비움)
 HOLD_MS = 340  # 이만큼 누르고 있으면 '꾹 누름' — 마스코트가 기를 모으기 시작한다
 STATUS_BOX = 18  # 상태 점 + 새로고침 링을 담는 작은 캔버스 한 변 (px)
 DOT_R = 2.0  # 상태 점 반지름 — 링(반지름 7) 안쪽에 넉넉히 들어가게 작게
@@ -888,6 +890,9 @@ class App:
         self._dragging = False
         self._hold_job = None   # '꾹 누름' 판정 예약
         self._holding = False   # 지금 꾹 누르고 있는가
+        self._on_char = False   # 누른 자리가 캐릭터 위였나 (끌면 창 대신 캐릭터를 끈다)
+        self._char_drag = False  # 지금 캐릭터를 끌고 있는가
+        self._away = AwayWatch()  # PC 입력이 5분 없으면 캐릭터가 자리비움
         self._menu_open = False
         # 지금 창에 걸어 둔 '항상 위' 값 — 전체화면일 때 내렸다가 끝나면 되돌린다
         self._topmost_now: bool | None = None
@@ -1013,6 +1018,7 @@ class App:
         self.root.after(1200, self._expiry_tick)
         # 원격 대기는 사용량과 무관하므로 곧바로 — 켜 두기로 했으면 여기서 되살아난다
         self.root.after(1500, self._remote_tick)
+        self.root.after(AWAY_TICK, self._away_tick)
 
     # -------------------------------------------------- 본체(스킨) 그리기
     def _build_body(self) -> None:
@@ -1033,6 +1039,11 @@ class App:
         #   **한 번 누른 게 두 번 처리된다**(마스코트가 두 배로 튀고, 기절 누적도 두 배로
         #   쌓이고, 클릭 한 번에 반짝이가 터졌다. 2026-08-03 에 실제로 그러고 있었다).
         self._bind_drag(self.root)
+        if self._away.away:  # 다시 지은 캐릭터도 자리비움 중이었으면 그대로 잇는다
+            try:
+                self.skin.set_away(True)
+            except Exception:  # noqa: BLE001
+                pass
         # 상태 점은 스킨 위에 얹는 별도 캔버스라 스킨을 다시 그릴 때마다 자리를 다시 잡는다.
         # (root 의 자식이라 _bind_drag 가 못 걸지만, 이벤트가 root 로 올라가 똑같이 동작한다)
         self._sync_status()
@@ -1339,6 +1350,12 @@ class App:
         self._dy = e.y_root - self.root.winfo_y()
         self._from = (e.x_root, e.y_root)
         self._dragging = True
+        self._char_drag = False
+        # 캐릭터 위를 눌렀나 — 그러면 끌 때 창이 아니라 캐릭터가 위젯 안에서 따라온다
+        try:
+            self._on_char = bool(self.skin.catch(self._dx, self._dy))
+        except Exception:  # noqa: BLE001
+            self._on_char = False
         # 누른 순간 마스코트가 반응한다 (스킨이 지원하면). 끌기로 이어져도 무해하다.
         # _dx/_dy 는 창 기준 누른 자리 = 캔버스 좌표(창을 꽉 채우므로) — 마스코트를
         # 직접 찔렀는지 스킨이 이 값으로 판단한다.
@@ -1361,6 +1378,16 @@ class App:
         except Exception:  # noqa: BLE001
             pass
 
+    def _cancel_hold(self):
+        """꾹 누름을 **놓지 않고** 접는다 (캐릭터 끌기로 이어질 때. 튕겨 오르지 않게)."""
+        if getattr(self, "_hold_job", None) is not None:
+            try:
+                self.root.after_cancel(self._hold_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._hold_job = None
+        self._holding = False
+
     def _end_hold(self):
         """누르기가 끝났거나(뗌) 끌기로 바뀌었다 — 꾹 누름을 접는다."""
         if getattr(self, "_hold_job", None) is not None:
@@ -1381,11 +1408,34 @@ class App:
             return
         # 끌기 시작한 순간 꾹 누름은 접는다 (옮기려던 것이지 놀려던 게 아니다)
         start = getattr(self, "_from", (e.x_root, e.y_root))
-        if max(abs(e.x_root - start[0]), abs(e.y_root - start[1])) > DRAG_SLOP:
+        far = max(abs(e.x_root - start[0]), abs(e.y_root - start[1])) > DRAG_SLOP
+        if self._on_char:
+            # ★ 캐릭터를 잡고 끈다(11-20): 창은 그대로, 캐릭터만 위젯 안에서 마우스를 따라간다.
+            #   꾹 누름은 놓아 튕기지 않고 조용히 접는다(끌림으로 이어지므로).
+            if far or self._char_drag:
+                if not self._char_drag:
+                    self._char_drag = True
+                    self._cancel_hold()
+                try:
+                    self.skin.drag(e.x_root - self.root.winfo_rootx(),
+                                   e.y_root - self.root.winfo_rooty())
+                except Exception:  # noqa: BLE001
+                    pass
+            return
+        if far:
             self._end_hold()
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
 
     def _release(self, e):
+        if self._char_drag:  # 캐릭터를 끌다 놓았다 — 제자리로 돌아간다. 클릭도 창 옮기기도 아니다
+            self._char_drag = self._on_char = False
+            self._dragging = False
+            try:
+                self.skin.put_down()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        self._on_char = False
         self._end_hold()
         self._dragging = False
         # 그냥 한 번 누른 것과 끌어서 옮긴 것을 구분한다.
@@ -3217,6 +3267,21 @@ class App:
             self.remote_error = ""
         self._say_state("on" if (want and not self.remote_error) else "off")
         self._apply_notice()
+
+    def _away_tick(self):
+        """PC 입력이 AWAY_AFTER(5분) 넘게 없으면 캐릭터가 자리비움, 돌아오면 반긴다."""
+        try:
+            changed = self._away.poll()
+            if changed is not None:
+                self.skin.set_away(changed)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if self.alive:
+                try:
+                    self.root.after(AWAY_TICK, self._away_tick)
+                except tk.TclError:  # 종료 중
+                    pass
 
     def _remote_tick(self):
         """켜 두기로 했으면 살아 있는지 REMOTE_TICK 마다 보고, 죽었으면 다시 살린다.

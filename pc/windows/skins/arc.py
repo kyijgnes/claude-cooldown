@@ -306,6 +306,7 @@ class ArcSkin(Skin):
 
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
+        self.feel(usage)  # 사용량 → 클로디 기분 (base.feel)
         self._ok_stamp = stamp  # 값이 언제 것인지 — 오류 띠에서도 이걸 쓴다
         m = marks(usage)
         self.five.set(usage.five.pct, usage.five.left, m.five)
@@ -314,6 +315,7 @@ class ArcSkin(Skin):
         self._foot(stamp, usage)
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
+        self.feel_error()
         if not keep_values:
             self.five.set(None, "")
             self.week.set(None, "")
