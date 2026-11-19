@@ -93,13 +93,12 @@ def set_setting(key: str, value, root: str = PACK_DIR) -> None:
 
 def active(root: str = PACK_DIR) -> str | None:
     """바에 세울 캐릭터 이름. None 이면 클로디.
-    한 번도 안 골랐으면 첫 캐릭터(넣어 둔 캐릭터가 업데이트 뒤 갑자기 클로디로 바뀌지 않게),
-    `클로디` 를 골랐으면 클로디, 고른 캐릭터가 빠졌으면 첫 캐릭터."""
-    chars = characters(root)
+    ★ 기본은 클로디(11-20 사용자: 설치했을 때는 원래 클로디). 사용자가 「바 캐릭터」에서 고른
+    캐릭터만 선다. 팩을 넣거나 만들어도 저절로 바뀌지 않고, 고른 캐릭터가 빠지면 클로디로 돌아간다."""
     name = settings(root).get("바 캐릭터")
-    if name == CLAUDI or not chars:
+    if not name or name == CLAUDI:
         return None
-    return name if name in chars else chars[0]
+    return name if name in characters(root) else None
 
 
 def set_active(name: str | None, root: str = PACK_DIR) -> None:
@@ -353,6 +352,168 @@ def remove_character(name: str, root: str = PACK_DIR) -> str | None:
         dst, n = os.path.join(root, f"_{name} {n}"), n + 1
     os.rename(src, dst)
     return os.path.basename(dst)
+
+
+# ---------------------------------------------------------------- 캐릭터팩 파일 (내보내기·넣기)
+# 캐릭터 하나 = zip 하나. 이름은 `<캐릭터>.캐릭터팩.zip` (그냥 zip 이라 어디서나 열리고 이름으로 알아본다).
+#     팩.json                {"형식": 1, "캐릭터": "<이름>"}
+#     <이름>/설정.json        캐릭터 설정 (보는 쪽 등)
+#     <이름>/<동작>/<그림>    동작 폴더마다 그림
+# ★ 남이 만든 파일을 받는 길이라 넣을 때 다 의심한다: 경로 탈출(`..`·절대경로·드라이브)·
+#   그림 아닌 파일·한도(캐릭터 수·동작당 장수)·지나치게 큰 파일. 하나라도 걸리면 통째로 거절하고
+#   팩 폴더에는 아무것도 안 남긴다(임시 폴더 `_넣는 중…` 에 풀어 다 맞으면 이름만 바꿔 옮긴다).
+PACK_SUFFIX = ".캐릭터팩.zip"
+PACK_FORMAT = 1
+PACK_MANIFEST = "팩.json"
+PACK_MAX_FILE = 20 * 1024 * 1024  # 팩 파일 자체
+PACK_MAX_CLIP = 8 * 1024 * 1024  # 풀었을 때 그림 한 장
+PACK_MAX_TOTAL = 60 * 1024 * 1024  # 풀었을 때 전부
+PACK_SKIP = {"thumbs.db", "desktop.ini", ".ds_store"}  # 탐색기가 저절로 만드는 것
+
+
+class PackError(ValueError):
+    """팩을 넣지 못한 까닭 (화면에 한 줄로 그대로 보여 준다)."""
+
+
+def clean_name(name: str) -> str:
+    return "".join(ch for ch in name.strip() if ch not in BAD_NAME and ord(ch) >= 32).strip(" .")
+
+
+def free_name(name: str, root: str = PACK_DIR) -> str:
+    """겹치지 않는 캐릭터 이름: `솜구름` 이 있으면 `솜구름 (2)`, `솜구름 (3)` …"""
+    taken = {n.casefold() for n in os.listdir(root)} if os.path.isdir(root) else set()
+    if name.casefold() not in taken:
+        return name
+    n = 2
+    while f"{name} ({n})".casefold() in taken:
+        n += 1
+    return f"{name} ({n})"
+
+
+def export_pack(char: str, dest: str, root: str = PACK_DIR) -> str:
+    """캐릭터 하나를 팩 파일 하나로 저장한다. 저장한 경로를 돌려준다."""
+    import zipfile
+
+    if char not in all_characters(root):
+        raise PackError("없는 캐릭터")
+    if not any(clips(char, m, root) for m in MOTIONS):
+        raise PackError("그림 없는 캐릭터")
+    tmp = dest + ".쓰는중"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(PACK_MANIFEST, json.dumps({"형식": PACK_FORMAT, "캐릭터": char},
+                                             ensure_ascii=False, indent=1))
+        conf = char_settings(char, root)
+        if conf:
+            z.writestr(f"{char}/설정.json", json.dumps(conf, ensure_ascii=False, indent=1))
+        for m in MOTIONS:
+            for p in clips(char, m, root):
+                z.write(p, f"{char}/{m}/{os.path.basename(p)}")
+    os.replace(tmp, dest)
+    return dest
+
+
+def _pack_plan(z) -> tuple[str, dict, list]:
+    """zip 을 훑어 (캐릭터 이름, 캐릭터 설정, [(zip 안 이름, 동작, 파일 이름)]) 를 낸다. 틀리면 PackError."""
+    try:
+        meta = json.loads(z.read(PACK_MANIFEST).decode("utf-8-sig"))
+    except KeyError:
+        raise PackError("캐릭터팩 파일이 아님") from None
+    except ValueError:
+        raise PackError("팩 정보가 깨짐") from None
+    if not isinstance(meta, dict) or not isinstance(meta.get("형식"), int):
+        raise PackError("팩 정보가 깨짐")
+    if meta["형식"] > PACK_FORMAT:
+        raise PackError("더 새 버전에서 만든 팩 · 앱 업데이트 필요")
+    name = clean_name(str(meta.get("캐릭터") or ""))
+    if not name or name.startswith("_"):
+        raise PackError("캐릭터 이름이 잘못됨")
+    conf, files, total = {}, [], 0
+    per_motion: dict[str, int] = {}
+    for info in z.infolist():
+        raw = info.filename
+        parts = raw.replace("\\", "/").split("/")
+        if raw.startswith(("/", "\\")) or ":" in raw or any(p in ("..", ".") for p in parts):
+            raise PackError("잘못된 경로가 든 팩")
+        if info.is_dir():
+            continue
+        if raw == PACK_MANIFEST:
+            continue
+        if parts[-1].casefold() in PACK_SKIP:
+            continue
+        if info.file_size > PACK_MAX_CLIP:
+            raise PackError(f"그림 한 장이 {PACK_MAX_CLIP // 1024 // 1024}MB 넘음")
+        total += info.file_size
+        if total > PACK_MAX_TOTAL:
+            raise PackError(f"풀면 {PACK_MAX_TOTAL // 1024 // 1024}MB 넘음")
+        if len(parts) == 2 and parts[1] == "설정.json":
+            try:
+                got = json.loads(z.read(info).decode("utf-8-sig"))
+            except ValueError:
+                raise PackError("캐릭터 설정이 깨짐") from None
+            conf = {k: v for k, v in got.items() if isinstance(k, str)} if isinstance(got, dict) else {}
+            continue
+        if len(parts) != 3 or not parts[2]:
+            raise PackError("팩 안에 모르는 파일")
+        _top, motion, fname = parts
+        if not fname.lower().endswith(EXTS) or clean_name(fname) != fname:
+            raise PackError("그림이 아닌 파일이 든 팩")
+        if motion not in MOTIONS:
+            continue  # 더 새 버전의 동작(이 앱은 모르는 것)은 건너뛴다
+        per_motion[motion] = per_motion.get(motion, 0) + 1
+        if per_motion[motion] > MAX_PER_MOTION:
+            raise PackError(f"{motion} 그림이 {MAX_PER_MOTION}장 넘음")
+        files.append((info, motion, fname))
+    if not files:
+        raise PackError("그림 없는 팩")
+    return name, conf, files
+
+
+def import_pack(src: str, root: str = PACK_DIR) -> str:
+    """팩 파일을 넣는다. 넣은 캐릭터 이름(겹치면 `이름 (2)`)을 돌려준다. 바 캐릭터는 안 바꾼다."""
+    import zipfile
+
+    try:
+        if os.path.getsize(src) > PACK_MAX_FILE:
+            raise PackError(f"팩 파일이 {PACK_MAX_FILE // 1024 // 1024}MB 넘음")
+        z = zipfile.ZipFile(src)
+    except OSError:
+        raise PackError("파일을 못 읽음") from None
+    except zipfile.BadZipFile:
+        raise PackError("캐릭터팩 파일이 아님") from None
+    with z:
+        name, conf, files = _pack_plan(z)
+        if len(all_characters(root)) >= MAX_CHARS:
+            raise PackError(f"캐릭터는 {MAX_CHARS}명까지 · 하나 빼고 넣기")
+        os.makedirs(root, exist_ok=True)
+        tmp = os.path.join(root, f"_넣는 중 {os.getpid()} {time.time_ns()}")
+        try:
+            for info, motion, fname in files:
+                folder = os.path.join(tmp, motion)
+                os.makedirs(folder, exist_ok=True)
+                out = os.path.join(folder, fname)
+                left = PACK_MAX_CLIP
+                with z.open(info) as fin, open(out, "wb") as fout:
+                    # 적힌 크기를 믿지 않고 실제로 읽은 만큼 센다(크기를 속인 zip)
+                    while chunk := fin.read(65536):
+                        left -= len(chunk)
+                        if left < 0:
+                            raise PackError(f"그림 한 장이 {PACK_MAX_CLIP // 1024 // 1024}MB 넘음")
+                        fout.write(chunk)
+                try:
+                    from PIL import Image
+
+                    with Image.open(out) as im:
+                        im.verify()
+                except Exception:
+                    raise PackError("열리지 않는 그림이 든 팩") from None
+            if conf:
+                _write_json(os.path.join(tmp, "설정.json"), conf)
+            final = free_name(name, root)
+            os.rename(tmp, os.path.join(root, final))
+            return final
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import tkinter as tk
 from datetime import datetime
@@ -254,6 +255,8 @@ class MainScreen:
             here = None
         if here is not None and here in self._ours():
             return
+        if getattr(self, "_dialog_open", False):
+            return  # 캐릭터팩 넣기·내보내기 파일 창이 떠 있다
         if any(self._alive(t) for t in self.app._panels):
             # 메인 화면에서 띄운 팝업이 아직 떠 있다. 그 팝업이 닫힐 때 다시 본다(`panel_closed`)
             return
@@ -777,16 +780,109 @@ class MainScreen:
             self._look_row(rows2, 0, "바 캐릭터", lambda box: self._segments(box, [
                 (name, (now or cooldown_pack.CLAUDI) == name, lambda n=name: self._set_buddy(n))
                 for name in [cooldown_pack.CLAUDI, *chars]]))
+            # 넣기·만들기·내보내기 (11-20). 넣어도 바 캐릭터는 안 바뀐다. 위 고르기 칸에서 고른다
             add_row = tk.Frame(wrap, bg=P.bg)
             add_row.pack(fill="x", pady=(2, 0))
-            a._themed_button(add_row, "캐릭터·그림 넣기", a.open_pack_import,
-                             width=0).pack(side="right")
+            all_chars = cooldown_pack.all_characters()
+            buttons = [("캐릭터팩 넣기", self._pack_in), ("캐릭터팩 만들기", self._pack_new)]
+            if all_chars:
+                buttons.append(("그림 고치기", a.open_pack_import))
+            if chars:
+                buttons.append(("내보내기", lambda: self._pack_out(add_row)))
+            for i, (text, fn) in enumerate(reversed(buttons)):
+                a._themed_button(add_row, text, fn, width=0).pack(
+                    side="right", padx=(6 if i else 0, 0))
+            note = getattr(self, "_pack_note", None)
+            if note:
+                text, bad = note
+                tk.Label(wrap, text=text, bg=P.bg, fg=P.red if bad else P.sub, font=(KR, 9),
+                         anchor="e").pack(fill="x", pady=(2, 0))
 
     def _set_buddy(self, name: str) -> None:
         """바에 세울 캐릭터를 바꾸고 위젯을 다시 짓는다."""
         cooldown_pack.set_active(None if name == cooldown_pack.CLAUDI else name)
+        self._pack_note = None
         self.app.reload_pack()
         self._render()
+
+    # ---- 캐릭터팩 넣기·만들기·내보내기
+    def _pack_dialog(self, fn):
+        """파일 창을 띄우는 동안은 밖을 눌러 닫기(`_away_check`)를 쉰다(파일 창으로 포커스가 간다)."""
+        self._dialog_open = True
+        try:
+            return fn()
+        finally:
+            self._dialog_open = False
+
+    def _pack_changed(self, note: str, bad: bool = False) -> None:
+        self._pack_note = (note, bad)
+        self.app.reload_pack()
+        imp = getattr(self.app, "_pack_import", None)
+        if imp is not None and self._alive(imp.win):
+            imp._render()
+        if self.is_open():
+            self._render()
+
+    def _pack_in(self) -> None:
+        from tkinter import filedialog
+
+        path = self._pack_dialog(lambda: filedialog.askopenfilename(
+            parent=self.top, title="캐릭터팩 넣기",
+            filetypes=[("캐릭터팩", "*" + cooldown_pack.PACK_SUFFIX), ("zip", "*.zip")]))
+        if not path:
+            return
+        try:
+            name = cooldown_pack.import_pack(path)
+        except cooldown_pack.PackError as e:
+            self._pack_changed(f"넣지 못함: {e}", bad=True)
+            return
+        except Exception:
+            self._pack_changed("넣지 못함: 캐릭터팩 파일이 아님", bad=True)
+            return
+        self._pack_changed(f"「{name}」 넣음 · 바 캐릭터에서 고르기")
+
+    def _pack_new(self) -> None:
+        """새 캐릭터 이름 정하기 → 그 캐릭터의 그림 넣기 창으로 바로 이어진다."""
+        if len(cooldown_pack.all_characters()) >= cooldown_pack.MAX_CHARS:
+            self._pack_changed(f"캐릭터는 {cooldown_pack.MAX_CHARS}명까지 · 그림 고치기에서 하나 빼기", bad=True)
+            return
+        self.app.open_pack_import()
+        imp = getattr(self.app, "_pack_import", None)
+        if imp is not None and self._alive(imp.win):
+            imp.win.after(50, imp._new_char)
+
+    def _pack_out(self, anchor: tk.Widget) -> None:
+        chars = cooldown_pack.characters()
+        if len(chars) == 1:
+            self._pack_save(chars[0])
+            return
+        m = tk.Menu(self.top, tearoff=0)
+        for name in chars:
+            m.add_command(label=name, command=lambda n=name: self._pack_save(n))
+        m.tk_popup(anchor.winfo_rootx() + anchor.winfo_width() - 80,
+                   anchor.winfo_rooty() + anchor.winfo_height())
+
+    def _pack_save(self, char: str) -> None:
+        from tkinter import filedialog
+
+        dest = self._pack_dialog(lambda: filedialog.asksaveasfilename(
+            parent=self.top, title=f"{char} 내보내기",
+            initialfile=char + cooldown_pack.PACK_SUFFIX,
+            defaultextension=cooldown_pack.PACK_SUFFIX,
+            filetypes=[("캐릭터팩", "*" + cooldown_pack.PACK_SUFFIX)]))
+        if not dest:
+            return
+        if not dest.lower().endswith(cooldown_pack.PACK_SUFFIX):
+            dest = os.path.splitext(dest)[0] + cooldown_pack.PACK_SUFFIX
+        try:
+            cooldown_pack.export_pack(char, dest)
+        except cooldown_pack.PackError as e:
+            self._pack_changed(f"내보내지 못함: {e}", bad=True)
+            return
+        except OSError:
+            self._pack_changed("내보내지 못함: 그 자리에 저장 못 함", bad=True)
+            return
+        self._pack_changed(f"「{char}」 내보냄 · {os.path.basename(dest)}")
 
     def _look_card(self, parent, cls, on: bool, w: int, pick) -> tk.Frame:
         """스킨 하나 = 작은 그림 + 짧은 이름. 고른 것은 초록 테두리."""

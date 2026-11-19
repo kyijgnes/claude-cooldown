@@ -1,8 +1,9 @@
 """
-캐릭터·그림 넣기 — 바 캐릭터를 만들고 동작마다 그림을 **한 장씩 골라** 넣는 창.
+캐릭터팩 만들기 — 바 캐릭터를 만들고 동작마다 그림을 **한 장씩 골라** 넣는 창.
 
     python cooldown_pack_import.py          혼자 띄우기
-    앱: 메인 화면 > 위젯 모양 > [캐릭터·그림 넣기] (바에 세울 한 명은 「바 캐릭터」에서 고른다)
+    앱: 메인 화면 > 위젯 모양 > [캐릭터팩 만들기](이름 창부터) · [그림 고치기]
+        (바에 세울 한 명은 「바 캐릭터」에서 고른다. 팩 파일 넣기·내보내기는 메인 화면 단추)
 
 위: 캐릭터 이름 단추들 + [+ 캐릭터]. 고른 캐릭터의 동작 아홉 줄(서기·걷기·인사·…),
 줄마다 넣은 그림 작은 그림 + [+]. [+] → 「파일에서 고르기」(그대로 복사, 움직임 유지) 또는
@@ -64,7 +65,7 @@ class PackImport:
         self.root_dir = root
         self.on_change = on_change
         self.win = tk.Toplevel(master) if master is not None else tk.Tk()
-        self.win.title("캐릭터·그림 넣기")
+        self.win.title("캐릭터팩 만들기")
         self.win.configure(bg=P.bg)
         self.win.resizable(False, False)
         self._thumbs: list = []
@@ -79,7 +80,7 @@ class PackImport:
         for w in self.body.winfo_children():
             w.destroy()
         self._thumbs = []
-        tk.Label(self.body, text="캐릭터·그림 넣기", bg=P.bg, fg=P.title,
+        tk.Label(self.body, text="캐릭터팩 만들기", bg=P.bg, fg=P.title,
                  font=(KR, 12, "bold"), anchor="w").pack(fill="x")
         tk.Label(self.body, text=f"캐릭터 {pack.MAX_CHARS}명까지 · 동작마다 {pack.MAX_PER_MOTION}장까지"
                  " · 빈 동작은 서기 그림 사용",
@@ -89,6 +90,9 @@ class PackImport:
             tk.Label(self.body, text="캐릭터 없음 · [+ 캐릭터]로 이름부터 정하기", bg=P.bg,
                      fg=P.sub, font=(KR, 10), anchor="w").pack(fill="x", pady=16)
         else:
+            if not any(pack.clips(self.char, m, self.root_dir) for m in pack.MOTIONS):
+                tk.Label(self.body, text=f"{self.char} · 서기 그림 한 장부터 넣기", bg=P.bg,
+                         fg=P.green, font=(KR, 10, "bold"), anchor="w").pack(fill="x", pady=(0, 4))
             for motion in pack.MOTIONS:
                 self._row(motion)
             self._char_foot()
@@ -117,7 +121,9 @@ class PackImport:
         self._render()
 
     def _new_char(self) -> None:
-        """이름 한 칸짜리 작은 창."""
+        """이름 한 칸짜리 작은 창. 만들면 그 캐릭터의 동작 줄이 바로 열린다(이름 → 그림 한 흐름)."""
+        if len(pack.all_characters(self.root_dir)) >= pack.MAX_CHARS:
+            return
         top = tk.Toplevel(self.win)
         top.title("새 캐릭터")
         top.configure(bg=P.bg)
@@ -171,6 +177,28 @@ class PackImport:
             b.pack(side="left", padx=(0 if i == 0 else 1, 0))
             b.bind("<Button-1>", lambda e, v=val: self._set_face(v))
         self._button(row, "이 캐릭터 빼기", self._drop_char).pack(side="right")
+        if any(pack.clips(self.char, m, self.root_dir) for m in pack.MOTIONS):
+            self._button(row, "내보내기", self._export).pack(side="right", padx=(0, 6))
+        self.note = tk.Label(self.body, text="", bg=P.bg, fg=P.sub, font=(KR, 9), anchor="w")
+        self.note.pack(fill="x")
+
+    def _export(self) -> None:
+        """이 캐릭터를 팩 파일 하나로 저장(`<이름>.캐릭터팩.zip`)."""
+        dest = filedialog.asksaveasfilename(
+            parent=self.win, title=f"{self.char} 내보내기",
+            initialfile=self.char + pack.PACK_SUFFIX, defaultextension=pack.PACK_SUFFIX,
+            filetypes=[("캐릭터팩", "*" + pack.PACK_SUFFIX)])
+        if not dest:
+            return
+        if not dest.lower().endswith(pack.PACK_SUFFIX):
+            dest = os.path.splitext(dest)[0] + pack.PACK_SUFFIX
+        try:
+            pack.export_pack(self.char, dest, self.root_dir)
+            self.note.configure(text=f"「{self.char}」 내보냄 · {os.path.basename(dest)}", fg=P.sub)
+        except pack.PackError as e:
+            self.note.configure(text=f"내보내지 못함: {e}", fg=P.red)
+        except OSError:
+            self.note.configure(text="내보내지 못함: 그 자리에 저장 못 함", fg=P.red)
 
     def _set_face(self, val: str) -> None:
         pack.set_char_setting(self.char, "보는 쪽", val, self.root_dir)
