@@ -759,12 +759,28 @@ class MainScreen:
         self._switch(wrap, Label.TOPMOST, bool(a.state["topmost"]), a.toggle_topmost)
         if a.skin.dockable:
             self._switch(wrap, Label.DOCK, bool(a.state["dock"]), a._tray_toggle_dock)
-            # 캐릭터 팩: 바의 클로디 자리에 내 그림 (그림은 내 PC 폴더에만, cooldown_pack)
+            # 캐릭터 마당: 바 오른쪽 끝에 캐릭터들이 노는 칸 (그림은 내 PC 폴더에만, cooldown_pack)
+            n = len(cooldown_pack.characters())
             pack_row = tk.Frame(wrap, bg=P.bg)
             pack_row.pack(fill="x", pady=(6, 0))
-            tk.Label(pack_row, text="캐릭터 팩" + (" · 켜짐" if cooldown_pack.present() else ""),
+            tk.Label(pack_row, text="캐릭터 마당" + (f" · {n}명" if n else " · 없음"),
                      bg=P.bg, fg=P.title, font=(KR, 10), anchor="w").pack(side="left")
-            a._themed_button(pack_row, "그림 넣기", a.open_pack_import, width=0).pack(side="right")
+            a._themed_button(pack_row, "캐릭터·그림 넣기", a.open_pack_import,
+                             width=0).pack(side="right")
+            if n:
+                yard_w = cooldown_pack.yard_width()
+                rows2 = tk.Frame(wrap, bg=P.bg)
+                rows2.pack(fill="x")
+                rows2.columnconfigure(1, weight=1)
+                self._look_row(rows2, 0, "마당 폭", lambda box: self._segments(box, [
+                    (f"{v}", v == yard_w, lambda v=v: self._set_yard(v))
+                    for v in cooldown_pack.YARD_WIDTHS]))
+
+    def _set_yard(self, width: int) -> None:
+        """마당 폭을 바꾸고 위젯을 다시 짓는다 (작업표시줄 자리도 새 폭으로 다시 잡힌다)."""
+        cooldown_pack.set_setting("마당 폭", width)
+        self.app.reload_pack()
+        self._render()
 
     def _look_card(self, parent, cls, on: bool, w: int, pick) -> tk.Frame:
         """스킨 하나 = 작은 그림 + 짧은 이름. 고른 것은 초록 테두리."""

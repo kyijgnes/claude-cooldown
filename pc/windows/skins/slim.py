@@ -50,7 +50,7 @@ from .base import (
     worst,
 )
 from .claudi import Claudi
-from .packpet import PackPet
+from .yard import Yard
 
 import cooldown_pack
 
@@ -316,6 +316,12 @@ class SlimSkin(Skin):
             self.dot_spot = (self.width - DOT_INSET, DOT_INSET)
             mascot_cx = (week_end + 7 + week_end + MGAP) // 2
 
+        # 캐릭터 마당: 캐릭터가 있으면 숫자 칸들 **오른쪽 끝에** 마당 칸을 덧댄다(폭은 팩 설정).
+        # 그 앞까지가 지금까지의 바(`content_w`) — 번갈아 칸·상태 점·클로디는 거기 안에서 잡는다.
+        self.content_w = self.width
+        self.yard_w = cooldown_pack.yard_width() if cooldown_pack.present() else 0
+        self.width = self.content_w + self.yard_w
+
         self.c = tk.Canvas(
             parent, width=self.width, height=self.h, bg=P.bg,
             highlightthickness=0, bd=0,
@@ -354,7 +360,7 @@ class SlimSkin(Skin):
             )
         else:
             self._slot_win = self.c.create_window(
-                self.width - PAD_R, self.div_bot + SLOT_RISE,
+                self.content_w - PAD_R, self.div_bot + SLOT_RISE,
                 window=self.slot, anchor="se",
             )
         self.model = self.slot.create_text(
@@ -367,13 +373,13 @@ class SlimSkin(Skin):
         # (완주 축하 폭죽이 바를 가로질러 터진다). 좁은 바는 상태 점 네모 앞까지만 —
         # 그 자리에 뛰어들면 앱이 얹은 네모에 가려 사라진 것처럼 보인다.
         # **맨 마지막에 켠다** — 매 프레임 다시 그리므로 늘 맨 위에 온다.
-        box_r = week_end if self.compact else self.width - PAD_R
-        # 내 PC 에 캐릭터 팩(`~/.claude_cooldown_pack/`)이 있으면 클로디 대신 그 그림이 앉는다.
-        # 이름은 그대로 `self.claudi` — 앱·아래 메서드가 같은 약속으로 부른다(packpet.py 머리).
-        if cooldown_pack.present():
-            # 폭은 틈 안에서만 — 넘으면 옆 숫자·번갈아 칸을 덮는다(시험 팩으로 겪음)
-            gap = MGAP_C - 4 if self.compact else MGAP - 9
-            self.claudi = PackPet(self.c, (x1, 0, box_r, self.h), width=gap)
+        box_r = week_end if self.compact else self.content_w - PAD_R
+        # 캐릭터 마당이 있으면 클로디 대신 마당이 논다. 이름은 그대로 `self.claudi` —
+        # 앱·아래 메서드가 같은 약속으로 부른다(yard.py 머리). 클로디 틈은 비워 둔다.
+        if self.yard_w:
+            self.c.create_line(self.content_w, self.div_top, self.content_w, self.div_bot,
+                               fill=P.line, width=1)
+            self.claudi = Yard(self.c, (self.content_w + 4, 0, self.width - 4, self.h))
         else:
             self.claudi = Claudi(self.c, (x1, 0, box_r, self.h))
         self.claudi.home(mascot_cx)
@@ -575,7 +581,7 @@ class SlimSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._paint(P.bg, tone(worst(usage)))
-        if isinstance(self.claudi, PackPet):
+        if isinstance(self.claudi, Yard):
             self.claudi.set_mood(cooldown_pack.mood(usage.five.pct, usage.week.pct))
             if cooldown_pack.was_reset(self._last_five, usage.five.pct):
                 self.claudi.celebrate()
@@ -603,7 +609,7 @@ class SlimSkin(Skin):
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
         self._paint(P.red_bg, P.red)
-        if isinstance(self.claudi, PackPet):
+        if isinstance(self.claudi, Yard):
             self.claudi.set_mood("오류")
         # 오류가 번갈아 칸을 통째로 쓴다 (굵게·빨강 한 가지만). 길면 훑어서 다 보여 준다.
         self._slot_cancel()  # 조회 성공으로 예약해 뒀던 반영이 오류를 덮지 않게
