@@ -235,7 +235,7 @@ class MainScreen:
             pass
 
     def _ours(self) -> list:
-        """밖으로 치지 않는 창: 메인 화면과, 그 위에 띄운 팝업들, 캐릭터 마당 그림 넣기 창
+        """밖으로 치지 않는 창: 메인 화면과, 그 위에 띄운 팝업들, 캐릭터·그림 넣기 창
         (그 창과 거기서 띄운 새 캐릭터·미리 보기 창까지)."""
         ours = [self.top] + [t for t in self.app._panels if t is not None]
         pack = getattr(self.app, "_pack_import", None)
@@ -257,6 +257,9 @@ class MainScreen:
         if any(self._alive(t) for t in self.app._panels):
             # 메인 화면에서 띄운 팝업이 아직 떠 있다. 그 팝업이 닫힐 때 다시 본다(`panel_closed`)
             return
+        pack = getattr(self.app, "_pack_import", None)
+        if pack is not None and self._alive(pack.win):
+            return  # 캐릭터·그림 넣기 창이 떠 있는 동안은 밖을 눌러도 안 닫는다(11-20 지시)
         self.close_away()
 
     def close_away(self) -> None:
@@ -765,26 +768,23 @@ class MainScreen:
         self._switch(wrap, Label.TOPMOST, bool(a.state["topmost"]), a.toggle_topmost)
         if a.skin.dockable:
             self._switch(wrap, Label.DOCK, bool(a.state["dock"]), a._tray_toggle_dock)
-            # 캐릭터 마당: 바 오른쪽 끝에 캐릭터들이 노는 칸 (그림은 내 PC 폴더에만, cooldown_pack)
-            n = len(cooldown_pack.characters())
-            pack_row = tk.Frame(wrap, bg=P.bg)
-            pack_row.pack(fill="x", pady=(6, 0))
-            tk.Label(pack_row, text="캐릭터 마당" + (f" · {n}명" if n else " · 없음"),
-                     bg=P.bg, fg=P.title, font=(KR, 10), anchor="w").pack(side="left")
-            a._themed_button(pack_row, "캐릭터·그림 넣기", a.open_pack_import,
+            # 바 캐릭터: 클로디 자리에 세울 한 명 (그림은 내 PC 폴더에만, cooldown_pack)
+            chars = cooldown_pack.characters()
+            now = cooldown_pack.active()
+            rows2 = tk.Frame(wrap, bg=P.bg)
+            rows2.pack(fill="x", pady=(6, 0))
+            rows2.columnconfigure(1, weight=1)
+            self._look_row(rows2, 0, "바 캐릭터", lambda box: self._segments(box, [
+                (name, (now or cooldown_pack.CLAUDI) == name, lambda n=name: self._set_buddy(n))
+                for name in [cooldown_pack.CLAUDI, *chars]]))
+            add_row = tk.Frame(wrap, bg=P.bg)
+            add_row.pack(fill="x", pady=(2, 0))
+            a._themed_button(add_row, "캐릭터·그림 넣기", a.open_pack_import,
                              width=0).pack(side="right")
-            if n:
-                yard_w = cooldown_pack.yard_width()
-                rows2 = tk.Frame(wrap, bg=P.bg)
-                rows2.pack(fill="x")
-                rows2.columnconfigure(1, weight=1)
-                self._look_row(rows2, 0, "마당 폭", lambda box: self._segments(box, [
-                    (f"{v}", v == yard_w, lambda v=v: self._set_yard(v))
-                    for v in cooldown_pack.YARD_WIDTHS]))
 
-    def _set_yard(self, width: int) -> None:
-        """마당 폭을 바꾸고 위젯을 다시 짓는다 (작업표시줄 자리도 새 폭으로 다시 잡힌다)."""
-        cooldown_pack.set_setting("마당 폭", width)
+    def _set_buddy(self, name: str) -> None:
+        """바에 세울 캐릭터를 바꾸고 위젯을 다시 짓는다."""
+        cooldown_pack.set_active(None if name == cooldown_pack.CLAUDI else name)
         self.app.reload_pack()
         self._render()
 

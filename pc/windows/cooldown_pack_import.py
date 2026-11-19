@@ -1,8 +1,8 @@
 """
-캐릭터 마당 그림 넣기 — 캐릭터를 만들고 동작마다 그림을 **한 장씩 골라** 넣는 창.
+캐릭터·그림 넣기 — 바 캐릭터를 만들고 동작마다 그림을 **한 장씩 골라** 넣는 창.
 
     python cooldown_pack_import.py          혼자 띄우기
-    앱: 메인 화면 > 위젯 모양 > 캐릭터 마당 [캐릭터·그림 넣기]
+    앱: 메인 화면 > 위젯 모양 > [캐릭터·그림 넣기] (바에 세울 한 명은 「바 캐릭터」에서 고른다)
 
 위: 캐릭터 이름 단추들 + [+ 캐릭터]. 고른 캐릭터의 동작 아홉 줄(서기·걷기·인사·…),
 줄마다 넣은 그림 작은 그림 + [+]. [+] → 「파일에서 고르기」(그대로 복사, 움직임 유지) 또는
@@ -64,7 +64,7 @@ class PackImport:
         self.root_dir = root
         self.on_change = on_change
         self.win = tk.Toplevel(master) if master is not None else tk.Tk()
-        self.win.title("캐릭터 마당")
+        self.win.title("캐릭터·그림 넣기")
         self.win.configure(bg=P.bg)
         self.win.resizable(False, False)
         self._thumbs: list = []
@@ -79,7 +79,7 @@ class PackImport:
         for w in self.body.winfo_children():
             w.destroy()
         self._thumbs = []
-        tk.Label(self.body, text="캐릭터 마당", bg=P.bg, fg=P.title,
+        tk.Label(self.body, text="캐릭터·그림 넣기", bg=P.bg, fg=P.title,
                  font=(KR, 12, "bold"), anchor="w").pack(fill="x")
         tk.Label(self.body, text=f"캐릭터 {pack.MAX_CHARS}명까지 · 동작마다 {pack.MAX_PER_MOTION}장까지"
                  " · 빈 동작은 서기 그림 사용",
@@ -147,6 +147,14 @@ class PackImport:
         self._button(row, "그만두기", top.destroy).pack(side="right", padx=(0, 6))
         entry.bind("<Return>", ok)
         top.bind("<Escape>", lambda e: top.destroy())
+        # 그냥 두면 화면 왼쪽 위 아무 데나 뜬다(11-20 지적) — 이 창 한가운데 위에 띄운다
+        top.update_idletasks()
+        w, h = top.winfo_reqwidth(), top.winfo_reqheight()
+        x = self.win.winfo_rootx() + (self.win.winfo_width() - w) // 2
+        y = self.win.winfo_rooty() + 60
+        top.geometry(f"+{max(0, x)}+{max(0, y)}")
+        top.lift()
+        entry.focus_set()
 
     def _char_foot(self) -> None:
         row = tk.Frame(self.body, bg=P.bg)

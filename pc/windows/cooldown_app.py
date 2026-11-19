@@ -69,7 +69,7 @@ import cooldown_update  # noqa: E402  [업데이트 대기] 클로드가 고쳐�
 import cooldown_leftover  # noqa: E402  [남은 식구] 클로드가 고쳐지면 지운다
 import cooldown_newver  # noqa: E402  쿨다운 자기 새 버전 알림
 import cooldown_selfupdate  # noqa: E402  쿨다운 자기 새 버전 받아 옆에 풀고 바꿔 켜기
-import cooldown_pack  # noqa: E402  캐릭터 마당 그림 폴더(바뀌면 다시 그림)
+import cooldown_pack  # noqa: E402  바 캐릭터 그림 폴더(바뀌면 다시 그림)
 import cooldown_dino  # noqa: E402  클로디를 아주 오래 꾹 누르면 뜨는 공룡 점프
 import skins  # noqa: E402
 from cooldown_dino_view import DinoBoard  # noqa: E402
@@ -1111,7 +1111,7 @@ class App:
         self.show_window()
 
     def _pack_watch(self) -> None:
-        """캐릭터 마당 폴더를 밖에서(탐색기·다른 프로그램) 고쳐도 껐다 켤 것 없이 반영한다.
+        """바 캐릭터 폴더를 밖에서(탐색기·다른 프로그램) 고쳐도 껐다 켤 것 없이 반영한다.
         3초마다 폴더 지문만 잰다(파일 이름·크기·고친 시각). 공룡 판이 떠 있으면 미룬다."""
         try:
             if self.alive and self._dino_board is None:
@@ -1119,7 +1119,7 @@ class App:
                 if getattr(self, "_pack_sig", None) is None:
                     self._pack_sig = sig
                 elif sig != self._pack_sig:
-                    applog("캐릭터 마당 폴더가 바뀜 — 다시 그림")
+                    applog("바 캐릭터 폴더가 바뀜 — 다시 그림")
                     self.reload_pack()
         except Exception:  # noqa: BLE001  지켜보기 하나 때문에 앱이 서면 안 된다
             pass

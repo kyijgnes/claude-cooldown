@@ -1,12 +1,12 @@
 """
-캐릭터 마당 팩 — 작업표시줄 바 오른쪽 **마당 칸**에서 노는 캐릭터들의 그림. Tk 없음.
+바 캐릭터 팩 — 작업표시줄 바의 클로디 자리에 세울 캐릭터들의 그림. Tk 없음.
 
 그림은 저장소에 넣지 않는다. 각자 PC 의 `~/.claude_cooldown_pack/` 폴더에만 둔다
 (이 저장소는 공개이고 친구들에게 나눠주므로, 남의 그림이 실려 나가면 안 된다).
-캐릭터가 하나도 없으면 마당 칸 없이 지금처럼 클로디가 나온다.
+캐릭터는 여럿 넣어 둘 수 있고, 바에는 고른 **한 명**(`active`)만 나온다. 고른 게 없으면 클로디.
 
     ~/.claude_cooldown_pack/
-        설정.json                  {"마당 폭": 180}
+        설정.json                  {"바 캐릭터": "<이름>"}   비었거나 "클로디"면 클로디
         <캐릭터 이름>/              이름은 사용자가 정한다 (폴더 이름 = 캐릭터 이름)
             서기/ 걷기/ 인사/ 놀람/ 눌림/ 허둥/ 잠/ 축하/ 딴짓/
             설정.json              {"보는 쪽": "오른쪽"}  그림 속 캐릭터가 보는 쪽
@@ -36,8 +36,8 @@ MOTIONS = ("서기", "걷기", "인사", "놀람", "눌림", "허둥", "잠", "�
 MOTION_LABELS = {
     "서기": "가만히 있을 때",
     "걷기": "걸어 다닐 때",
-    "인사": "친구와 마주쳤을 때",
-    "놀람": "눌렸을 때·옆 친구가 눌렸을 때",
+    "인사": "가끔 손 흔들 때",
+    "놀람": "눌렀을 때",
     "눌림": "길게 누르는 동안",
     "허둥": "사용량 80% 넘음",
     "잠": "한도 다 참",
@@ -55,9 +55,8 @@ FALLBACK = {
     "축하": ("인사", "서기"),
     "딴짓": ("서기",),
 }
-YARD_WIDTHS = (120, 180, 240)
-YARD_DEFAULT = 180
-MAX_CHARS = 5  # 마당이 좁아 이보다 많으면 놀 자리가 없다
+MAX_CHARS = 8  # 넣어 둘 수 있는 캐릭터 수 (바에는 한 명만 나온다)
+CLAUDI = "클로디"
 MAX_PER_MOTION = 6  # 동작 하나에 넣을 수 있는 그림 수 (★ 한 장씩 골라 넣는다. 묶음째 넣기 없음)
 
 TIGHT_AT = 80.0  # 이 이상이면 허둥
@@ -92,12 +91,19 @@ def set_setting(key: str, value, root: str = PACK_DIR) -> None:
     _write_json(os.path.join(root, "설정.json"), data)
 
 
-def yard_width(root: str = PACK_DIR) -> int:
-    try:
-        w = int(settings(root).get("마당 폭", YARD_DEFAULT))
-    except (TypeError, ValueError):
-        w = YARD_DEFAULT
-    return min(YARD_WIDTHS, key=lambda v: abs(v - w))
+def active(root: str = PACK_DIR) -> str | None:
+    """바에 세울 캐릭터 이름. None 이면 클로디.
+    한 번도 안 골랐으면 첫 캐릭터(넣어 둔 캐릭터가 업데이트 뒤 갑자기 클로디로 바뀌지 않게),
+    `클로디` 를 골랐으면 클로디, 고른 캐릭터가 빠졌으면 첫 캐릭터."""
+    chars = characters(root)
+    name = settings(root).get("바 캐릭터")
+    if name == CLAUDI or not chars:
+        return None
+    return name if name in chars else chars[0]
+
+
+def set_active(name: str | None, root: str = PACK_DIR) -> None:
+    set_setting("바 캐릭터", name or CLAUDI, root)
 
 
 def char_settings(char: str, root: str = PACK_DIR) -> dict:
@@ -125,7 +131,7 @@ def all_characters(root: str = PACK_DIR) -> list[str]:
 
 
 def characters(root: str = PACK_DIR) -> list[str]:
-    """마당에 나올 캐릭터 (그림이 하나라도 있는 것, 이름 순, `MAX_CHARS` 까지)."""
+    """고를 수 있는 캐릭터 (그림이 하나라도 있는 것, 이름 순, `MAX_CHARS` 까지)."""
     return [c for c in all_characters(root) if any(clips(c, m, root) for m in MOTIONS)][:MAX_CHARS]
 
 
@@ -172,7 +178,7 @@ def pick(char: str, motion: str, root: str = PACK_DIR, avoid: str | None = None)
 
 # ---------------------------------------------------------------- 사용량 → 분위기
 def mood(five: float | None, week: float | None) -> str:
-    """사용량 두 개로 마당 분위기를 정한다: 여유 · 허둥 · 잠."""
+    """사용량 두 개로 캐릭터 기분을 정한다: 여유 · 허둥 · 잠."""
     worst = max((p for p in (five, week) if p is not None), default=0.0)
     if worst >= FULL_AT:
         return "잠"
@@ -351,9 +357,9 @@ def remove_character(name: str, root: str = PACK_DIR) -> str | None:
 
 if __name__ == "__main__":
     # 팩 점검: 캐릭터마다 어느 동작을 제 그림으로 갖고 있는지
-    print("팩 폴더:", PACK_DIR, "· 마당 폭", yard_width())
+    print("팩 폴더:", PACK_DIR, "· 바 캐릭터", active() or CLAUDI)
     for c in characters():
         own = [m for m in MOTIONS if clips(c, m)]
         print(f"  {c}: " + ", ".join(f"{m} {len(clips(c, m))}" for m in own))
     if not present():
-        print("  캐릭터 없음 → 마당 없이 클로디")
+        print("  캐릭터 없음 → 클로디")

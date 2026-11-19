@@ -50,7 +50,7 @@ from .base import (
     worst,
 )
 from .claudi import Claudi
-from .yard import Yard
+from .buddy import Buddy
 
 import cooldown_pack
 
@@ -117,6 +117,10 @@ MGAP_C = 36  # 5시간 칸 ↔ 주간 칸 틈 — 여기 가운데에 클로디�
 # 안 비우면 클로디가 그 자리에 뛰어들 때 네모에 가려 사라진 것처럼 보인다.
 DOT_BOX = 18
 DOT_GAP_C = 4  # 주간 칸 ↔ 상태 점 네모
+GAP_C = 14  # 바 캐릭터가 있을 때 5시간 칸 ↔ 주간 칸 틈 (클로디 틈이 필요 없다)
+CHAR_C = 1.15  # 좁은 바에서 바 캐릭터 자리 폭 = 바 높이 × 이 배
+# 알림 글자 테두리 (바 캐릭터가 걸쳐 설 때만): 사방 1px
+OUTLINE = ((-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1))
 # 덮었던 문구가 물러나 **숫자를 다시 보여 주는 시간**(ms). 문구 차례(SLOT_HOLD)보다 훨씬 길다 —
 # 좁은 바에서 정작 보고 싶은 건 숫자고, 알림은 몇 시간씩 남아 있을 수 있다.
 BLANK_HOLD = 15000
@@ -256,10 +260,11 @@ class SlimSkin(Skin):
     compact = False
 
     def build(self, parent: tk.Misc) -> None:
-        # ★ 같은 스킨을 다시 지을 때(마당 폭·밝기 바꾸기) 지난번에 마당을 더한 폭이 남아 있다.
-        #   그 위에 또 더하면 바가 끝없이 늘고 한도 칸까지 벌어진다(11-20 실제로 겪음).
+        # ★ 같은 스킨을 다시 지을 때(캐릭터·밝기 바꾸기) 지난번에 정한 폭이 남아 있다.
+        #   그 위에 또 더하면 바가 끝없이 는다(11-20 마당 폭에서 실제로 겪음).
         #   넓은 바는 늘 클래스에 적힌 폭에서, 좁은 바는 아래에서 글꼴로 다시 잰다.
         self.width = type(self).width
+        self.buddy_name = cooldown_pack.active()  # 바 캐릭터 (없으면 클로디)
         self.f_label = tkfont.Font(parent, family=KR, size=9)
         self.f_value = tkfont.Font(parent, family=NUM, size=13, weight="bold")
         self.f_small = tkfont.Font(parent, family=KR, size=8)
@@ -287,13 +292,21 @@ class SlimSkin(Skin):
             # 좁은 바: 남은 시간·모델별 칸을 들어내고 두 숫자 줄과 게이지만 남긴다.
             # 칸 폭 = 그 칸의 숫자 줄 폭 (게이지가 숫자 끝에 맞춰 끝난다).
             x1, cell_1, cell_2 = PAD_L_C, five_w, week_w
-            x2 = x1 + cell_1 + MGAP_C
+            # 바 캐릭터가 있으면 클로디 틈(MGAP_C)이 빈다 — 두 칸을 GAP_C 로 붙이고
+            # 캐릭터는 주간 칸 **오른쪽**에 제 자리(CHAR_C)를 받는다(11-20 「불필요하게 넓다」).
+            x2 = x1 + cell_1 + (GAP_C if self.buddy_name else MGAP_C)
             week_end = x2 + cell_2
             # 문구는 자리를 따로 안 쓰고 **숫자 줄 위를 덮는다** — 그래서 가로 전체가 칸이다.
             self.right_w = week_end - x1
-            self.width = week_end + DOT_GAP_C + DOT_BOX
+            if self.buddy_name:
+                char_w = int(self.h * CHAR_C)
+                self.buddy_box = (week_end + DOT_GAP_C, 0, week_end + DOT_GAP_C + char_w, self.h)
+                self.width = self.buddy_box[2] + DOT_GAP_C + DOT_BOX
+                mascot_cx = (self.buddy_box[0] + self.buddy_box[2]) // 2
+            else:
+                self.width = week_end + DOT_GAP_C + DOT_BOX
+                mascot_cx = (x1 + cell_1 + x2) // 2
             self.dot_spot = (self.width - DOT_BOX // 2, DOT_INSET)
-            mascot_cx = (x1 + cell_1 + x2) // 2
         else:
             need_cell = max(
                 self.f_label.measure(label)
@@ -320,11 +333,7 @@ class SlimSkin(Skin):
             self.dot_spot = (self.width - DOT_INSET, DOT_INSET)
             mascot_cx = (week_end + 7 + week_end + MGAP) // 2
 
-        # 캐릭터 마당: 캐릭터가 있으면 숫자 칸들 **오른쪽 끝에** 마당 칸을 덧댄다(폭은 팩 설정).
-        # 그 앞까지가 지금까지의 바(`content_w`) — 번갈아 칸·상태 점·클로디는 거기 안에서 잡는다.
         self.content_w = self.width
-        self.yard_w = cooldown_pack.yard_width() if cooldown_pack.present() else 0
-        self.width = self.content_w + self.yard_w
 
         self.c = tk.Canvas(
             parent, width=self.width, height=self.h, bg=P.bg,
@@ -367,6 +376,12 @@ class SlimSkin(Skin):
                 self.content_w - PAD_R, self.div_bot + SLOT_RISE,
                 window=self.slot, anchor="se",
             )
+        # ★ 바 캐릭터가 이 칸에 걸쳐 서므로(넓은 바) 글자에 **바탕색 테두리**를 두른다 —
+        #   그림 위에서도 글자가 끊겨 보이지 않게(11-20 지시: 겹쳐도 되나 구분되게).
+        self._outline = [
+            self.slot.create_text(0, 0, text="", font=self.f_small, fill=P.bg)
+            for _ in OUTLINE
+        ] if (self.buddy_name and not self.compact) else []
         self.model = self.slot.create_text(
             self.right_w, slot_h / 2, text="" if self.compact else "불러오는 중",
             anchor="w" if self.compact else "e",
@@ -378,12 +393,15 @@ class SlimSkin(Skin):
         # 그 자리에 뛰어들면 앱이 얹은 네모에 가려 사라진 것처럼 보인다.
         # **맨 마지막에 켠다** — 매 프레임 다시 그리므로 늘 맨 위에 온다.
         box_r = week_end if self.compact else self.content_w - PAD_R
-        # 캐릭터 마당이 있으면 클로디 대신 마당이 논다. 이름은 그대로 `self.claudi` —
-        # 앱·아래 메서드가 같은 약속으로 부른다(yard.py 머리). 클로디 틈은 비워 둔다.
-        if self.yard_w:
-            self.c.create_line(self.content_w, self.div_top, self.content_w, self.div_bot,
-                               fill=P.line, width=1)
-            self.claudi = Yard(self.c, (self.content_w + 4, 0, self.width - 4, self.h))
+        # 바 캐릭터를 골라 뒀으면 클로디 대신 그 캐릭터가 선다. 이름은 그대로 `self.claudi` —
+        # 앱·아래 메서드가 같은 약속으로 부른다(buddy.py 머리).
+        # 넓은 바: 클로디 틈부터 오른쪽 끝까지(모델별·알림 칸 위)를 거닌다. 알림 칸에도 겹쳐 그린다.
+        # 좁은 바: 주간 칸 오른쪽 제 자리(`buddy_box`)에 선다.
+        if self.buddy_name:
+            box = self.buddy_box if self.compact else (week_end + 7, 0, self.content_w - PAD_R, self.h)
+            self.claudi = Buddy(self.c, box, self.buddy_name)
+            if not self.compact:
+                self.claudi.mirror = self.slot
         else:
             self.claudi = Claudi(self.c, (x1, 0, box_r, self.h))
         self.claudi.home(mascot_cx)
@@ -459,6 +477,7 @@ class SlimSkin(Skin):
         if not items:
             try:
                 self.slot.itemconfigure(self.model, text="")
+                self._outline_sync()
             except tk.TclError:
                 pass
             self._slot_face(False)
@@ -500,8 +519,21 @@ class SlimSkin(Skin):
             self.slot.itemconfigure(
                 self.model, fill=_mix(color, self.slot.cget("bg"), fade)
             )
+            self._outline_sync()
         except tk.TclError:  # 캔버스가 사라졌다 (스킨·테마 전환)
             pass
+
+    def _outline_sync(self) -> None:
+        """글자 테두리(바탕색, 사방 1px)를 지금 글자에 맞춘다. 바 캐릭터가 없으면 없다."""
+        if not self._outline:
+            return
+        x, y = self.slot.coords(self.model)
+        cfg = {k: self.slot.itemcget(self.model, k) for k in ("text", "font", "anchor")}
+        bg = self.slot.cget("bg")
+        for item, (ox, oy) in zip(self._outline, OUTLINE):
+            self.slot.coords(item, x + ox, y + oy)
+            self.slot.itemconfigure(item, fill=bg, **cfg)
+        self.slot.tag_raise(self.model)
 
     def _slot_after(self, gen: int, ms: int, fn) -> None:
         try:
@@ -585,7 +617,7 @@ class SlimSkin(Skin):
     # -------------------------------------------------- 값
     def show(self, usage: Usage, stamp: str) -> None:
         self._paint(P.bg, tone(worst(usage)))
-        if isinstance(self.claudi, Yard):
+        if isinstance(self.claudi, Buddy):
             self.claudi.set_mood(cooldown_pack.mood(usage.five.pct, usage.week.pct))
             if cooldown_pack.was_reset(self._last_five, usage.five.pct):
                 self.claudi.celebrate()
@@ -613,7 +645,7 @@ class SlimSkin(Skin):
 
     def show_error(self, text: str, keep_values: bool, stamp: str) -> None:
         self._paint(P.red_bg, P.red)
-        if isinstance(self.claudi, Yard):
+        if isinstance(self.claudi, Buddy):
             self.claudi.set_mood("오류")
         # 오류가 번갈아 칸을 통째로 쓴다 (굵게·빨강 한 가지만). 길면 훑어서 다 보여 준다.
         self._slot_cancel()  # 조회 성공으로 예약해 뒀던 반영이 오류를 덮지 않게
