@@ -32,7 +32,8 @@ def _no_activate(top: tk.Toplevel) -> None:
         import ctypes
 
         u = ctypes.windll.user32
-        hwnd = u.GetParent(top.winfo_id()) or top.winfo_id()
+        top.update_idletasks()  # ★ deiconify 직후엔 바깥 창이 아직 없다 (그러면 안쪽 창에 붙어 헛일)
+        hwnd = u.GetAncestor(top.winfo_id(), 2) or top.winfo_id()  # GA_ROOT
         GWL_EXSTYLE, TOOL, NOACT, APPWIN = -20, 0x80, 0x08000000, 0x40000
         style = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
         u.SetWindowLongW(hwnd, GWL_EXSTYLE, (style | TOOL | NOACT) & ~APPWIN)
