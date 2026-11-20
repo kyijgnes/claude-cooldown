@@ -301,6 +301,12 @@ class Skin:
         if ch is not None and hasattr(ch, "put_down"):
             ch.put_down()
 
+    def wheel(self, x: float, y: float, delta: int) -> None:
+        """캐릭터 위에서 마우스 휠을 굴렸다 (창 기준 자리, 위로 굴리면 delta > 0)."""
+        ch = self._char()
+        if ch is not None and hasattr(ch, "wheel"):
+            ch.wheel(*ch.to_local(self, x, y), delta)
+
     def set_away(self, away: bool) -> None:
         """PC 입력이 한참 없다(참) / 돌아왔다(거짓). 앱의 `AwayWatch` 가 바뀔 때만 부른다."""
         ch = self._char()
@@ -364,10 +370,12 @@ ANNOY_COOL = 0.8
 ANNOY_NAMES = ("", "짜증", "화남", "포기")
 # 흔들기 기절: 끄는 동안 SHAKE_WINDOW 초 안에 방향을 SHAKE_TURNS 번 넘게 바꾸고(한 번 휘두를 때
 # SHAKE_SWING px 넘게), 그동안 SHAKE_SPEED px/초 넘게 빨리 움직였으면 어지럽다.
-SHAKE_SWING = 14.0
-SHAKE_TURNS = 6
-SHAKE_WINDOW = 1.5
-SHAKE_SPEED = 700.0
+# 11-20 넷째(흔들어도 기절을 안 한다): 옛 기준(6번·1.5초 내내 초당 700px)은 작정하고 흔들어도 안 걸렸다.
+# 좌우로 2~3번 세게 흔들면(방향 바뀜 3번) 걸리게 낮추고, 빠르기는 흔든 동안만 잰다.
+SHAKE_SWING = 24.0
+SHAKE_TURNS = 3
+SHAKE_WINDOW = 1.2
+SHAKE_SPEED = 380.0
 SHAKE_KEEP = 3.0  # 다 흔든 뒤 이만큼 안에 놓아야 기절 (가만 들고 있으면 정신 차린다)
 
 
@@ -426,7 +434,9 @@ class Shake:
         self.path: list[tuple[float, float]] = []  # (때, 움직인 거리)
         self.hit_at: float | None = None
 
-    def feed(self, x: float, y: float, now: float) -> None:
+    def feed(self, x: float, y: float, now: float) -> bool:
+        """끈 자리 하나를 받는다. 이번에 **새로** 어지러워졌으면 참 (잡은 채로 헤롱 그림으로 바꾸게)."""
+        was = self.dizzy(now)
         if self.last is not None:
             lx, ly, _ = self.last
             self.path.append((now, ((x - lx) ** 2 + (y - ly) ** 2) ** 0.5))
@@ -447,9 +457,11 @@ class Shake:
                 self.peak[i] = v
         self.turns = [t for t in self.turns if now - t <= SHAKE_WINDOW]
         self.path = [p for p in self.path if now - p[0] <= SHAKE_WINDOW]
-        speed = sum(d for _, d in self.path) / SHAKE_WINDOW
+        span = max(0.25, now - self.path[0][0]) if self.path else SHAKE_WINDOW
+        speed = sum(d for _, d in self.path) / span
         if len(self.turns) >= SHAKE_TURNS and speed >= SHAKE_SPEED:
             self.hit_at = now
+        return self.dizzy(now) and not was
 
     def dizzy(self, now: float) -> bool:
         return self.hit_at is not None and now - self.hit_at <= SHAKE_KEEP

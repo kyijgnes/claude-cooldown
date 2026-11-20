@@ -427,6 +427,72 @@ def read_frames(path: str):
     return out
 
 
+CROP_ALPHA = 40      # 이보다 옅은 점은 테두리를 잴 때 없는 것으로 본다 (그림자·번진 가장자리)
+CROP_TAIL = 0.004    # 가장자리 쪽에 이만큼(몫)도 안 되는 점들은 잘라 낸다 (멀리 떨어진 작은 꾸밈)
+
+
+def content_box(images):
+    """여러 장에 걸친 **캐릭터가 있는 네모** (left, top, right, bottom). 없으면 None.
+
+    11-20 넷째(그림이 잘 안 보인다): 카카오 이모티콘은 캐릭터에서 멀리 떨어진 옅은 점·작은 꾸밈이
+    한두 장면에 있어서, 그것까지 넣어 자르면 캐릭터가 칸 한쪽에 작게 그려졌다. 그래서 옅은 점은 빼고
+    (`CROP_ALPHA`), 모든 장면을 합친 진하기를 가로·세로로 더해 양 끝의 아주 적은 몫(`CROP_TAIL`)은 걷는다.
+    ★ 장면마다 따로 자르지 않는다 (움직일 때 들썩인다)."""
+    from PIL import ImageChops
+
+    total = None
+    for im in images:
+        a = im.getchannel("A").point(lambda v: 255 if v >= CROP_ALPHA else 0)
+        total = a if total is None or total.size != a.size else ImageChops.lighter(total, a)
+    if total is None:
+        return None
+    box = total.getbbox()
+    if box is None:  # 다 옅다: 그래도 무언가 있으면 그 테두리
+        boxes = [b for b in (im.getbbox() for im in images) if b]
+        return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                max(b[2] for b in boxes), max(b[3] for b in boxes)) if boxes else None
+    from PIL import Image
+
+    core = total.crop(box)
+    bw, bh = core.size
+    # 열·줄마다 진한 점의 몫 (평균으로 줄이면 더한 것과 비례한다, 점마다 돌지 않아 빠르다)
+    def flat(im):
+        get = getattr(im, "get_flattened_data", None) or im.getdata
+        return list(get())
+
+    cols = [v * bh for v in flat(core.convert("F").resize((bw, 1), Image.BOX))]
+    rows = [v * bw for v in flat(core.convert("F").resize((1, bh), Image.BOX))]
+    mass = sum(rows)
+
+    def trim(prof):
+        cut = mass * CROP_TAIL
+        lo, hi = 0, len(prof)
+        acc = 0.0
+        while lo < hi - 1 and acc + prof[lo] <= cut:
+            acc += prof[lo]
+            lo += 1
+        acc = 0.0
+        while hi - 1 > lo and acc + prof[hi - 1] <= cut:
+            acc += prof[hi - 1]
+            hi -= 1
+        return lo, hi
+
+    l, r = trim(cols)
+    t, b = trim(rows)
+    return box[0] + l, box[1] + t, box[0] + r, box[1] + b
+
+
+def halo(img, alpha: int = 110):
+    """그림 둘레에 1px 밝은 테두리를 깐다 (어두운 바에서 어두운 선이 묻히지 않게)."""
+    from PIL import Image, ImageFilter
+
+    a = img.getchannel("A")
+    ring = a.filter(ImageFilter.MaxFilter(3)).point(lambda v: alpha if v >= 60 else 0)
+    under = Image.new("RGBA", img.size, (255, 255, 255, 0))
+    under.putalpha(ring)
+    return Image.alpha_composite(under, img)
+
+
 def fit_frames(frames, height: int, speed: float = 1.0, width: int | None = None):
     """[(RGBA, ms)] 의 투명 테두리를 걷고 높이·폭 안에 맞춘다(바닥 가운데 정렬).
     ★ 모든 프레임에 걸친 네모 하나로 자른다 — 프레임마다 따로 자르면 움직일 때 들썩인다."""
@@ -434,10 +500,8 @@ def fit_frames(frames, height: int, speed: float = 1.0, width: int | None = None
 
     if not frames:
         return []
-    boxes = [b for b in (f.getbbox() for f, _ in frames) if b]
-    if boxes:
-        box = (min(b[0] for b in boxes), min(b[1] for b in boxes),
-               max(b[2] for b in boxes), max(b[3] for b in boxes))
+    box = content_box([f for f, _ in frames])
+    if box:
         frames = [(f.crop(box), ms) for f, ms in frames]
     w = max(f.width for f, _ in frames)
     h = max(f.height for f, _ in frames)

@@ -20,7 +20,7 @@ import pytest  # noqa: E402
 from PIL import Image  # noqa: E402
 
 import cooldown_pack as pack  # noqa: E402
-from skins import carry  # noqa: E402
+from skins import carry, wins  # noqa: E402
 from skins.base import ANNOY_COOL, ANNOY_STEPS, Annoy, Shake, set_palette  # noqa: E402
 from skins.buddy import FADE, FADE_MS, GIVEUP_SEC, REST_MAX, TICK_MS, Buddy  # noqa: E402
 from skins.claudi import FAINT_FRAMES, Claudi  # noqa: E402
@@ -58,6 +58,12 @@ def tkroot():
     set_palette("dark")
     yield r
     r.destroy()
+
+
+@pytest.fixture(autouse=True)
+def no_perch(monkeypatch):
+    """시험 화면 뒤의 진짜 창 제목 줄에 걸터앉지 않게."""
+    monkeypatch.setattr(wins, "title_bar_at", lambda sx, sy: None)
 
 
 @pytest.fixture
@@ -254,7 +260,7 @@ def test_shake_detect():
     assert not s.dizzy(11)
 
 
-def test_buddy_shaken_off_bar_faints_at_home(tkroot, basic, pressed):
+def test_buddy_shaken_off_bar_faints_where_dropped(tkroot, basic, pressed):
     b, clock = make_buddy(tkroot, basic)
     home = b.home_x
     x, y = spot(b)
@@ -264,17 +270,56 @@ def test_buddy_shaken_off_bar_faints_at_home(tkroot, basic, pressed):
         clock.t = t
         b.drag(px, py - 400)
     clock.t = shake(feed, x, y, clock.t)
+    assert b._held_dizzy and b.motion == "기절"      # 잡힌 채로 벌써 헤롱
+    at = b._carry.at
     b.put_down()
-    assert b.mode == "날기"
-    run(b, clock, 1.2)
-    assert b.mode == "기절" and b.motion == "기절" and b.x == pytest.approx(home)
+    assert b.mode == "기절" and b._carry is not None   # 바 밖 놓은 그 자리에서 뻗는다
     assert b.clip.effect == "헤롱"                     # 기절 그림이 없으면 헤롱 효과
     cyc = b._cycle()
-    assert 2.5 <= cyc <= 3.6 and cyc - 0.6 <= b.until - clock.t <= cyc
+    assert 2.5 <= cyc <= 3.6 and cyc - 0.6 <= b.until - clock.t <= cyc + 1e-6
+    run(b, clock, 1.0)
+    assert b.mode == "기절" and b._carry.at == pytest.approx(at)
     b.react(*spot(b))
     assert b.mode == "기절"
-    run(b, clock, cyc + 0.2)
-    assert b.mode == ""
+    run(b, clock, cyc - 0.9)
+    assert b.mode == "날기" and b.motion == "뛰기"     # 깨어나 뛰어 돌아온다
+    run(b, clock, carry.RUN_MAX + 0.2)
+    assert b.mode == "" and b._carry is None and b.x == pytest.approx(home)
+
+
+def test_shake_two_or_three_swings_is_enough():
+    """좌우로 두세 번 세게 흔들면 걸린다 (11-20 넷째: 옛 기준은 안 걸렸다)."""
+    s = Shake()
+    t, x = 10.0, 0.0
+    hit = []
+    for target in (80, -80, 80, -80):                 # 0.12초에 160px 씩 오가기
+        for k in range(6):
+            x += (target - x) / (6 - k)
+            t += 0.02
+            hit.append(s.feed(x, 0, t))
+    assert s.dizzy(t) and hit.count(True) == 1         # 새로 어지러워진 때만 참
+    s = Shake()
+    t, x = 10.0, 0.0
+    for target in (80, -80):                           # 한 번 오간 것으로는 아니다
+        for k in range(6):
+            x += (target - x) / (6 - k)
+            t += 0.02
+            s.feed(x, 0, t)
+    assert not s.dizzy(t)
+
+
+def test_held_dizzy_wears_off(tkroot, basic, pressed):
+    b, clock = make_buddy(tkroot, basic)
+    x, y = spot(b)
+    assert b.catch(x, y)
+
+    def feed(px, py, t):
+        clock.t = t
+        b.drag(px, py - 400)
+    clock.t = shake(feed, x, y, clock.t)
+    assert b.motion == "기절"
+    run(b, clock, 3.5)                                # 들고 가만히 있으면 정신 차린다
+    assert b.mode == "끌림" and b.motion == "끌림" and not b._held_dizzy
 
 
 def test_buddy_shaken_on_bar_faints_there_then_runs_home(tkroot, basic, pressed):
@@ -307,7 +352,7 @@ def test_buddy_gentle_drag_no_faint(tkroot, basic, pressed):
         clock.t += 0.03
         b.drag(x - i * 20, y - i * 10)
     b.put_down()
-    run(b, clock, 1.3)
+    run(b, clock, carry.RUN_MAX + 0.2)
     assert b.mode == "" and b.motion != "기절"
 
 
@@ -372,7 +417,7 @@ def test_buddy_lands_softly(tkroot, basic, pressed):
     assert b.catch(x, y)
     b.drag(x + 600, y - 600)
     b.put_down()
-    run(b, clock, 1.2)
+    run(b, clock, carry.RUN_MAX + 0.2)
     assert b.mode == "" and b.vy == 0 and b.y == 0     # 내려앉을 때 폴짝 튀지 않는다
 
 

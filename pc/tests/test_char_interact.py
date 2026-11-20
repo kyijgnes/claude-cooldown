@@ -20,7 +20,8 @@ from PIL import Image  # noqa: E402
 import cooldown_pack as pack  # noqa: E402
 from skins import carry  # noqa: E402
 from skins.base import AwayWatch, char_mood, set_palette  # noqa: E402
-from skins.buddy import RETURN_SEC, TICK_MS, Buddy  # noqa: E402
+from skins import wins  # noqa: E402
+from skins.buddy import TICK_MS, Buddy  # noqa: E402
 from skins.claudi import Claudi  # noqa: E402
 
 CHAR = "시험떡"
@@ -104,6 +105,12 @@ def test_mood_steps():
     assert char_mood(None, None) == "여유"
 
 
+@pytest.fixture(autouse=True)
+def no_perch(monkeypatch):
+    """시험 화면 뒤의 진짜 창 제목 줄에 걸터앉지 않게."""
+    monkeypatch.setattr(wins, "title_bar_at", lambda sx, sy: None)
+
+
 @pytest.fixture
 def pressed(monkeypatch):
     """마우스 단추를 누르고 있는 셈 (안 그러면 끄는 중에 놓은 것으로 본다)."""
@@ -116,20 +123,20 @@ def test_buddy_drag_inside_bar_walks_home(tkroot, packdir, pressed):
     x, y = spot(b)
     assert not b.catch(x - 120, y)           # 캐릭터 밖: 끌면 창이 움직인다
     assert b.catch(x, y)
-    b.drag(x - 150, y)
+    b.drag(x - 60, y)                        # 캐릭터 칸 안 (왼쪽 사용량 막대 위가 아님)
     assert b.mode == "끌림" and b.motion == "끌림"
     assert b._carry is not None and b._carry.alive()   # 떠 있는 창에 탔다
     run(b, clock, 1.0)
     assert b.mode == "끌림"                  # 손에 잡혀 있는 동안은 그대로
     b.put_down()                             # 바 위에 놓았다: 그 자리에 내려앉는다
     assert b.mode == "복귀" and b._carry is None
-    assert abs(b.x - (home - 150)) < 1
+    assert abs(b.x - (home - 60)) < 1
     ticks = 0
     while b.mode == "복귀":                   # 제자리에 닿는 순간 평소로 돌아간다
         clock.t += TICK_MS / 1000
         b.step()
         ticks += 1
-        assert ticks * TICK_MS / 1000 <= RETURN_SEC + 0.3
+        assert ticks * TICK_MS / 1000 <= carry.return_time(60) + 0.1
     assert b.x == pytest.approx(home)
 
 
@@ -146,7 +153,7 @@ def test_buddy_drag_off_screen_flies_home(tkroot, packdir, pressed):
     assert all(c.itemcget(i, "state") == "hidden" for c, i in b._items.items())  # 바 안 자리는 빈다
     b.put_down()
     assert b.mode == "날기" and b._flight is not None
-    run(b, clock, 1.2)                       # 길어도 1.1초면 닿는다
+    run(b, clock, carry.RUN_MAX + 0.2)        # 아무리 멀어도 RUN_MAX 초면 닿는다
     assert b.mode == "" and b._carry is None and not win.alive()
     assert b.x == pytest.approx(home)
     b._draw()
@@ -161,7 +168,7 @@ def test_buddy_released_elsewhere_lands(tkroot, packdir, monkeypatch):
     assert b.catch(x, y)
     b.drag(x, y - 500)
     monkeypatch.setattr(carry, "button_down", lambda: False)
-    run(b, clock, 1.2)
+    run(b, clock, carry.RUN_MAX + 0.2)
     assert b.mode == "" and b._carry is None
 
 

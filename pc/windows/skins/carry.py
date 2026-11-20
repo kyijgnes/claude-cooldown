@@ -101,6 +101,13 @@ class Carry:
         except tk.TclError:
             pass
 
+    def on_click(self, cb) -> None:
+        """떠 있는 창을 누르면 `cb()` (창 제목 줄에 앉아 있는 캐릭터를 누를 때)."""
+        try:
+            self.canvas.bind("<Button-1>", lambda _e: cb())
+        except tk.TclError:
+            pass
+
     def close(self) -> None:
         if self in _open:
             _open.remove(self)
@@ -140,22 +147,49 @@ def solid(img):
     return out
 
 
+# 놓은 뒤 제자리로 뛰어 돌아가는 시간 (11-20 넷째: 바 안에서 놓을 때와 밖에서 놓을 때 빠르기가 달랐다.
+# 바 안 빠르기(200px 쯤을 1.4초)를 기준으로 한 셈으로 맞추고, 아주 멀어도 RUN_MAX 초 안에 닿는다).
+RUN_BASE = 0.5     # 초
+RUN_PACE = 220.0   # px/초 (평균. 처음엔 느리고 끝엔 이 두 배쯤)
+RUN_MIN, RUN_MAX = 0.8, 2.8
+
+
+def return_time(dist: float) -> float:
+    """제자리까지 `dist` px 를 뛰어가는 시간(초). 바 안·밖 같은 셈."""
+    return min(RUN_MAX, max(RUN_MIN, RUN_BASE + abs(dist) / RUN_PACE))
+
+
+def ease_in(p: float) -> float:
+    """처음엔 천천히, 나중엔 빠르게 (11-20 넷째 사용자: 달려갈 때 처음엔 천천히 나중엔 빠르게)."""
+    p = min(1.0, max(0.0, p))
+    return p * p
+
+
 class Flight:
-    """놓은 자리에서 제자리로 돌아오는 길: **곧은 줄**로 미끄러지듯 (11-20 둘째: 포물선은 튀어 보였다).
+    """놓은 자리에서 제자리로 돌아오는 길: **곧은 줄** (11-20 둘째: 포물선은 튀어 보였다).
 
-    천천히 떠나 가운데서 빨라지고 닿을 때 살며시 멎는다(가속·감속이 매끄러운 5차 곡선).
-    멀수록 조금 더 오래(0.5~1.1초). `at(now)` → (x, y, 다 왔나)."""
+    `ease="smooth"`(클로디): 천천히 떠나 가운데서 빨라지고 닿을 때 살며시 멎는다(5차 곡선), 0.5~1.1초.
+    `ease="in"`(팩 캐릭터, 11-20 넷째): 뛰어 오듯 처음엔 천천히 나중엔 빠르게, 시간은 `return_time`.
+    `at(now)` → (x, y, 다 왔나)."""
 
-    def __init__(self, start: tuple[float, float], end: tuple[float, float], now: float):
+    def __init__(self, start: tuple[float, float], end: tuple[float, float], now: float,
+                 ease: str = "smooth"):
         self.sx, self.sy = start
         self.ex, self.ey = end
         dist = math.hypot(self.ex - self.sx, self.ey - self.sy)
         self.t0 = now
-        self.dur = min(1.1, max(0.5, 0.4 + dist / 1600))
+        self.ease = ease
+        if ease == "in":
+            self.dur = return_time(dist)
+        else:
+            self.dur = min(1.1, max(0.5, 0.4 + dist / 1600))
+
+    def progress(self, now: float) -> float:
+        return min(1.0, max(0.0, (now - self.t0) / self.dur))
 
     def at(self, now: float) -> tuple[float, float, bool]:
-        p = min(1.0, max(0.0, (now - self.t0) / self.dur))
-        e = p * p * p * (p * (6 * p - 15) + 10)
+        p = self.progress(now)
+        e = ease_in(p) if self.ease == "in" else p * p * p * (p * (6 * p - 15) + 10)
         x = self.sx + (self.ex - self.sx) * e
         y = self.sy + (self.ey - self.sy) * e
         return x, y, p >= 1.0

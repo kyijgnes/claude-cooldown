@@ -1054,6 +1054,15 @@ class App:
         widget.bind("<B1-Motion>", self._drag)
         widget.bind("<ButtonRelease-1>", self._release)
         widget.bind("<Button-3>", self._popup)
+        widget.bind("<MouseWheel>", self._wheel)
+
+    def _wheel(self, e):
+        """캐릭터 위에서 휠을 굴리면 빙글 돈다 (11-20 넷째). 캐릭터 밖이면 아무 일 없음."""
+        try:
+            self.skin.wheel(e.x_root - self.root.winfo_rootx(),
+                            e.y_root - self.root.winfo_rooty(), int(e.delta))
+        except Exception:  # noqa: BLE001
+            pass
 
     def switch_skin(self, key: str) -> None:
         self._close_panels()  # 디자인을 바꾸면 옛 팝업(옛 색·자리)이 떠돌지 않게 닫는다
