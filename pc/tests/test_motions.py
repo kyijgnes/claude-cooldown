@@ -165,7 +165,7 @@ def test_annoy_steps_up_and_down():
     a = Annoy()
     t = 0.0
     got = []
-    for _ in range(12):
+    for _ in range(60):
         got.append(a.tap(t))
         t += 0.25
         if got[-1] == 3:
@@ -173,12 +173,12 @@ def test_annoy_steps_up_and_down():
     assert got[0] == 0 and 1 in got and 2 in got and got[-1] == 3   # 짜증 → 화남 → 포기
     assert got == sorted(got)
     a = Annoy()
-    for i in range(7):
+    for i in range(20):
         a.tap(i * 0.1)
-    assert a.level(0.7) == 2                                        # 화남
+    assert a.level(2.0) == 2                                        # 화남
     t_down = (a.heat - ANNOY_STEPS[1]) / ANNOY_COOL
-    assert a.level(0.7 + t_down + 0.2) == 1                         # 서서히 짜증으로
-    assert a.level(0.7 + 30) == 0                                    # 한참 두면 괜찮아진다
+    assert a.level(2.0 + t_down + 0.2) == 1                         # 서서히 짜증으로
+    assert a.level(2.0 + 60) == 0                                    # 한참 두면 괜찮아진다
     a = Annoy()
     assert all(a.tap(i * 2.0) == 0 for i in range(30))              # 2초에 한 번(새로고침)은 안 쌓인다
 
@@ -186,7 +186,7 @@ def test_annoy_steps_up_and_down():
 def test_buddy_click_stages_giveup_and_recover(tkroot, basic):
     b, clock = make_buddy(tkroot, basic)
     seen = []
-    for _ in range(20):
+    for _ in range(60):
         b.react(*spot(b))
         seen.append(b.motion if b.mode != "포기" else "포기")
         run(b, clock, 0.2)
@@ -208,6 +208,10 @@ def test_buddy_click_stages_giveup_and_recover(tkroot, basic):
 def test_buddy_click_stage_cools_down(tkroot, basic):
     b, clock = make_buddy(tkroot, basic)
     for _ in range(5):
+        b.react(*spot(b))
+        run(b, clock, 0.15)
+    assert b._annoy.level(clock.t) == 0               # 몇 번 누르는 것으로는 짜증 안 남
+    for _ in range(7):
         b.react(*spot(b))
         run(b, clock, 0.15)
     assert b._annoy.level(clock.t) >= 1
