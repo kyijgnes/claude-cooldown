@@ -19,8 +19,9 @@
 - 그림은 도트 표(HEAD/LEGS/ARM/EYES)에 `#` 로 찍어 두고 `_sprite` 한 곳에서만 픽셀로 옮긴다.
   ★ **폰 앱(`android/art/make_claudi_icon.py`)이 이 표를 그대로 읽어 간다** —
   모양을 고쳤으면 그 스크립트를 다시 돌려 폰과 어긋나지 않게 한다.
-- 바 캐릭터(`buddy.py`)와 같은 상호작용 약속(11-20): **잡아 끌면 위젯 안에서 따라오고**
-  (`catch`·`drag`·`drop`, 놓으면 떨어져 통통 튀며 제자리로 달려간다), **PC 를 5분 안 쓰면 졸다가**
+- 바 캐릭터(`buddy.py`)와 같은 상호작용 약속(11-20): **잡아 끌면 투명한 맨 위 작은 창에 타서 화면
+  어디로든 따라오고**(`catch`·`drag`·`put_down`, `carry.Carry`. 바 위에 놓으면 떨어져 통통 튀며 제자리로
+  달려가고, 바 밖에 놓으면 포물선을 그리며 날아와 제자리에 선다), **PC 를 5분 안 쓰면 졸다가**
   돌아오면 손 흔들어 반기고(`set_away`), 사용량이 한도면 졸고 80% 넘으면 자주 폴짝(`set_mood`),
   5시간 한도가 풀리면 폭죽 축하(`celebrate`). 기절은 원래 있던 것(작정하고 두드려야 뻗음) 그대로.
 - `leave=False` 면 **자리를 비우지 않는다** — 슬림 바는 작업표시줄 아래로 쏙 내려가면
@@ -33,10 +34,12 @@ from __future__ import annotations
 
 import math
 import random
+import time
 import tkinter as tk
 
 import cooldown_dino as dino
 
+from . import carry
 from .base import P
 
 MASCOT_U = 2    # 도트 한 칸 (px). 팔까지 가로 11칸(22px) · 세로 8칸(16px)
@@ -334,6 +337,12 @@ class Claudi:
         self.on_morph = None
         self._mood = "여유"   # 사용량 기분 (`set_mood`): 여유·보통·허둥·잠·오류
         self._pc_away = False  # PC 입력이 한참 없다 (`set_away`)
+        self._carry: carry.Carry | None = None  # 끄는 동안·날아오는 동안 타는 창
+        self._flight: carry.Flight | None = None
+        self._held = (0.0, 0.0)  # 끌고 있는 몸 한가운데 (캔버스 좌표, 바 밖일 수 있다)
+        self._eye_bg: str | None = None  # 눈을 파낼 색 (떠 있는 창에서는 바탕이 투명색이라 따로 준다)
+        self._in_carry = False
+        self.now = time.monotonic  # 날아오는 길의 시계 (시험은 가짜 시계로 바꿔 끼운다)
 
     def set_box(self, box: tuple[float, float, float, float]) -> None:
         """놀 자리를 정한다(고쳐 잡을 수도 있다). 집은 상자 한가운데."""
@@ -559,14 +568,17 @@ class Claudi:
 
     def catch(self, x: float | None, y: float | None) -> bool:
         """누른 자리가 클로디 위인가 (끌면 창 대신 클로디가 따라온다). 자리를 비웠으면 없는 셈."""
-        if x is None or y is None or self._away > 0 or not self._near(x, y):
+        if (x is None or y is None or self._away > 0 or self._carry is not None
+                or not self._near(x, y)):
             return False
         self._goff = (self.cx + self._bx - x, self.cy + self._by - y)
+        self._held = (self.cx + self._bx, self.cy + self._by)
         return True
 
     def drag(self, x: float | None, y: float | None) -> None:
-        """잡혀 끌린다. 위젯(캔버스) 안에 통째로 남게 가두고, 발은 버둥버둥."""
-        if x is None or y is None or self._faint > 0 or self._party or self._dino:
+        """잡혀 끌린다. 투명한 떠 있는 창에 타서 화면 어디로든 따라가고, 발은 버둥버둥."""
+        if (x is None or y is None or self._faint > 0 or self._party or self._dino
+                or self._flight is not None):
             return
         if not self._grabbed:
             self._grabbed = True
@@ -577,21 +589,65 @@ class Claudi:
             self._wave = 0
             self._played = True
         self._quiet = 0
-        cw, ch = self._area()
-        hw, hh = 5.5 * self.u, self.sprite_h / 2
-        tx = min(max(x + self._goff[0], hw), max(hw, cw - hw))
-        ty = min(max(y + self._goff[1], hh), max(hh, ch - hh))
-        self._bx, self._by = tx - self.cx, ty - self.cy
+        self._held = (x + self._goff[0], y + self._goff[1])
         self._vy = self._yoff = 0.0
+        if self._carry is None:
+            try:
+                side = int(22 * self.u)
+                self._carry = carry.Carry(self.c, side, side, (side / 2, side / 2))
+            except tk.TclError:
+                self._carry = None
+        if self._carry is not None:
+            try:
+                self._carry.move(*carry.screen_of(self.c, *self._held))
+            except tk.TclError:
+                pass
+
+    def _land(self) -> None:
+        if self._carry is not None:
+            self._carry.close()
+        self._carry = None
+        self._flight = None
 
     def put_down(self) -> None:
-        """놓았다. 떨어져 통통 튀고(높이는 용수철) 제자리로 달려간다(가로는 `_step_sparks`)."""
-        if not self._grabbed:
+        """놓았다. 바 위면 그 자리에서 떨어져 통통 튀고(높이는 용수철) 제자리로 달려간다(가로는
+        `_step_sparks`). 바 밖이면 그 자리에서 제자리로 날아온다(`_fly`)."""
+        if not self._grabbed or self._flight is not None:
             return
-        self._grabbed = False
-        self._yoff, self._by, self._vy = self._by, 0.0, 0.0
-        self._launch = LAUNCH_FRAMES  # 높이 끌어 올렸으면 그만큼 떨어지게 가둠을 잠깐 푼다
-        self._surprise = SURPRISE_FRAMES * 2
+        tx, ty = self._held
+        if self._carry is None or carry.inside(self.c, tx, ty):
+            self._land()
+            cw, ch = self._area()
+            hw, hh = 5.5 * self.u, self.sprite_h / 2
+            tx = min(max(tx, hw), max(hw, cw - hw))
+            ty = min(max(ty, hh), max(hh, ch - hh))
+            self._bx, self._by = tx - self.cx, ty - self.cy
+            self._grabbed = False
+            self._yoff, self._by, self._vy = self._by, 0.0, 0.0
+            self._launch = LAUNCH_FRAMES  # 높이 끌어 올렸으면 그만큼 떨어지게 가둠을 잠깐 푼다
+            self._surprise = SURPRISE_FRAMES * 2
+            return
+        try:
+            end = carry.screen_of(self.c, self.cx, self.cy)
+        except tk.TclError:
+            self._land()
+            self._grabbed = False
+            return
+        self._flight = carry.Flight(self._carry.at, end, self.now())
+
+    def _fly(self) -> None:
+        """날아오는 중 한 프레임 (잡힌 채 버둥대는 모습 그대로). 다 오면 바에 내려앉아 폴짝."""
+        done = True
+        if self._flight is not None and self._carry is not None:
+            x, y, done = self._flight.at(self.now())
+            self._carry.move(x, y)
+        if done:
+            self._land()
+            self._grabbed = False
+            self._bx = self._by = 0.0
+            self._yoff = self._vy = 0.0
+            self._boost(JUMP_IMPULSE)
+            self._surprise = SURPRISE_FRAMES * 2
 
     # -------------------------------------------------- 자리비움·사용량 (11-20)
     def _sleepy(self) -> bool:
@@ -805,6 +861,11 @@ class Claudi:
         if gen != self._anim_gen:  # 새 build 가 시작됐다 — 이 루프는 은퇴
             return
         self._t += 1
+        if self._grabbed and self._flight is None and self._carry is not None \
+                and not carry.button_down():
+            self.put_down()  # 놓은 것을 앱이 못 받았다 (창 전환 등). 떠 있는 채로 남지 않게
+        if self._flight is not None:
+            self._fly()
         if self._grabbed:  # 잡혀 있는 동안은 용수철·잔동작을 멈춘다 (손을 따라갈 뿐)
             self._step_sparks()
         else:
@@ -1033,10 +1094,13 @@ class Claudi:
     def _draw_mascot(self) -> None:
         """매 프레임 지우고 다시 그린다. 평소엔 숨쉬듯 잔잔히 + 이따금 잔동작,
         누르면 팔을 번쩍 들고 출렁이며 눈웃음/놀람, 기절하면 X_X + 별이 뱅뱅."""
+        if self._carry is not None and not self._in_carry:
+            self._draw_carried()
+            return
         c = self.c
         c.delete("mascot")
         if self._faint > 0:
-            self._draw_faint(c, self.cx, c.cget("bg"))
+            self._draw_faint(c, self.cx, self._eye_bg or c.cget("bg"))
             self._draw_sparks(c)  # 기절해서도 아까 뿜은 것은 마저 흐른다
             return
         if self._dino:  # 공룡으로 변신해 있다 — 판에서 달리는 그 공룡이 작게 서 있다
@@ -1218,7 +1282,7 @@ class Claudi:
         (도형을 돌리면 이 크기에서 획이 뭉개진다).
         """
         c = self.c
-        bg = c.cget("bg")
+        bg = self._eye_bg or c.cget("bg")
         mid = (len(HEAD) + len(legs)) / 2
         x0 = cx - 4.5 * ux   # 머리 9칸의 왼쪽
         y0 = cy - mid * uy   # 머리 7줄 + 다리 2줄의 맨 위
@@ -1261,6 +1325,26 @@ class Claudi:
         paint(legs, len(HEAD))
         for col, row in EYES[expr]:
             cell(col + eye_dx, row, bg)
+
+    def _draw_carried(self) -> None:
+        """떠 있는 창에 그린다. 바 안 제자리는 비우고 아까 뿜은 반짝이만 마저 흐른다.
+        그리기 코드는 하나라서 캔버스·집 자리를 잠깐 떠 있는 창 것으로 바꿔 끼워 그대로 부른다."""
+        bar = self.c
+        bar.delete("mascot")
+        self._draw_sparks(bar)
+        keep = (self.c, self.cx, self.cy, self._bx, self._by, self._runx,
+                self._sparks, self._zzz, self._shells)
+        self.c = self._carry.canvas
+        self.cx, self.cy = self._carry.ax, self._carry.ay
+        self._bx = self._by = self._runx = 0.0
+        self._sparks, self._zzz, self._shells = [], [], []
+        self._eye_bg, self._in_carry = P.bg, True
+        try:
+            self._draw_mascot()
+        finally:
+            (self.c, self.cx, self.cy, self._bx, self._by, self._runx,
+             self._sparks, self._zzz, self._shells) = keep
+            self._eye_bg, self._in_carry = None, False
 
     def _draw_dino(self, c: tk.Canvas) -> None:
         """변신한 공룡 — 판(`cooldown_dino`)과 **같은 표**를 `MORPH_U` 칸으로 작게 세워 둔다.

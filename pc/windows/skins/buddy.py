@@ -13,8 +13,11 @@
 상호작용(11-20 사용자: 마당 없이 한 명이니 손에 닿는 반응이 중요하다)
 - 누르기: 폴짝 놀람. **2초 안에 6번**(`base.FAINT_TAPS`) 누르면 기절했다 깨어난다.
 - 길게 누르기: 눌림이 이어지다 놓으면 튕겨 오른다.
-- 끌기: 캐릭터 위에서 눌러 끌면 **창이 아니라 캐릭터가** 위젯 안에서 마우스를 따라간다(끌림).
-  놓으면 떨어져 통통 튀며 제자리로 종종걸음쳐 돌아간다.
+- 끌기: 캐릭터 위에서 눌러 끌면 **창이 아니라 캐릭터가** 마우스를 따라간다(끌림). 끄는 동안은 투명한
+  맨 위 작은 창(`carry.Carry`)에 타서 화면 어디로든 가고 바 안 제자리는 빈다. 놓은 자리가 바 위면
+  거기 내려앉아 통통 튀며 종종걸음으로, 바 밖이면 포물선을 그리며 날아와(`carry.Flight`) 제자리에 선다.
+- 그림: 후보(`pack.pick_clip`) 하나 = 그림 한 장(고정 그림은 효과를 구워 움직인다) 또는 이어 붙이기 묶음.
+  평소 동작은 후보가 많으면 최근에 튼 절반은 피해 고른다(`_avoid`).
 - 자리비움: PC 입력이 5분 없으면 집에서 자리비움 동작, 돌아오면 폴짝 반긴다(인사).
 - 사용량 네 단계가 평소 동작에 늘 보인다: 여유(천천히, 자주 인사) · 보통(부지런히 거닒) ·
   허둥(80% 넘음, 쉬지 않고 오감) · 잠(한도). 5시간 한도가 풀리면 축하, 오류면 집에서 섬.
@@ -30,6 +33,7 @@ import tkinter as tk
 
 import cooldown_pack as pack
 
+from . import carry
 from .base import TapCount
 
 TICK_MS = 40
@@ -42,6 +46,8 @@ FAINT_SEC = 2.6     # 기절해 있는 시간
 WELCOME_SEC = 2.4   # 돌아온 사람을 반기는 시간
 RETURN_SEC = 1.4    # 놓은 뒤 이 시간 안에 제자리로 (멀리 끌었으면 그만큼 빨리 걷는다)
 RETURN_MIN = 1.2    # 돌아가는 걸음의 가장 느린 속도 (px/틱)
+WIDE_FX = ("쓰러짐", "빙글")  # 옆으로 눕거나 도는 효과는 폭을 더 준다 (안 주면 작아진다)
+WIDE_K = 1.7
 TAG = "buddy"
 
 # 사용량 단계별 평소 동작: (쉬는 시간 범위(초), 거닐 확률, 인사 확률, 걷는 속도(px/틱), 딴짓까지(초))
@@ -69,8 +75,9 @@ class Buddy:
         self.dir = 1 if self.right else -1
         self.target: float | None = None
         self.motion = ""
-        self.path: str | None = None
+        self.clip: pack.Clip | None = None
         self.frames: list = []
+        self.loop_from = 0  # 다 돌면 여기로 되감는다 (쓰러짐은 누운 채로만 돈다)
         self.fi = 0
         self.left_ms = 0.0
         self.until = 0.0
@@ -78,7 +85,8 @@ class Buddy:
         self.y = 0.0
         self.vy = 0.0
         self.held = False
-        # 지금 하는 큰 일: "" 평소 · "기절" · "끌림" · "복귀"(놓아서 돌아가는 중) · "자리비움"
+        # 지금 하는 큰 일: "" 평소 · "기절" · "끌림" · "날기"(바 밖에 놓아 날아오는 중) ·
+        # "복귀"(바 위에 놓아 걸어 돌아가는 중) · "자리비움"
         self.mode = ""
         self.w = self.height
         self._mood = "여유"
@@ -92,6 +100,10 @@ class Buddy:
         self._taps = TapCount()
         self._grab_off = (0.0, 0.0)
         self._speed = RETURN_MIN
+        self._recent: dict[str, list] = {}  # 동작마다 최근에 튼 후보 key
+        self._carry: carry.Carry | None = None  # 끄는 동안·날아오는 동안 타는 창
+        self._flight: carry.Flight | None = None
+        self._held_at = (0.0, 0.0)  # 끌고 있는 자리 (캔버스 좌표, 바 밖일 수 있다): 가운데 x, 발 y
 
     # -------------------------------------------------- 약속
     def home(self, cx: float, cy: float | None = None) -> None:
@@ -154,13 +166,15 @@ class Buddy:
     # -------------------------------------------------- 끌기
     def catch(self, x: float | None, y: float | None) -> bool:
         """누른 자리가 캐릭터 위인가. 끌기를 시작하면 이 자리를 잡은 채로 따라간다."""
-        if not self._hit(x, y):
+        if self._carry is not None or not self._hit(x, y):
             return False
         self._grab_off = (self.x - x, (self.y1 + self.y) - y)
+        self._held_at = (self.x, self.y1 + self.y)
         return True
 
     def drag(self, x: float | None, y: float | None) -> None:
-        if x is None or y is None or self.mode == "기절":
+        """끄는 중 (캔버스 좌표, 바 밖일 수 있다). 캐릭터는 떠 있는 창에 타서 화면 어디로든 따라온다."""
+        if x is None or y is None or self.mode in ("기절", "날기"):
             return
         if self.mode != "끌림":
             self.mode = "끌림"
@@ -169,34 +183,73 @@ class Buddy:
             self._played = True
             self._play("끌림", 3600, busy=True)
         self._touched = self.now()
-        cw, ch = self._area()
-        lo, hi = self.w / 2, cw - self.w / 2
-        nx = x + self._grab_off[0]
-        nx = min(max(nx, lo), hi) if hi > lo else nx
-        if abs(nx - self.x) > 0.5:
-            self._face(1 if nx > self.x else -1)
-        self.x = nx
-        bottom = y + self._grab_off[1]
-        bottom = min(max(bottom, float(self.height)), float(ch))
-        self.y = bottom - self.y1
+        nx, bottom = x + self._grab_off[0], y + self._grab_off[1]
+        if abs(nx - self._held_at[0]) > 0.5:
+            self._face(1 if nx > self._held_at[0] else -1)
+        self._held_at = (nx, bottom)
         self.vy = 0.0
+        if self._carry is None:
+            self._lift_out()
+        if self._carry is not None:
+            try:
+                self._carry.move(*carry.screen_of(self.c, nx, bottom))
+            except tk.TclError:
+                pass
+        self._dirty = True
+
+    def _lift_out(self) -> None:
+        """떠 있는 창을 만든다 (그림은 `_draw` 가 그 창에 그린다)."""
+        try:
+            w = int(self.max_w * WIDE_K) + 8
+            h = self.height + 12
+            self._carry = carry.Carry(self.c, w, h, (w / 2, h - 4))
+        except tk.TclError:
+            self._carry = None
+
+    def _land(self) -> None:
+        if self._carry is not None:
+            self._carry.close()
+        self._carry = None
+        self._flight = None
         self._dirty = True
 
     def put_down(self) -> None:
         if self.mode != "끌림":
             return
-        self.mode = "복귀"
-        self.busy = False
-        self.until = 0
-        self.target = self.home_x
-        # 멀리 끌었으면 그만큼 빨리 걸어 RETURN_SEC 안에 닿는다
-        ticks = RETURN_SEC * 1000 / TICK_MS
-        self._speed = max(RETURN_MIN, abs(self.home_x - self.x) / ticks)
+        nx, bottom = self._held_at
+        if self._carry is None or carry.inside(self.c, nx, bottom - self.height / 2):
+            # 바 위에 놓았다: 그 자리에 내려앉아 통통 튀고 제자리로 종종걸음
+            self._land()
+            cw, ch = self._area()
+            lo, hi = self.w / 2, cw - self.w / 2
+            self.x = min(max(nx, lo), hi) if hi > lo else nx
+            self.y = min(max(bottom, float(self.height)), float(ch)) - self.y1
+            self.mode = "복귀"
+            self.busy = False
+            self.until = 0
+            self.target = self.home_x
+            # 멀리 끌었으면 그만큼 빨리 걸어 RETURN_SEC 안에 닿는다
+            ticks = RETURN_SEC * 1000 / TICK_MS
+            self._speed = max(RETURN_MIN, abs(self.home_x - self.x) / ticks)
+            return
+        # 바 밖에 놓았다: 그 자리에서 제자리로 날아온다
+        self.mode = "날기"
+        self.target = None
+        try:
+            start = self._carry.at
+            end = carry.screen_of(self.c, self.home_x, self.y1)
+        except tk.TclError:
+            self._land()
+            self.mode = ""
+            return
+        self._flight = carry.Flight(start, end, self.now())
+        if end[0] != start[0]:
+            self._face(1 if end[0] > start[0] else -1)
 
     # -------------------------------------------------- 자리비움 (PC 입력 없음)
     def set_away(self, away: bool) -> None:
         if away:
-            if self.mode in ("기절", "끌림"):
+            if self.mode in ("기절", "끌림", "날기"):
                 return  # 지금 손에 잡혀 있거나 뻗어 있다. 다음에 앱이 다시 알려 준다
             self.mode = "자리비움"
             self.held = False
@@ -231,32 +284,57 @@ class Buddy:
         self._play("축하", 2.6, busy=True)
 
     # -------------------------------------------------- 그림
-    def _frames_for(self, path: str, flip: bool) -> list:
-        key = (path, flip)
+    def _raw_for(self, clip: pack.Clip, flip: bool) -> tuple[list, int]:
+        """후보 → ([(PIL RGBA, ms)], 되감을 자리), 바 높이에 맞춘 것 (굽기는 한 번만)."""
+        key = ("raw", clip.key, flip)
         if key not in self._cache:
-            from PIL import Image, ImageTk
+            from PIL import Image
+            width = int(self.max_w * (WIDE_K if clip.effect in WIDE_FX else 1))
             try:
-                raw = pack.load_frames(path, self.height, width=self.max_w)
+                raw, loop_from = pack.load_clip(clip, self.height, width)
             except Exception:  # 깨진 그림 하나 때문에 위젯이 죽으면 안 된다
-                raw = []
+                raw, loop_from = [], 0
             if flip:
                 raw = [(im.transpose(Image.FLIP_LEFT_RIGHT), ms) for im, ms in raw]
-            self._cache[key] = [(ImageTk.PhotoImage(im, master=self.c), ms) for im, ms in raw]
+            self._cache[key] = (raw, loop_from)
         return self._cache[key]
 
+    def _frames_for(self, clip: pack.Clip, flip: bool, solid: bool = False) -> tuple[list, int]:
+        """후보 → ([(PhotoImage, ms)], 되감을 자리). `solid` 는 떠 있는 창에 태울 그림(알파 반 자름)."""
+        key = (clip.key, flip, solid)
+        if key not in self._cache:
+            from PIL import ImageTk
+            raw, loop_from = self._raw_for(clip, flip)
+            self._cache[key] = ([(ImageTk.PhotoImage(carry.solid(im) if solid else im, master=self.c), ms)
+                                 for im, ms in raw], loop_from)
+        return self._cache[key]
+
+    def _flip(self) -> bool:
+        return (self.dir > 0) != self.right
+
     def _refresh_frames(self) -> None:
-        if self.path:
-            self.frames = self._frames_for(self.path, (self.dir > 0) != self.right)
+        if self.clip:
+            self.frames, self.loop_from = self._frames_for(self.clip, self._flip())
             if self.frames:
                 self.w = self.frames[0][0].width()
+            if self.loop_from >= len(self.frames):
+                self.loop_from = 0
+
+    def _avoid(self, motion: str) -> list:
+        """최근에 튼 후보들 (피할 것). 후보가 n 개면 최근 n//2 개(적어도 하나는 남긴다)."""
+        n = len(pack.candidates(self.name, motion, self.root))
+        keep = max(0, min(n - 1, n // 2))
+        return self._recent.get(motion, [])[-keep:] if keep else []
 
     def _play(self, motion: str, seconds: float | None = None, busy: bool = False) -> None:
-        path = pack.pick(self.name, motion, self.root,
-                         avoid=self.path if motion == self.motion else None)
-        if path is None:
+        clip = pack.pick_clip(self.name, motion, self.root, avoid=self._avoid(motion))
+        if clip is None:
             return
-        if path != self.path or motion != self.motion:
-            self.path, self.motion = path, motion
+        if clip != self.clip or motion != self.motion:
+            self.clip, self.motion = clip, motion
+            hist = self._recent.setdefault(motion, [])
+            hist.append(clip.key)
+            del hist[:-pack.MAX_PER_MOTION]
             self._refresh_frames()
             self.fi = 0
             self.left_ms = self.frames[0][1] if self.frames else 200
@@ -273,7 +351,7 @@ class Buddy:
             self._refresh_frames()
 
     def _hit(self, x, y) -> bool:
-        if x is None or y is None:
+        if x is None or y is None or self._carry is not None:
             return False
         bottom = self.y1 + self.y
         return abs(x - self.x) <= self.w / 2 + 2 and bottom - self.height - 2 <= y <= bottom + 2
@@ -340,7 +418,9 @@ class Buddy:
         self.left_ms -= ms
         moved = False
         while self.left_ms <= 0:
-            self.fi = (self.fi + 1) % len(self.frames)
+            self.fi += 1
+            if self.fi >= len(self.frames):
+                self.fi = self.loop_from if self.loop_from < len(self.frames) else 0
             self.left_ms += self.frames[self.fi][1]
             moved = True
         return moved
@@ -358,6 +438,10 @@ class Buddy:
         dt = (now - self._last) * 1000
         self._last = now
         dirty = self._advance(dt)
+        if self.mode == "끌림" and self._carry is not None and not carry.button_down():
+            self.put_down()  # 놓은 것을 앱이 못 받았다 (창 전환 등). 떠 있는 채로 남지 않게
+        if self.mode == "날기":
+            return self._fly(now)
         if self.mode != "끌림" and (abs(self.y) > 0.05 or abs(self.vy) > 0.05):
             self.vy = (self.vy - self.y * SPRING_K) * SPRING_DAMP
             self.y = max(self.y + self.vy, -(self.y1 - self.y0) * 0.35)
@@ -394,6 +478,20 @@ class Buddy:
             dirty = True
         return dirty
 
+    def _fly(self, now: float) -> bool:
+        """날아오는 중 한 틱. 다 오면 바에 내려앉아 폴짝."""
+        done = True
+        if self._flight is not None and self._carry is not None:
+            x, y, done = self._flight.at(now)
+            self._carry.move(x, y)
+        if done:
+            self._land()
+            self.mode = ""
+            self.x, self.y = self.home_x, 0.0
+            self.vy = POKE_VY * 0.7
+            self._play("놀람", busy=True)
+        return True
+
     def _tick(self, gen: int) -> None:
         if gen != self._gen or not self.c.winfo_exists():
             return
@@ -404,6 +502,9 @@ class Buddy:
 
     def _draw(self) -> None:
         if not self.frames:
+            return
+        if self._carry is not None:
+            self._draw_carried()
             return
         img = self.frames[self.fi % len(self.frames)][0]
         x, y = self.x, self.y1 + self.y + (2 if self.held else 0)
@@ -424,9 +525,30 @@ class Buddy:
                 else:
                     canvas.itemconfigure(item, image=img)
                     canvas.coords(item, x - dx, y - dy)
+                canvas.itemconfigure(item, state="normal")
                 if under:
                     canvas.tag_lower(item)  # 알림 칸에서는 글자 아래에 깐다
                 else:
                     canvas.tag_raise(item)
             except tk.TclError:
                 pass
+
+    def _draw_carried(self) -> None:
+        """떠 있는 창에 그린다. 바 안 제자리(본체·알림 칸)는 비운다."""
+        for canvas, item in list(self._items.items()):
+            try:
+                canvas.itemconfigure(item, state="hidden")
+            except tk.TclError:
+                pass
+        cv = self._carry.canvas
+        frames, _ = self._frames_for(self.clip, self._flip(), solid=True) if self.clip else ([], 0)
+        if not frames:
+            return
+        img = frames[self.fi % len(frames)][0]
+        try:
+            if not cv.find_withtag(TAG):
+                cv.create_image(self._carry.ax, self._carry.ay, image=img, anchor="s", tags=TAG)
+            else:
+                cv.itemconfigure(TAG, image=img)
+        except tk.TclError:
+            pass

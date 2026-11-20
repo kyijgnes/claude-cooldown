@@ -18,6 +18,7 @@ import pytest  # noqa: E402
 from PIL import Image  # noqa: E402
 
 import cooldown_pack as pack  # noqa: E402
+from skins import carry  # noqa: E402
 from skins.base import AwayWatch, TapCount, char_mood, set_palette  # noqa: E402
 from skins.buddy import FAINT_SEC, RETURN_SEC, TICK_MS, Buddy  # noqa: E402
 from skins.claudi import Claudi  # noqa: E402
@@ -136,7 +137,13 @@ def test_buddy_slow_taps_never_faint(tkroot, packdir):
     assert b.mode == ""
 
 
-def test_buddy_drag_and_return(tkroot, packdir):
+@pytest.fixture
+def pressed(monkeypatch):
+    """마우스 단추를 누르고 있는 셈 (안 그러면 끄는 중에 놓은 것으로 본다)."""
+    monkeypatch.setattr(carry, "button_down", lambda: True)
+
+
+def test_buddy_drag_inside_bar_walks_home(tkroot, packdir, pressed):
     b, clock = make_buddy(tkroot, packdir)
     home = b.home_x
     x, y = spot(b)
@@ -144,14 +151,12 @@ def test_buddy_drag_and_return(tkroot, packdir):
     assert b.catch(x, y)
     b.drag(x - 150, y)
     assert b.mode == "끌림" and b.motion == "끌림"
-    assert abs(b.x - (home - 150)) < 1
-    b.drag(-500, y + 400)                    # 위젯 밖으로 끌어도 안에 가둔다
-    assert b.x == pytest.approx(b.w / 2)
-    assert b.y1 + b.y <= H
+    assert b._carry is not None and b._carry.alive()   # 떠 있는 창에 탔다
     run(b, clock, 1.0)
     assert b.mode == "끌림"                  # 손에 잡혀 있는 동안은 그대로
-    b.put_down()
-    assert b.mode == "복귀"
+    b.put_down()                             # 바 위에 놓았다: 그 자리에 내려앉는다
+    assert b.mode == "복귀" and b._carry is None
+    assert abs(b.x - (home - 150)) < 1
     ticks = 0
     while b.mode == "복귀":                   # 제자리에 닿는 순간 평소로 돌아간다
         clock.t += TICK_MS / 1000
@@ -159,6 +164,38 @@ def test_buddy_drag_and_return(tkroot, packdir):
         ticks += 1
         assert ticks * TICK_MS / 1000 <= RETURN_SEC + 0.3
     assert b.x == pytest.approx(home)
+
+
+def test_buddy_drag_off_screen_flies_home(tkroot, packdir, pressed):
+    b, clock = make_buddy(tkroot, packdir)
+    home = b.home_x
+    x, y = spot(b)
+    assert b.catch(x, y)
+    b.drag(-900, y - 700)                    # 바 밖 멀리: 가두지 않고 따라간다
+    win = b._carry
+    sx, sy = carry.screen_of(b.c, -900 + (b.x - x), y - 700 + (b.y1 + b.y - y))
+    assert win.at == pytest.approx((sx, sy))
+    b._draw()
+    assert all(c.itemcget(i, "state") == "hidden" for c, i in b._items.items())  # 바 안 자리는 빈다
+    b.put_down()
+    assert b.mode == "날기" and b._flight is not None
+    run(b, clock, 1.0)                       # 길어도 0.9초면 닿는다
+    assert b.mode == "" and b._carry is None and not win.alive()
+    assert b.x == pytest.approx(home)
+    b._draw()
+    assert all(c.itemcget(i, "state") == "normal" for c, i in b._items.items())
+
+
+def test_buddy_released_elsewhere_lands(tkroot, packdir, monkeypatch):
+    """앱이 놓기를 못 받아도(창 전환) 단추가 떨어져 있으면 스스로 내려온다."""
+    b, clock = make_buddy(tkroot, packdir)
+    x, y = spot(b)
+    monkeypatch.setattr(carry, "button_down", lambda: True)
+    assert b.catch(x, y)
+    b.drag(x, y - 500)
+    monkeypatch.setattr(carry, "button_down", lambda: False)
+    run(b, clock, 1.2)
+    assert b.mode == "" and b._carry is None
 
 
 def test_buddy_away_and_welcome(tkroot, packdir):
@@ -212,21 +249,38 @@ def make_claudi(tkroot):
     return cl
 
 
-def test_claudi_drag_and_return(tkroot):
+def test_claudi_drag_and_return(tkroot, pressed):
     cl = make_claudi(tkroot)
     assert not cl.catch(cl.cx - 80, cl.cy)
     assert cl.catch(cl.cx, cl.cy)
     cl.drag(cl.cx - 200, cl.cy - 10)
-    assert cl._grabbed and cl._bx == pytest.approx(-200)
-    cl.drag(-999, cl.cy - 10)                   # 바 왼쪽 끝에 걸린다
-    assert cl.cx + cl._bx == pytest.approx(5.5 * cl.u)
+    assert cl._grabbed and cl._carry is not None    # 떠 있는 창에 탔다
     frames(cl, 30)
     assert cl._grabbed                        # 잡혀 있는 동안 제자리로 안 돌아간다
-    cl.put_down()
-    assert not cl._grabbed
+    assert not cl.c.find_withtag("mascot") or cl._sparks   # 바 안 자리는 빈다
+    cl.put_down()                             # 바 위에 놓았다: 그 자리에서 떨어진다
+    assert not cl._grabbed and cl._carry is None
+    assert cl._bx == pytest.approx(-200)
     assert cl._yoff == pytest.approx(-10)     # 끌어 올린 높이에서 떨어진다
     frames(cl, 80)
     assert cl._bx == 0.0 and abs(cl._yoff) < 4   # 제자리 (혼자 하는 폴짝은 봐준다)
+
+
+def test_claudi_drag_off_screen_flies_home(tkroot, pressed):
+    cl = make_claudi(tkroot)
+    clock = Clock()
+    cl.now = clock
+    assert cl.catch(cl.cx, cl.cy)
+    cl.drag(-999, cl.cy - 600)                # 바 밖 멀리 (가두지 않는다)
+    win = cl._carry
+    assert win.at == pytest.approx(carry.screen_of(cl.c, -999, cl.cy - 600))
+    cl.put_down()
+    assert cl._grabbed and cl._flight is not None   # 날아오는 동안은 잡힌 모습 그대로
+    for _ in range(30):
+        clock.t += 0.045
+        frames(cl, 1)
+    assert not cl._grabbed and cl._carry is None and not win.alive()
+    assert cl._bx == 0.0
 
 
 def test_claudi_away_naps_until_back(tkroot):

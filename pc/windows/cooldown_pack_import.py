@@ -10,8 +10,11 @@
 「화면에서 따오기」(네모로 골라 찍고, 미리 보기에서 바탕 지우기·움직임 담기).
 아래: 그림이 보는 쪽(걷는 쪽에 맞춰 뒤집을 때 씀) · [이 캐릭터 빼기].
 
-★ 한 번에 한 장이다. 동작마다 `MAX_PER_MOTION`(6)장까지. 묶음째 받거나 다른 프로그램의
-  저장 파일을 뒤지는 기능은 넣지 않는다(사용자 지시 11-19: 필요한 일부만 골라 넣기).
+★ 한 번에 한 장이다. 후보 수는 동작마다 한도가 다르다(`pack.LIMITS`: 누르면 나오는 동작 2 · 상태 4 ·
+  평소 16, 이어 붙이기 묶음은 한 개). 묶음째 받거나 다른 프로그램의 저장 파일을 뒤지는 기능은
+  넣지 않는다(사용자 지시 11-19: 필요한 일부만 골라 넣기). 묶음·효과는 동작 폴더의 `움직임.json` 이
+  정하고, 여기서는 묶음을 그림 하나처럼(첫 장 + 장 수) 보여 주고 지운다. 그림을 지우면
+  `움직임.json` 의 그 이름도 걷어 낸다(`pack.delete_candidate`).
 ★ 화면 좌표: 이 앱은 배율 인식을 안 켜서 Tk 좌표는 논리 픽셀이고, `ImageGrab` 은 실제 픽셀을
   준다. 그래서 **먼저 화면 전체를 찍고 그 그림 위에서 고르게** 한 뒤 비율로 되돌린다.
 """
@@ -39,6 +42,7 @@ import cooldown_pack as pack  # noqa: E402
 from skins.base import KR, P  # noqa: E402
 
 THUMB = 40
+THUMBS_PER_LINE = 8  # 평소 동작은 16개까지라 두 줄로 접는다
 BGS = ((0, "끔"), (12, "약하게"), (28, "보통"), (48, "강하게"))
 CAPTURES = ((0, "멈춘 그림"), (2, "2초 담기"), (4, "4초 담기"))
 GRAB_MS = 70  # 움직임 담을 때 한 장 간격
@@ -82,7 +86,7 @@ class PackImport:
         self._thumbs = []
         tk.Label(self.body, text="캐릭터팩 만들기", bg=P.bg, fg=P.title,
                  font=(KR, 12, "bold"), anchor="w").pack(fill="x")
-        tk.Label(self.body, text=f"캐릭터 {pack.MAX_CHARS}명까지 · 동작마다 {pack.MAX_PER_MOTION}장까지"
+        tk.Label(self.body, text=f"캐릭터 {pack.MAX_CHARS}명까지 · 줄 끝 숫자는 넣은 수/넣을 수 있는 수"
                  " · 빈 동작은 서기 그림 사용",
                  bg=P.bg, fg=P.faint, font=(KR, 9), anchor="w").pack(fill="x", pady=(0, 8))
         self._chips()
@@ -221,24 +225,32 @@ class PackImport:
                  anchor="w").pack(side="left")
         tk.Label(name, text=pack.MOTION_LABELS[motion], bg=P.bg, fg=P.faint, font=(KR, 8),
                  anchor="w").pack(side="left", padx=(6, 0))
-        files = pack.clips(self.char, motion, self.root_dir)
-        for path in files:
-            self._thumb(row, path)
-        if len(files) < pack.MAX_PER_MOTION:
-            add = tk.Label(row, text="+", bg=P.track, fg=P.sub, font=(KR, 14),
-                           width=3, cursor="hand2")
-            add.pack(side="left", padx=2, ipady=4)
-            add.bind("<Button-1>", lambda e, m=motion, w=add: self._add_menu(m, w))
+        cands = pack.all_candidates(self.char, motion, self.root_dir)
+        tk.Label(name, text=f"{len(cands)}/{pack.limit(motion)}", bg=P.bg, fg=P.faint,
+                 font=(KR, 8), anchor="e").pack(side="right", padx=(0, 6))
+        grid = tk.Frame(row, bg=P.bg)
+        grid.pack(side="left")
+        cells = [lambda g, c=c: self._thumb(g, c) for c in cands]
+        if pack.room_left(self.char, motion, self.root_dir) > 0:
+            cells.append(lambda g, m=motion: self._add_cell(g, m))
+        for i, make in enumerate(cells):
+            w = make(grid)
+            w.grid(row=i // THUMBS_PER_LINE, column=i % THUMBS_PER_LINE, padx=2, pady=1)
 
-    def _thumb(self, row: tk.Frame, path: str) -> None:
+    def _add_cell(self, grid: tk.Frame, motion: str) -> tk.Widget:
+        add = tk.Label(grid, text="+", bg=P.track, fg=P.sub, font=(KR, 14),
+                       width=3, cursor="hand2")
+        add.bind("<Button-1>", lambda e, m=motion, w=add: self._add_menu(m, w))
+        return add
+
+    def _thumb(self, grid: tk.Frame, clip) -> tk.Widget:
         from PIL import ImageTk
 
         try:
-            frames = pack.load_frames(path, THUMB - 4, width=THUMB - 4)
+            frames = pack.load_frames(clip.files[0], THUMB - 4, width=THUMB - 4)
         except Exception:
             frames = []
-        cell = tk.Frame(row, bg=P.track, width=THUMB, height=THUMB + 4)
-        cell.pack(side="left", padx=2)
+        cell = tk.Frame(grid, bg=P.track, width=THUMB, height=THUMB + 4)
         cell.pack_propagate(False)
         if frames:
             img = ImageTk.PhotoImage(frames[0][0], master=self.win)
@@ -246,12 +258,16 @@ class PackImport:
             tk.Label(cell, image=img, bg=P.track).pack(expand=True)
         else:
             tk.Label(cell, text="?", bg=P.track, fg=P.red).pack(expand=True)
+        if len(clip.files) > 1:  # 이어 붙이기 묶음: 첫 장 + 장 수
+            tk.Label(cell, text=f"{len(clip.files)}장", bg=P.track, fg=P.sub,
+                     font=(KR, 7)).place(x=1, rely=1.0, y=-1, anchor="sw")
         x = tk.Label(cell, text="✕", bg=P.track, fg=P.faint, font=(KR, 7), cursor="hand2")
         x.place(relx=1.0, x=-1, y=0, anchor="ne")
-        x.bind("<Button-1>", lambda e, p=path: self._delete(p))
+        x.bind("<Button-1>", lambda e, c=clip: self._delete(c))
+        return cell
 
-    def _delete(self, path: str) -> None:
-        pack.delete_clip(path, self.root_dir)
+    def _delete(self, clip) -> None:
+        pack.delete_candidate(clip, self.root_dir)
         self._changed()
 
     def _add_menu(self, motion: str, widget: tk.Widget) -> None:
