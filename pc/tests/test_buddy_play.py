@@ -90,6 +90,16 @@ def run(b, clock, seconds, each=None):
             each()
 
 
+def until_home(b, clock, limit=12.0):
+    """제자리에 닿아 평소로 돌아오는 순간까지 (닿은 뒤 거닐기 시작하면 자리가 바뀌므로)."""
+    n = 0
+    while b.mode != "" and n * TICK_MS / 1000 < limit:
+        clock.t += TICK_MS / 1000
+        b.step()
+        n += 1
+    return n * TICK_MS / 1000
+
+
 def spot(b):
     return b.x, b.y1 + b.y - b.height / 2
 
@@ -180,7 +190,7 @@ def test_throw_bounces_and_comes_home(tkroot, basic):
     assert min(ys) < ys[0]                                          # 위로 날아갔다가
     assert max(ys) == pytest.approx(floor)                          # 바 높이 바닥에 닿고
     assert max(bounces) >= 1                                        # 튕겼다
-    run(b, clock, 3.0 + carry.RUN_MAX)                                # 넉넉한 시험 화면이라 오래 난다
+    until_home(b, clock)                                            # 넉넉한 시험 화면이라 오래 난다
     assert b.mode == "" and b._carry is None and b.x == pytest.approx(b.home_x)
 
 
@@ -270,7 +280,8 @@ def test_drop_on_gauge_eats_then_runs_home(tkroot, basic):
     run(b, clock, EAT_SEC)
     assert not b.c.find_withtag("buddy_fx")
     assert b.motion in ("축하", "뛰기")
-    run(b, clock, 1.3 + carry.RUN_MAX)
+    run(b, clock, 1.3)
+    until_home(b, clock)
     assert b.mode == "" and b.x == pytest.approx(b.home_x)
 
 
@@ -314,7 +325,7 @@ def test_looks_at_cursor_and_waves(tkroot, basic):
     run(b, clock, 0.3)
     assert b.dir == -1                                              # 왼쪽 커서를 본다
     run(b, clock, 3.0)
-    assert b.motion == "인사"
+    assert b.motion == "부끄럼"                                      # 오래 대고 있으면 배시시
     b.pointer = lambda: (cx + 500, cy)
     b.until = clock.t + 100
     b.dir = -1

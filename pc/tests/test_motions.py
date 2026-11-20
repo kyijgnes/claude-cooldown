@@ -112,8 +112,10 @@ def basic(tmp_path):
 
 # ------------------------------------------------------------------ 약속
 def test_seventeen_motions():
-    assert len(pack.MOTIONS) == 17 and len(set(pack.MOTIONS)) == 17
-    assert sum(len(ms) for _, ms in pack.GROUPS) == 17
+    """열일곱 + 감정 여섯 = 스물셋 (11-20 넷째)."""
+    assert len(pack.MOTIONS) == 23 and len(set(pack.MOTIONS)) == 23
+    assert sum(len(ms) for _, ms in pack.GROUPS) == 23
+    assert [g for g, _ in pack.GROUPS] == ["평소", "이동", "상호작용", "상태", "감정"]
     for m in pack.MOTIONS:
         assert pack.MOTION_LABELS[m] and m in pack.FALLBACK and m in pack.DEFAULT_FX
         assert "\n" not in pack.MOTION_LABELS[m] and "—" not in pack.MOTION_LABELS[m]

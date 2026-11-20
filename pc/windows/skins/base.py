@@ -319,6 +319,8 @@ class Skin:
         if ch is None or not hasattr(ch, "set_mood"):
             return
         ch.set_mood(char_mood(usage.five.pct, usage.week.pct))
+        if hasattr(ch, "note_usage"):  # 사용량이 짧은 새 크게 뛰면 당황
+            ch.note_usage(usage.five.pct)
         before = getattr(self, "_feel_five", None)
         if cooldown_pack.was_reset(before, usage.five.pct) and hasattr(ch, "celebrate"):
             ch.celebrate()
