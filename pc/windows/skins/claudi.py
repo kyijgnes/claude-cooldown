@@ -21,9 +21,10 @@
   모양을 고쳤으면 그 스크립트를 다시 돌려 폰과 어긋나지 않게 한다.
 - 바 캐릭터(`buddy.py`)와 같은 상호작용 약속(11-20): **잡아 끌면 투명한 맨 위 작은 창에 타서 화면
   어디로든 따라오고**(`catch`·`drag`·`put_down`, `carry.Carry`. 바 위에 놓으면 떨어져 통통 튀며 제자리로
-  달려가고, 바 밖에 놓으면 포물선을 그리며 날아와 제자리에 선다), **PC 를 5분 안 쓰면 졸다가**
+  달려가고, 바 밖에 놓으면 곧은 줄로 미끄러지듯 날아와 제자리에 선다. **끄는 동안 마구 흔들면**
+  (`base.Shake`) 놓은 뒤 헤롱헤롱 기절한다), **PC 를 5분 안 쓰면 졸다가**
   돌아오면 손 흔들어 반기고(`set_away`), 사용량이 한도면 졸고 80% 넘으면 자주 폴짝(`set_mood`),
-  5시간 한도가 풀리면 폭죽 축하(`celebrate`). 기절은 원래 있던 것(작정하고 두드려야 뻗음) 그대로.
+  5시간 한도가 풀리면 폭죽 축하(`celebrate`). 두드려 뻗는 기절(박자 놀이의 짝)은 원래대로 둔다.
 - `leave=False` 면 **자리를 비우지 않는다** — 슬림 바는 작업표시줄 아래로 쏙 내려가면
   되지만, 카드·아크·표는 위젯 한가운데라 내려갈 곳이 없다(허공에서 사라진 꼴이 된다).
 
@@ -40,7 +41,7 @@ import tkinter as tk
 import cooldown_dino as dino
 
 from . import carry
-from .base import P
+from .base import P, Shake
 
 MASCOT_U = 2    # 도트 한 칸 (px). 팔까지 가로 11칸(22px) · 세로 8칸(16px)
 MASCOT_COLOR = "#d97757"  # 클로드 코랄 본래 색. 폰 앱 그림표(android/art)가 쓴다.
@@ -342,6 +343,8 @@ class Claudi:
         self._held = (0.0, 0.0)  # 끌고 있는 몸 한가운데 (캔버스 좌표, 바 밖일 수 있다)
         self._eye_bg: str | None = None  # 눈을 파낼 색 (떠 있는 창에서는 바탕이 투명색이라 따로 준다)
         self._in_carry = False
+        self._shake = Shake()  # 끄는 동안 마구 흔들었나 (놓으면 헤롱헤롱 기절)
+        self._dizzy = False    # 흔들려 어지러운 채로 날아오는 중
         self.now = time.monotonic  # 날아오는 길의 시계 (시험은 가짜 시계로 바꿔 끼운다)
 
     def set_box(self, box: tuple[float, float, float, float]) -> None:
@@ -588,8 +591,10 @@ class Claudi:
             self._end_act()
             self._wave = 0
             self._played = True
+            self._shake.reset()
         self._quiet = 0
         self._held = (x + self._goff[0], y + self._goff[1])
+        self._shake.feed(*self._held, self.now())
         self._vy = self._yoff = 0.0
         if self._carry is None:
             try:
@@ -615,6 +620,8 @@ class Claudi:
         if not self._grabbed or self._flight is not None:
             return
         tx, ty = self._held
+        dizzy = self._shake.dizzy(self.now())
+        self._shake.reset()
         if self._carry is None or carry.inside(self.c, tx, ty):
             self._land()
             cw, ch = self._area()
@@ -626,6 +633,8 @@ class Claudi:
             self._yoff, self._by, self._vy = self._by, 0.0, 0.0
             self._launch = LAUNCH_FRAMES  # 높이 끌어 올렸으면 그만큼 떨어지게 가둠을 잠깐 푼다
             self._surprise = SURPRISE_FRAMES * 2
+            if dizzy:  # 마구 흔들렸다: 그 자리에서 헤롱헤롱 뻗었다가 깨어나 제자리로
+                self._dizzy_faint()
             return
         try:
             end = carry.screen_of(self.c, self.cx, self.cy)
@@ -633,7 +642,15 @@ class Claudi:
             self._land()
             self._grabbed = False
             return
+        self._dizzy = dizzy
         self._flight = carry.Flight(self._carry.at, end, self.now())
+
+    def _dizzy_faint(self) -> None:
+        self._dizzy = False
+        self._faint = FAINT_FRAMES
+        self._clicks = 0.0
+        self._surprise = 0
+        self._combo = self._hits = 0
 
     def _fly(self) -> None:
         """날아오는 중 한 프레임 (잡힌 채 버둥대는 모습 그대로). 다 오면 바에 내려앉아 폴짝."""
@@ -645,9 +662,11 @@ class Claudi:
             self._land()
             self._grabbed = False
             self._bx = self._by = 0.0
-            self._yoff = self._vy = 0.0
-            self._boost(JUMP_IMPULSE)
-            self._surprise = SURPRISE_FRAMES * 2
+            self._yoff = self._vy = 0.0  # 살며시 내려앉는다 (11-20 둘째: 튀지 않게)
+            if self._dizzy:
+                self._dizzy_faint()
+            else:
+                self._surprise = SURPRISE_FRAMES
 
     # -------------------------------------------------- 자리비움·사용량 (11-20)
     def _sleepy(self) -> bool:
@@ -893,7 +912,7 @@ class Claudi:
         for z in self._zzz:  # z 는 비스듬히 떠오른다 (옆 칸을 침범하지 않게 조금만)
             z[0] += 0.13; z[1] -= 0.28; z[2] -= 1
         self._zzz = [z for z in self._zzz if z[2] > 0]
-        if self._bx and not self._grabbed:  # 놓은 뒤: 제자리로 달려간다
+        if self._bx and not self._grabbed and self._faint == 0:  # 놓은 뒤: 제자리로 달려간다 (뻗은 동안은 그 자리)
             stride = max(BACK_MIN, abs(self._bx) * BACK_RATE)
             self._bx = 0.0 if abs(self._bx) <= stride else self._bx - math.copysign(stride, self._bx)
         if self._running > 0:  # 달려오는 중 — 왼쪽에서 제자리로

@@ -3,7 +3,7 @@
 
 11-20 사용자: 끌어서 납치할 때 바 테두리 안에만 갇혀 답답하다. 그래서 끄는 동안은 캐릭터를
 **투명 바탕의 맨 위 작은 창**에 태워 화면 어디로든(모니터 여럿이면 가상 화면 전체) 따라오게 하고,
-바 안 제자리는 비운다. 놓으면 그 자리에서 바의 제자리로 포물선을 그리며 날아와 다시 바에 선다.
+바 안 제자리는 비운다. 놓으면 그 자리에서 바의 제자리로 곧은 줄을 따라 미끄러지듯 돌아와 다시 바에 선다.
 클로디(`claudi.py`)와 팩 캐릭터(`buddy.py`)가 같이 쓴다.
 
 - 창은 테두리 없음(`overrideredirect`) · 맨 위 · 작업표시줄에 안 뜸 · 눌러도 포커스를 안 뺏음.
@@ -141,21 +141,21 @@ def solid(img):
 
 
 class Flight:
-    """놓은 자리에서 제자리로 날아오는 길: 위로 솟았다 내려앉는 포물선.
+    """놓은 자리에서 제자리로 돌아오는 길: **곧은 줄**로 미끄러지듯 (11-20 둘째: 포물선은 튀어 보였다).
 
-    멀수록 조금 더 오래(0.4~0.9초) · 더 높이 난다. `at(now)` → (x, y, 다 왔나)."""
+    천천히 떠나 가운데서 빨라지고 닿을 때 살며시 멎는다(가속·감속이 매끄러운 5차 곡선).
+    멀수록 조금 더 오래(0.5~1.1초). `at(now)` → (x, y, 다 왔나)."""
 
     def __init__(self, start: tuple[float, float], end: tuple[float, float], now: float):
         self.sx, self.sy = start
         self.ex, self.ey = end
         dist = math.hypot(self.ex - self.sx, self.ey - self.sy)
         self.t0 = now
-        self.dur = min(0.9, max(0.4, 0.3 + dist / 2000))
-        self.arc = min(160.0, 30.0 + dist * 0.18)
+        self.dur = min(1.1, max(0.5, 0.4 + dist / 1600))
 
     def at(self, now: float) -> tuple[float, float, bool]:
         p = min(1.0, max(0.0, (now - self.t0) / self.dur))
-        e = p * p * (3 - 2 * p)  # 천천히 떠나 빠르게 지나 살짝 늦추며 닿는다
+        e = p * p * p * (p * (6 * p - 15) + 10)
         x = self.sx + (self.ex - self.sx) * e
-        y = self.sy + (self.ey - self.sy) * e - self.arc * 4 * p * (1 - p)
+        y = self.sy + (self.ey - self.sy) * e
         return x, y, p >= 1.0

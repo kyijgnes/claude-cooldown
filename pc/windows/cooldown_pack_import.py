@@ -5,7 +5,8 @@
     앱: 메인 화면 > 위젯 모양 > [캐릭터팩 만들기](이름 창부터) · [그림 고치기]
         (바에 세울 한 명은 「바 캐릭터」에서 고른다. 팩 파일 넣기·내보내기는 메인 화면 단추)
 
-위: 캐릭터 이름 단추들 + [+ 캐릭터]. 고른 캐릭터의 동작 아홉 줄(서기·걷기·인사·…),
+위: 캐릭터 이름 단추들 + [+ 캐릭터]. 그 아래 동작 묶음 단추 넷(평소·이동·상호작용·상태, `pack.GROUPS`.
+동작이 열일곱이라 한 화면에 다 펴면 창이 화면보다 길어진다)과 고른 묶음의 동작 줄들,
 줄마다 넣은 그림 작은 그림 + [+]. [+] → 「파일에서 고르기」(그대로 복사, 움직임 유지) 또는
 「화면에서 따오기」(네모로 골라 찍고, 미리 보기에서 바탕 지우기·움직임 담기).
 아래: 그림이 보는 쪽(걷는 쪽에 맞춰 뒤집을 때 씀) · [이 캐릭터 빼기].
@@ -75,6 +76,7 @@ class PackImport:
         self._thumbs: list = []
         chars = pack.all_characters(root)
         self.char = chars[0] if chars else None
+        self.group = pack.GROUPS[0][0]  # 펼쳐 보는 동작 묶음
         self.body = tk.Frame(self.win, bg=P.bg, padx=16, pady=12)
         self.body.pack(fill="both", expand=True)
         self._render()
@@ -87,7 +89,7 @@ class PackImport:
         tk.Label(self.body, text="캐릭터팩 만들기", bg=P.bg, fg=P.title,
                  font=(KR, 12, "bold"), anchor="w").pack(fill="x")
         tk.Label(self.body, text=f"캐릭터 {pack.MAX_CHARS}명까지 · 줄 끝 숫자는 넣은 수/넣을 수 있는 수"
-                 " · 빈 동작은 서기 그림 사용",
+                 " · 빈 동작은 비슷한 동작 그림 사용",
                  bg=P.bg, fg=P.faint, font=(KR, 9), anchor="w").pack(fill="x", pady=(0, 8))
         self._chips()
         if self.char is None:
@@ -97,7 +99,8 @@ class PackImport:
             if not any(pack.clips(self.char, m, self.root_dir) for m in pack.MOTIONS):
                 tk.Label(self.body, text=f"{self.char} · 서기 그림 한 장부터 넣기", bg=P.bg,
                          fg=P.green, font=(KR, 10, "bold"), anchor="w").pack(fill="x", pady=(0, 4))
-            for motion in pack.MOTIONS:
+            self._groups()
+            for motion in dict(pack.GROUPS)[self.group]:
                 self._row(motion)
             self._char_foot()
         foot = tk.Frame(self.body, bg=P.bg)
@@ -119,6 +122,22 @@ class PackImport:
             b.bind("<Button-1>", lambda e, n=name: self._pick_char(n))
         if len(chars) < pack.MAX_CHARS:
             self._button(bar, "+ 캐릭터", self._new_char).pack(side="left")
+
+    def _groups(self) -> None:
+        """동작 묶음 단추 (평소 · 이동 · 상호작용 · 상태)."""
+        seg = tk.Frame(self.body, bg=P.line, padx=1, pady=1)
+        seg.pack(anchor="w", pady=(0, 6))
+        for i, (title, _motions) in enumerate(pack.GROUPS):
+            on = title == self.group
+            b = tk.Label(seg, text=title, bg=P.green if on else P.track,
+                         fg=P.bg if on else P.sub, font=(KR, 9, "bold" if on else "normal"),
+                         padx=12, pady=3, cursor="hand2")
+            b.pack(side="left", padx=(0 if i == 0 else 1, 0))
+            b.bind("<Button-1>", lambda e, t=title: self._pick_group(t))
+
+    def _pick_group(self, title: str) -> None:
+        self.group = title
+        self._render()
 
     def _pick_char(self, name: str) -> None:
         self.char = name
@@ -218,7 +237,7 @@ class PackImport:
     def _row(self, motion: str) -> None:
         row = tk.Frame(self.body, bg=P.bg)
         row.pack(fill="x", pady=2)
-        name = tk.Frame(row, bg=P.bg, width=200, height=THUMB + 4)
+        name = tk.Frame(row, bg=P.bg, width=220, height=THUMB + 4)
         name.pack(side="left")
         name.pack_propagate(False)
         tk.Label(name, text=motion, bg=P.bg, fg=P.title, font=(KR, 10, "bold"),

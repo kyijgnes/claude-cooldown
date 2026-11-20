@@ -356,9 +356,19 @@ def inside(widget: tk.Misc, x: float, y: float, pad: int = 4) -> bool:
 
 # ---------------------------------------------------------------- 캐릭터 공용 셈
 CALM_AT = 50.0      # 이보다 낮으면 「여유」, 넘으면 「보통」 (80 넘으면 허둥, 한도면 잠)
-FAINT_TAPS = 6      # 캐릭터를 FAINT_WINDOW 초 안에 이만큼 누르면 기절 (5번 넘게)
-FAINT_WINDOW = 2.0
 AWAY_AFTER = 300.0  # PC 입력이 이만큼(초) 없으면 자리비움
+# 자꾸 누르기(11-20 둘째): 누를 때마다 1 씩 쌓이고 초마다 ANNOY_COOL 만큼 식는다.
+# 쌓인 만큼 짜증 → 화남 → 포기. 2초에 한 번 꼴로 누르는 것(새로고침)은 안 쌓인다.
+ANNOY_STEPS = (3.0, 6.0, 10.0)  # 짜증 · 화남 · 포기에 닿는 쌓임
+ANNOY_COOL = 0.5
+ANNOY_NAMES = ("", "짜증", "화남", "포기")
+# 흔들기 기절: 끄는 동안 SHAKE_WINDOW 초 안에 방향을 SHAKE_TURNS 번 넘게 바꾸고(한 번 휘두를 때
+# SHAKE_SWING px 넘게), 그동안 SHAKE_SPEED px/초 넘게 빨리 움직였으면 어지럽다.
+SHAKE_SWING = 14.0
+SHAKE_TURNS = 6
+SHAKE_WINDOW = 1.5
+SHAKE_SPEED = 700.0
+SHAKE_KEEP = 3.0  # 다 흔든 뒤 이만큼 안에 놓아야 기절 (가만 들고 있으면 정신 차린다)
 
 
 def char_mood(five: float | None, week: float | None) -> str:
@@ -370,20 +380,79 @@ def char_mood(five: float | None, week: float | None) -> str:
     return m
 
 
-class TapCount:
-    """짧은 시간 안에 몇 번 눌렀나 (연타 → 기절). 시계는 바깥에서 받는다(시험용)."""
+class Annoy:
+    """자꾸 누른 정도 → 단계 0(괜찮음)·1(짜증)·2(화남)·3(포기). 시계는 바깥에서 받는다(시험용).
+    포기에 닿으면 쌓인 것을 비운다(체념하고 나면 처음부터)."""
 
-    def __init__(self, n: int = FAINT_TAPS, window: float = FAINT_WINDOW):
-        self.n, self.window = n, window
-        self.times: list[float] = []
+    def __init__(self, steps=ANNOY_STEPS, cool: float = ANNOY_COOL):
+        self.steps, self.cool = steps, cool
+        self.heat = 0.0
+        self.t: float | None = None
 
-    def tap(self, now: float) -> bool:
-        """한 번 눌렀다. 이번 것으로 연타가 됐으면 참(그리고 센 것을 비운다)."""
-        self.times = [t for t in self.times if now - t <= self.window] + [now]
-        if len(self.times) >= self.n:
-            self.times = []
-            return True
-        return False
+    def _cool(self, now: float) -> None:
+        if self.t is not None:
+            self.heat = max(0.0, self.heat - self.cool * max(0.0, now - self.t))
+        self.t = now
+
+    def level(self, now: float) -> int:
+        self._cool(now)
+        return sum(self.heat >= s for s in self.steps)
+
+    def tap(self, now: float) -> int:
+        """한 번 눌렀다. 지금 단계를 낸다(3 이면 포기, 쌓인 것은 비운다)."""
+        self._cool(now)
+        self.heat += 1.0
+        got = sum(self.heat >= s for s in self.steps)
+        if got >= 3:
+            self.heat = 0.0
+        return got
+
+    def reset(self) -> None:
+        self.heat = 0.0
+
+
+class Shake:
+    """끄는 동안 마우스를 마구 흔들었나. `feed(x, y, now)` 를 끌 때마다, `dizzy(now)` 로 묻는다.
+    좌우·위아래를 따로 보아 방향이 바뀐 때를 세고(휘두른 폭이 SHAKE_SWING 넘을 때만), 빠르기도 본다."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self) -> None:
+        self.last: tuple[float, float, float] | None = None
+        self.peak = [0.0, 0.0]
+        self.dir = [0, 0]
+        self.turns: list[float] = []
+        self.path: list[tuple[float, float]] = []  # (때, 움직인 거리)
+        self.hit_at: float | None = None
+
+    def feed(self, x: float, y: float, now: float) -> None:
+        if self.last is not None:
+            lx, ly, _ = self.last
+            self.path.append((now, ((x - lx) ** 2 + (y - ly) ** 2) ** 0.5))
+        else:
+            self.peak = [x, y]
+        self.last = (x, y, now)
+        for i, v in enumerate((x, y)):
+            d = self.dir[i]
+            if d == 0:
+                if abs(v - self.peak[i]) >= SHAKE_SWING:
+                    self.dir[i] = 1 if v > self.peak[i] else -1
+                    self.peak[i] = v
+            elif (v - self.peak[i]) * d > 0:
+                self.peak[i] = v
+            elif abs(v - self.peak[i]) >= SHAKE_SWING:
+                self.turns.append(now)
+                self.dir[i] = -d
+                self.peak[i] = v
+        self.turns = [t for t in self.turns if now - t <= SHAKE_WINDOW]
+        self.path = [p for p in self.path if now - p[0] <= SHAKE_WINDOW]
+        speed = sum(d for _, d in self.path) / SHAKE_WINDOW
+        if len(self.turns) >= SHAKE_TURNS and speed >= SHAKE_SPEED:
+            self.hit_at = now
+
+    def dizzy(self, now: float) -> bool:
+        return self.hit_at is not None and now - self.hit_at <= SHAKE_KEEP
 
 
 def idle_seconds() -> float:

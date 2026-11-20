@@ -1,6 +1,6 @@
 """바 캐릭터·클로디 상호작용(11-20) 상태 전이 시험. 가짜 시계·가짜 입력으로 돈다.
 
-연타 → 기절 → 깨어남 · 끌기 → 놓기 → 제자리 · 입력 없음 → 자리비움 → 반기기 · 사용량 네 단계.
+자꾸 누르기 → 짜증·화남·포기 · 흔들기 → 헤롱 기절 · 끌기 → 놓기 → 제자리 · 입력 없음 → 자리비움 → 반기기 · 사용량 네 단계.
 그림 팩은 임시 폴더에 직접 만든다(사용자 팩은 안 읽는다). tk 창은 띄우지 않는다(withdraw).
 """
 import os
@@ -19,8 +19,8 @@ from PIL import Image  # noqa: E402
 
 import cooldown_pack as pack  # noqa: E402
 from skins import carry  # noqa: E402
-from skins.base import AwayWatch, TapCount, char_mood, set_palette  # noqa: E402
-from skins.buddy import FAINT_SEC, RETURN_SEC, TICK_MS, Buddy  # noqa: E402
+from skins.base import AwayWatch, char_mood, set_palette  # noqa: E402
+from skins.buddy import RETURN_SEC, TICK_MS, Buddy  # noqa: E402
 from skins.claudi import Claudi  # noqa: E402
 
 CHAR = "시험떡"
@@ -104,39 +104,6 @@ def test_mood_steps():
     assert char_mood(None, None) == "여유"
 
 
-def test_tapcount_window():
-    t = TapCount(6, 2.0)
-    assert not any(t.tap(s * 0.5) for s in range(6))   # 0.5초 간격 6번 = 2.5초에 걸침 → 아님
-    t = TapCount(6, 2.0)
-    hits = [t.tap(10 + s * 0.3) for s in range(6)]     # 1.5초 안에 6번 → 6번째에 연타
-    assert hits == [False] * 5 + [True]
-
-
-# ------------------------------------------------------------------ 바 캐릭터
-def test_buddy_tap_faint_and_wake(tkroot, packdir):
-    b, clock = make_buddy(tkroot, packdir)
-    for _ in range(5):
-        b.react(*spot(b))
-        clock.t += 0.25
-        b.step()
-    assert b.mode == ""                     # 다섯 번까지는 놀람만
-    b.react(*spot(b))
-    assert b.mode == "기절" and b.motion == "기절"
-    assert b.absorbed()                     # 논 것이다 (새로고침 아님)
-    b.react(*spot(b))                       # 뻗어 있는 동안 눌러도 그대로
-    assert b.mode == "기절"
-    run(b, clock, FAINT_SEC + 0.2)
-    assert b.mode == ""                     # 깨어났다
-
-
-def test_buddy_slow_taps_never_faint(tkroot, packdir):
-    b, clock = make_buddy(tkroot, packdir)
-    for _ in range(12):
-        b.react(*spot(b))
-        run(b, clock, 0.6)
-    assert b.mode == ""
-
-
 @pytest.fixture
 def pressed(monkeypatch):
     """마우스 단추를 누르고 있는 셈 (안 그러면 끄는 중에 놓은 것으로 본다)."""
@@ -179,7 +146,7 @@ def test_buddy_drag_off_screen_flies_home(tkroot, packdir, pressed):
     assert all(c.itemcget(i, "state") == "hidden" for c, i in b._items.items())  # 바 안 자리는 빈다
     b.put_down()
     assert b.mode == "날기" and b._flight is not None
-    run(b, clock, 1.0)                       # 길어도 0.9초면 닿는다
+    run(b, clock, 1.2)                       # 길어도 1.1초면 닿는다
     assert b.mode == "" and b._carry is None and not win.alive()
     assert b.x == pytest.approx(home)
     b._draw()

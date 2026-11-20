@@ -8,14 +8,17 @@
     ~/.claude_cooldown_pack/
         설정.json                  {"바 캐릭터": "<이름>"}   비었거나 "클로디"면 클로디
         <캐릭터 이름>/              이름은 사용자가 정한다 (폴더 이름 = 캐릭터 이름)
-            서기/ 걷기/ 인사/ 놀람/ 눌림/ 허둥/ 잠/ 축하/ 딴짓/
+            서기/ 딴짓/ 걷기/ 인사/  뛰기/ 점프/  놀람/ 눌림/ 짜증/ 화남/ 포기/ 끌림/ 기절/
+            허둥/ 잠/ 축하/ 자리비움/        (`MOTIONS` 열일곱, 묶음은 `GROUPS`)
             설정.json              {"보는 쪽": "오른쪽"}  그림 속 캐릭터가 보는 쪽
 
 - 동작 폴더마다 그림(png·gif·webp, 움직이는 것도 됨)을 넣는다. 그 동작을 할 때 후보 하나를 골라 튼다.
-  후보 수 한도는 동작마다 다르다(`LIMITS`: 상호작용 2 · 상태 4 · 평소 16).
+  후보 수 한도는 동작마다 다르다(`LIMITS`: 상호작용 2 · 이동·상태 4 · 평소 16).
 - 동작 폴더의 `움직임.json`(있으면)이 고정 그림에 효과를 주고 여러 장을 한 후보로 잇는다(`motion_meta`).
       {"그림": {"<파일명>": {"효과": "통통", "세기": 2}},
-       "이어 붙이기": [{"이름": "..", "그림": ["a.png", "b.png"], "간격": 0.3, "효과": "없음"}]}
+       "이어 붙이기": [{"이름": "..", "그림": ["a.png", "b.png"], "간격": 0.3, "효과": "없음"}],
+       "다음": {"<파일명>": ["<평소 동작>/<파일명>", ...]}}
+  「다음」은 평소 동작에서 이 그림 다음에 자연스러운 그림들이다(`next_clips`, 대개 `NEXT_RATE` 로 따른다).
   묶음 하나 = 후보 하나. 묶음에만 쓰인 그림은 따로 후보가 되지 않는다. 어디에도 안 적힌 그림은
   따로 후보이고 동작마다 정한 기본 효과(`DEFAULT_FX`)를 받는다. 효과는 PIL 로 장면을 미리 굽는다(`bake`).
 - 비어 있는 동작은 `FALLBACK` 으로 빌린다. **서기 한 장만 있어도 캐릭터로 친다.**
@@ -36,44 +39,59 @@ PACK_DIR = os.environ.get("CLAUDE_COOLDOWN_PACK") or os.path.join(
     os.path.expanduser("~"), ".claude_cooldown_pack")
 EXTS = (".png", ".gif", ".webp", ".apng")
 
-# 동작 이름 = 폴더 이름
-MOTIONS = ("서기", "걷기", "인사", "놀람", "눌림", "허둥", "잠", "축하", "딴짓", "기절", "끌림", "자리비움")
+# 동작 이름 = 폴더 이름 (11-20 둘째: 열일곱 가지. 이름은 GPT 그림 분배와 맞춘 것이라 그대로 둔다)
+# 평소(거닐며 늘 보이는 것) · 이동 · 상호작용(누르고 끌면 나오는 것) · 상태(사용량·자리비움)
+EVERYDAY = ("서기", "딴짓", "걷기", "인사")
+MOVES = ("뛰기", "점프")
+INTERACT = ("놀람", "눌림", "짜증", "화남", "포기", "끌림", "기절")
+STATES = ("허둥", "잠", "축하", "자리비움")
+MOTIONS = EVERYDAY + MOVES + INTERACT + STATES
+GROUPS = (("평소", EVERYDAY), ("이동", MOVES), ("상호작용", INTERACT), ("상태", STATES))
 MOTION_LABELS = {
-    "서기": "가만히 있을 때",
-    "걷기": "걸어 다닐 때",
-    "인사": "가끔 손 흔들 때",
-    "놀람": "눌렀을 때",
+    "서기": "가만히 서 있음",
+    "딴짓": "오래 가만있을 때 딴짓",
+    "걷기": "천천히 거닒",
+    "인사": "가끔 손 흔듦",
+    "뛰기": "제자리로 달려감",
+    "점프": "반김·축하 폴짝",
+    "놀람": "한 번 누름",
     "눌림": "길게 누르는 동안",
+    "짜증": "자꾸 누름",
+    "화남": "더 자꾸 누름",
+    "포기": "계속 눌러 체념함",
+    "끌림": "끌어서 옮기는 동안",
+    "기절": "끌며 마구 흔듦",
     "허둥": "사용량 80% 넘음",
     "잠": "한도 다 참",
     "축하": "한도 풀림",
-    "딴짓": "오래 가만있을 때",
-    "기절": "여러 번 빨리 눌렀을 때",
-    "끌림": "끌어서 옮기는 동안",
-    "자리비움": "PC를 한참 안 쓸 때",
+    "자리비움": "PC를 한참 안 씀",
 }
+# 빈 동작은 차례대로 빌린다 (한 단계만 본다. 거기도 비었으면 다음 것, 끝내 없으면 아무 그림이나)
 FALLBACK = {
     "서기": (),
+    "딴짓": ("서기",),
     "걷기": ("서기",),
     "인사": ("놀람", "서기"),
+    "뛰기": ("걷기", "서기"),
+    "점프": ("축하", "놀람", "서기"),
     "놀람": ("서기",),
     "눌림": ("놀람", "서기"),
-    "허둥": ("걷기", "서기"),
-    "잠": ("서기",),
-    "축하": ("인사", "서기"),
-    "딴짓": ("서기",),
-    "기절": ("잠", "눌림", "서기"),
+    "짜증": ("놀람", "서기"),
+    "화남": ("짜증", "놀람", "서기"),
+    "포기": ("잠", "눌림", "서기"),
     "끌림": ("놀람", "허둥", "서기"),
+    "기절": ("잠", "눌림", "서기"),
+    "허둥": ("뛰기", "걷기", "서기"),
+    "잠": ("서기",),
+    "축하": ("점프", "인사", "서기"),
     "자리비움": ("잠", "딴짓", "서기"),
 }
 MAX_CHARS = 8  # 넣어 둘 수 있는 캐릭터 수 (바에는 한 명만 나온다)
 CLAUDI = "클로디"
 # 동작 하나에 둘 수 있는 후보 수 (이어 붙이기 묶음은 한 개로 센다). 11-20 사용자:
 # 누르면 나오는 상호작용은 1~2개면 충분(직관적이게), 평소 동작은 다채롭게.
-INTERACT = ("놀람", "눌림", "기절", "끌림")
-STATES = ("허둥", "잠", "축하", "자리비움")
-EVERYDAY = ("서기", "걷기", "인사", "딴짓")
-LIMITS = {**{m: 2 for m in INTERACT}, **{m: 4 for m in STATES}, **{m: 16 for m in EVERYDAY}}
+LIMITS = {**{m: 2 for m in INTERACT}, **{m: 4 for m in MOVES + STATES},
+          **{m: 16 for m in EVERYDAY}}
 MAX_PER_MOTION = max(LIMITS.values())  # 옛 이름 (가장 큰 한도)
 MAX_FILES_PER_MOTION = 64  # 묶음까지 쳐서 동작 폴더 하나에 둘 그림 파일 수 (팩 넣기 막이)
 
@@ -189,13 +207,18 @@ def pick(char: str, motion: str, root: str = PACK_DIR, avoid: str | None = None)
 
 # ---------------------------------------------------------------- 움직임.json · 후보
 META = "움직임.json"
-EFFECTS = ("없음", "통통", "좌우", "흔들", "떨기", "숨쉬기", "쭈그러짐", "쓰러짐", "빙글")
-# 움직임.json 에 안 적힌 고정 그림이 받는 효과 (동작에 알맞게). 기절은 확실하게 쓰러진다.
+EFFECTS = ("없음", "통통", "좌우", "흔들", "떨기", "숨쉬기", "쭈그러짐", "쓰러짐", "빙글", "헤롱")
+# 움직임.json 에 안 적힌 고정 그림이 받는 효과 (동작에 알맞게). 기절은 헤롱헤롱 비틀대다 쓰러진다.
+# ★ 빌려 온 그림도 **빌린 동작의 기본 효과**를 받는다(`pick_clip`): 기절 그림이 없어 서기를 빌려도 헤롱.
 DEFAULT_FX = {
-    "서기": ("숨쉬기", 1), "걷기": ("통통", 1), "인사": ("흔들", 2), "놀람": ("쭈그러짐", 2),
-    "눌림": ("쭈그러짐", 1), "허둥": ("떨기", 2), "잠": ("숨쉬기", 2), "축하": ("통통", 3),
-    "딴짓": ("좌우", 1), "기절": ("쓰러짐", 3), "끌림": ("흔들", 3), "자리비움": ("숨쉬기", 1),
+    "서기": ("숨쉬기", 1), "딴짓": ("좌우", 1), "걷기": ("통통", 1), "인사": ("흔들", 2),
+    "뛰기": ("통통", 2), "점프": ("통통", 3),
+    "놀람": ("쭈그러짐", 2), "눌림": ("쭈그러짐", 1), "짜증": ("떨기", 1), "화남": ("떨기", 3),
+    "포기": ("숨쉬기", 1), "끌림": ("흔들", 3), "기절": ("헤롱", 3),
+    "허둥": ("떨기", 2), "잠": ("숨쉬기", 2), "축하": ("통통", 3), "자리비움": ("숨쉬기", 1),
 }
+NEXT_RATE = 0.7  # 평소 동작 다음 그림을 「다음」에 적힌 것에서 고르는 몫
+NEXT_MAX = 16    # 「다음」 한 칸에 적을 수 있는 그림 수
 GAP_MIN, GAP_MAX = 0.1, 1.0
 
 
@@ -221,11 +244,34 @@ def _power(v) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 3 else 2
 
 
+def _pic_name(name) -> bool:
+    return isinstance(name, str) and bool(name) and clean_name(name) == name \
+        and name.lower().endswith(EXTS)
+
+
+def meta_empty(meta: dict) -> bool:
+    return not (meta["그림"] or meta["이어 붙이기"] or meta["다음"])
+
+
 def clean_meta(got) -> dict:
     """움직임.json 내용을 약속대로 걸러 낸다. 모르는 칸·틀린 값은 버린다(없는 것처럼)."""
-    out: dict = {"그림": {}, "이어 붙이기": []}
+    out: dict = {"그림": {}, "이어 붙이기": [], "다음": {}}
     if not isinstance(got, dict):
         return out
+    nxt = got.get("다음")
+    if isinstance(nxt, dict):
+        for name, targets in nxt.items():
+            if not _pic_name(name) or not isinstance(targets, list):
+                continue
+            keep = []
+            for t in targets:
+                if not isinstance(t, str) or t.count("/") != 1:
+                    continue
+                m, f = t.split("/")
+                if m in EVERYDAY and _pic_name(f) and t not in keep:
+                    keep.append(t)
+            if keep:
+                out["다음"][name] = keep[:NEXT_MAX]
     pics = got.get("그림")
     if isinstance(pics, dict):
         for name, conf in pics.items():
@@ -259,7 +305,7 @@ def motion_meta(char: str, motion: str, root: str = PACK_DIR) -> dict:
 def write_meta(char: str, motion: str, meta: dict, root: str = PACK_DIR) -> None:
     meta = clean_meta(meta)
     path = os.path.join(root, char, motion, META)
-    if not meta["그림"] and not meta["이어 붙이기"]:
+    if meta_empty(meta):
         if os.path.isfile(path):
             os.remove(path)
         return
@@ -301,15 +347,55 @@ def limit(motion: str) -> int:
     return LIMITS.get(motion, 2)
 
 
+def own(char: str, motion: str, root: str = PACK_DIR) -> bool:
+    """그 동작 그림을 제 것으로 갖고 있나 (빌리지 않고)."""
+    return bool(clips(char, motion, root))
+
+
+def borrowed(clip: Clip, motion: str) -> Clip:
+    """빌려 온 후보에 빌린 동작의 기본 효과를 준다(기절 그림이 없어 서기를 빌려도 헤롱헤롱).
+    key 에 동작을 붙여 제 것과 캐시가 안 겹치게 한다. 움직이는 그림은 효과가 원래 안 먹는다."""
+    fx, power = DEFAULT_FX.get(motion, ("없음", 2))
+    return Clip(f"{motion}<{clip.key}", clip.files, fx, power, clip.gap)
+
+
 def pick_clip(char: str, motion: str, root: str = PACK_DIR, avoid=()) -> Clip | None:
     """동작 하나에 틀 후보 하나. 없으면 빌려 오고(FALLBACK), 그래도 없으면 아무 그림이나.
     `avoid` 는 최근에 튼 것들의 key — 남는 게 있으면 그것들을 피한다(평소 동작이 잇달아 같지 않게)."""
     for m in (motion, *FALLBACK.get(motion, ()), *MOTIONS):
         found = candidates(char, m, root)
         if found:
+            if m != motion:
+                found = [borrowed(c, motion) for c in found]
             rest = [c for c in found if c.key not in avoid]
             return random.choice(rest or found)
     return None
+
+
+def rest_clip(char: str, root: str = PACK_DIR) -> Clip | None:
+    """평소 그림 사이에 잠깐 쉬는 서기 한 장 (늘 같은 것: 서기 첫 후보. 없으면 빌린 것)."""
+    found = candidates(char, "서기", root)
+    return found[0] if found else pick_clip(char, "서기", root)
+
+
+def next_clips(char: str, clip: Clip, root: str = PACK_DIR) -> list[tuple[str, Clip]]:
+    """이 평소 그림 다음에 자연스러운 그림들 [(동작, 후보)] (그 폴더 움직임.json 의 「다음」).
+    묶음은 첫 장 이름으로 찾는다. 없는 동작·없는 파일·한도 밖 후보는 빼고 낸다."""
+    if not clip or not clip.files:
+        return []
+    folder = os.path.dirname(clip.files[0])
+    if os.path.basename(folder) not in EVERYDAY:
+        return []
+    meta = clean_meta(_read_json(os.path.join(folder, META)))
+    targets = meta["다음"].get(os.path.basename(clip.files[0]), [])
+    out = []
+    for t in targets:
+        m, f = t.split("/")
+        for c in candidates(char, m, root):
+            if os.path.basename(c.files[0]) == f:
+                out.append((m, c))
+                break
+    return out
 
 
 # ---------------------------------------------------------------- 사용량 → 분위기
@@ -384,6 +470,11 @@ FALL_STEPS, FALL_MS = 7, 45      # 쓰러지는 장면
 FALL_BOUNCE = (78, 90, 85, 90)   # 바닥에 닿고 한 번 들썩 (도)
 FALL_TAIL, FALL_TAIL_MS = 4, 160  # 누운 채 별이 도는 장면 (여기만 되돌아 돈다)
 SPIN_STEPS, SPIN_MS, SPIN_REST = 12, 45, 700
+# 헤롱: 비틀비틀 기울며 머리 위로 별이 돌다가(점점 크게) 픽 쓰러져 잠깐 누워 있고, 털고 일어난다.
+# 한 번 도는 데 약 3초. 기절이 이 길이만큼 이어진다(`buddy._faint`).
+DIZZY_WOBBLE, DIZZY_MS = 16, 70   # 비틀거리는 장면
+DIZZY_LIE, DIZZY_LIE_MS = 8, 140  # 누워서 별이 도는 장면
+DIZZY_UP, DIZZY_UP_MS = 6, 55     # 일어나는 장면
 STAR = (255, 213, 74, 255)
 STAR_EDGE = (90, 60, 10, 255)
 
@@ -396,6 +487,8 @@ def fx_count(effect: str, power: int = 2) -> int:
         return FALL_STEPS + len(FALL_BOUNCE) + FALL_TAIL
     if effect == "빙글":
         return SPIN_STEPS * (2 if power >= 3 else 1) + 1
+    if effect == "헤롱":
+        return DIZZY_WOBBLE + FALL_STEPS + len(FALL_BOUNCE) + DIZZY_LIE + DIZZY_UP
     return 1
 
 
@@ -449,7 +542,7 @@ def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300):
     n_img = len(imgs)
     w = max(im.width for im in imgs)
     h = max(im.height for im in imgs)
-    if effect not in FX_FRAMES and effect not in ("쓰러짐", "빙글"):
+    if effect not in FX_FRAMES and effect not in ("쓰러짐", "빙글", "헤롱"):
         if n_img == 1:
             return [(imgs[0], 1000)], 0
         return [(im, gap_ms) for im in imgs], 0
@@ -510,6 +603,8 @@ def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300):
             out.append((f, FALL_TAIL_MS))
             t_ms += FALL_TAIL_MS
         return out, loop_from
+    if effect == "헤롱":
+        return _dizzy(img_at, size, base, w, h, k, power), 0
     # 빙글: 한가운데를 축으로 한 바퀴(세기 3 은 두 바퀴), 그리고 잠깐 쉰다
     steps = SPIN_STEPS * (2 if power >= 3 else 1)
     t_ms = 0.0
@@ -519,6 +614,45 @@ def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300):
         t_ms += SPIN_MS
     out.append((_pose(img_at(t_ms), size, base), SPIN_REST))
     return out, 0
+
+
+def _dizzy(img_at, size, base, w, h, k, power):
+    """헤롱헤롱 기절 장면들: 비틀비틀(별이 머리 위를 돎) → 픽 쓰러짐 → 누워 별 → 일어남."""
+    import math
+
+    out = []
+    t_ms = 0.0
+    count = 2 + power
+    head = (base[0], base[1] - h - h * 0.10)  # 서 있을 때 머리 위
+    for i in range(DIZZY_WOBBLE):
+        p = i / DIZZY_WOBBLE
+        amp = (0.55 + 0.45 * p) * k  # 점점 크게 휘청인다
+        a = 13 * amp * math.sin(math.tau * 2 * p)
+        dx = 0.08 * w * amp * math.sin(math.tau * 2 * p + 0.8)
+        f = _pose(img_at(t_ms), size, base, angle=a, dx=dx, pivot=(w / 2, h))
+        _stars(f, (head[0] + dx * 1.6 + h * math.sin(math.radians(a)), head[1]),
+               w * 0.42, h * 0.07, max(2.0, h * 0.055), count, i * math.tau / 10)
+        out.append((f, DIZZY_MS))
+        t_ms += DIZZY_MS
+    pivot = (w, h)  # 오른쪽 발끝을 축으로 옆으로 픽
+    steps = [90 * ((i + 1) / FALL_STEPS) ** 2 for i in range(FALL_STEPS)] + list(FALL_BOUNCE)
+    for j, ang in enumerate(steps):
+        ms = FALL_MS if j < FALL_STEPS else 50
+        out.append((_pose(img_at(t_ms), size, base, angle=ang, pivot=pivot), ms))
+        t_ms += ms
+    bx, by = base[0] + w / 2, base[1]
+    for j in range(DIZZY_LIE):
+        f = _pose(img_at(t_ms), size, base, angle=90, pivot=pivot)
+        _stars(f, (bx + h * 0.78, by - w - h * 0.12), h * 0.18 * (0.8 + 0.2 * k),
+               h * 0.06, max(2.0, h * 0.06), count, j * math.tau / DIZZY_LIE / count * 2)
+        out.append((f, DIZZY_LIE_MS))
+        t_ms += DIZZY_LIE_MS
+    for j in range(DIZZY_UP):  # 털고 일어난다 (끝은 똑바로 서서 다음 장면과 이어진다)
+        p = (j + 1) / DIZZY_UP
+        ang = 90 * (1 - p) ** 1.5
+        out.append((_pose(img_at(t_ms), size, base, angle=ang, pivot=pivot), DIZZY_UP_MS))
+        t_ms += DIZZY_UP_MS
+    return out
 
 
 def same_height(imgs, height: int):
@@ -685,7 +819,26 @@ def _forget(meta: dict, names: set) -> dict:
         if g["그림"]:
             groups.append(g)
     meta["이어 붙이기"] = groups
+    meta["다음"] = {k: v for k, v in meta.get("다음", {}).items() if k not in names}
     return meta
+
+
+def _forget_refs(char_dir: str, motion: str, names: set) -> None:
+    """다른 평소 동작 폴더의 「다음」에 적힌 `<동작>/<이름>` 을 걷어 낸다 (그림을 지웠을 때)."""
+    gone = {f"{motion}/{n}" for n in names}
+    for m in EVERYDAY:
+        path = os.path.join(char_dir, m, META)
+        if not os.path.isfile(path):
+            continue
+        meta = clean_meta(_read_json(path))
+        nxt = {k: [t for t in v if t not in gone] for k, v in meta["다음"].items()}
+        nxt = {k: v for k, v in nxt.items() if v}
+        if nxt != meta["다음"]:
+            meta["다음"] = nxt
+            if meta_empty(meta):
+                os.remove(path)
+            else:
+                _write_json(path, meta)
 
 
 def delete_clip(path: str, root: str = PACK_DIR) -> None:
@@ -693,14 +846,16 @@ def delete_clip(path: str, root: str = PACK_DIR) -> None:
     real = os.path.realpath(path)
     if real.startswith(os.path.realpath(root) + os.sep) and os.path.isfile(real):
         os.remove(real)
-        _tidy_meta(os.path.dirname(real), {os.path.basename(real)})
+        folder = os.path.dirname(real)
+        _tidy_meta(folder, {os.path.basename(real)})
+        _forget_refs(os.path.dirname(folder), os.path.basename(folder), {os.path.basename(real)})
 
 
 def _tidy_meta(folder: str, names: set) -> None:
     path = os.path.join(folder, META)
     if os.path.isfile(path):
         meta = _forget(clean_meta(_read_json(path)), names)
-        if meta["그림"] or meta["이어 붙이기"]:
+        if not meta_empty(meta):
             _write_json(path, meta)
         else:
             os.remove(path)
@@ -725,11 +880,14 @@ def delete_candidate(clip: Clip, root: str = PACK_DIR) -> None:
         return
     mine = set(meta["이어 붙이기"].pop(idx)["그림"])
     keep = _named(meta)
-    for name in mine - keep:
+    gone = mine - keep
+    for name in gone:
         p = os.path.join(folder, name)
         if os.path.isfile(p):
             os.remove(p)
-    if meta["그림"] or meta["이어 붙이기"]:
+    meta = _forget(meta, gone)
+    _forget_refs(os.path.dirname(folder), os.path.basename(folder), gone)
+    if not meta_empty(meta):
         _write_json(path, meta)
     elif os.path.isfile(path):
         os.remove(path)
@@ -811,7 +969,7 @@ def export_pack(char: str, dest: str, root: str = PACK_DIR) -> str:
             for p in clips(char, m, root):
                 z.write(p, f"{char}/{m}/{os.path.basename(p)}")
             meta = motion_meta(char, m, root)
-            if clips(char, m, root) and (meta["그림"] or meta["이어 붙이기"]):
+            if clips(char, m, root) and not meta_empty(meta):
                 z.writestr(f"{char}/{m}/{META}", json.dumps(meta, ensure_ascii=False, indent=1))
     os.replace(tmp, dest)
     return dest
@@ -891,8 +1049,12 @@ def _pack_plan(z) -> tuple[str, dict, list, dict]:
         if len(plan_clips(sorted(names), meta, motion)) > limit(motion):
             raise PackError(f"{motion} 후보가 {limit(motion)}개 넘음")
     # 그림이 없는 동작의 움직임.json 은 버리고, 남은 것은 그 폴더 그림 이름만 남긴다
-    metas = {m: _forget(meta, _named(meta) - set(per_motion[m]))
+    metas = {m: _forget(meta, (_named(meta) | set(meta["다음"])) - set(per_motion[m]))
              for m, meta in metas.items() if m in per_motion}
+    have = {f"{m}/{f}" for m, names in per_motion.items() for f in names}
+    for meta in metas.values():  # 「다음」은 팩 안에 있는 그림만 가리키게
+        nxt = {k: [t for t in v if t in have] for k, v in meta["다음"].items()}
+        meta["다음"] = {k: v for k, v in nxt.items() if v}
     return name, conf, files, metas
 
 
@@ -937,7 +1099,7 @@ def import_pack(src: str, root: str = PACK_DIR) -> str:
             if conf:
                 _write_json(os.path.join(tmp, "설정.json"), conf)
             for motion, meta in metas.items():
-                if meta["그림"] or meta["이어 붙이기"]:
+                if not meta_empty(meta):
                     _write_json(os.path.join(tmp, motion, META), meta)
             final = free_name(name, root)
             os.rename(tmp, os.path.join(root, final))
@@ -951,7 +1113,7 @@ if __name__ == "__main__":
     # 팩 점검: 캐릭터마다 어느 동작을 제 그림으로 갖고 있는지
     print("팩 폴더:", PACK_DIR, "· 바 캐릭터", active() or CLAUDI)
     for c in characters():
-        own = [m for m in MOTIONS if clips(c, m)]
-        print(f"  {c}: " + ", ".join(f"{m} {len(clips(c, m))}" for m in own))
+        mine = [m for m in MOTIONS if clips(c, m)]
+        print(f"  {c}: " + ", ".join(f"{m} {len(clips(c, m))}" for m in mine))
     if not present():
         print("  캐릭터 없음 → 클로디")

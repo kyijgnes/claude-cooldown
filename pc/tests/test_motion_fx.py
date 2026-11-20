@@ -50,7 +50,7 @@ def test_no_meta_gives_default_effects(tmp_path):
     blob(os.path.join(root, CHAR, "기절", "a.png"))
     blob(os.path.join(root, CHAR, "서기", "a.png"))
     (faint,) = pack.candidates(CHAR, "기절", root)
-    assert faint.effect == "쓰러짐"           # 기절은 확실하게 쓰러진다
+    assert faint.effect == "헤롱"             # 기절은 헤롱헤롱 비틀대다 쓰러진다
     assert pack.candidates(CHAR, "서기", root)[0].effect == pack.DEFAULT_FX["서기"][0]
 
 
