@@ -798,11 +798,85 @@ def save_clip(char: str, motion: str, frames, root: str = PACK_DIR) -> str:
     return path
 
 
-def add_file(char: str, motion: str, src: str, root: str = PACK_DIR) -> str:
-    """그림 파일 한 장을 그대로 복사해 넣는다(움직이는 webp·gif 를 다시 굽지 않는다)."""
+def add_file(char: str, motion: str, src: str, root: str = PACK_DIR,
+             effect: str | None = None, power: int = 2) -> str:
+    """그림 파일 한 장을 그대로 복사해 넣는다(움직이는 webp·gif 를 다시 굽지 않는다).
+    `effect` 를 주면 움직임.json 의 「그림」에 효과·세기를 같이 적는다."""
     path = _new_path(char, motion, os.path.splitext(src)[1].lower(), root)
     shutil.copy2(src, path)
+    if effect is not None:
+        set_clip_fx(Clip(path, [path]), effect, power, root)
     return path
+
+
+def set_clip_fx(clip: Clip, effect: str, power: int = 2, root: str = PACK_DIR) -> bool:
+    """후보 하나의 효과·세기를 그 동작 폴더 움직임.json 에 적는다. 묶음이면 그 묶음 칸에,
+    그림 하나면 「그림」 칸에. 팩 밖을 가리키거나 틀린 값이면 아무것도 안 하고 False."""
+    if effect not in EFFECTS or not clip.files:
+        return False
+    folder = os.path.dirname(clip.files[0])
+    real = os.path.realpath(folder)
+    if not real.startswith(os.path.realpath(root) + os.sep):
+        return False
+    char, motion = os.path.basename(os.path.dirname(real)), os.path.basename(real)
+    meta = motion_meta(char, motion, root)
+    conf = {"효과": effect, "세기": _power(power)}
+    if "|" in clip.key:
+        try:
+            idx = int(clip.key.split("|")[1])
+        except (IndexError, ValueError):
+            return False
+        if not 0 <= idx < len(meta["이어 붙이기"]):
+            return False
+        meta["이어 붙이기"][idx].update(conf)
+    else:
+        meta["그림"][os.path.basename(clip.files[0])] = conf
+    write_meta(char, motion, meta, root)
+    return True
+
+
+def is_moving(path: str) -> bool:
+    """여러 장짜리(움직이는) 그림인가. 이런 그림엔 효과가 안 먹는다."""
+    from PIL import Image
+
+    try:
+        with Image.open(path) as im:
+            return getattr(im, "n_frames", 1) > 1
+    except Exception:
+        return False
+
+
+def folder_pictures(folder: str) -> list[str]:
+    """폴더 하나(아래 폴더는 안 봄)에 든 그림 파일들, 이름 순."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    return sorted(os.path.join(folder, n) for n in names
+                  if n.lower().endswith(EXTS) and not n.startswith(".")
+                  and os.path.isfile(os.path.join(folder, n)))
+
+
+def file_digest(path: str) -> str | None:
+    """그림 파일 내용의 지문 (넣을 때 이름이 바뀌어도 같은 그림을 알아본다)."""
+    import hashlib
+
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def used_pictures(char: str, root: str = PACK_DIR) -> dict[str, str]:
+    """그 캐릭터가 이미 넣은 그림들 {지문: 동작}."""
+    out: dict[str, str] = {}
+    for m in MOTIONS:
+        for p in clips(char, m, root):
+            d = file_digest(p)
+            if d and d not in out:
+                out[d] = m
+    return out
 
 
 def _named(meta: dict) -> set:
