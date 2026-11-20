@@ -111,7 +111,8 @@ def test_used_pictures_by_content(src, root):
 
 
 # ------------------------------------------------------------------ 창
-def test_folder_pick_adds_one_marks_used_and_keeps_limit(tkroot, src, root):
+def test_folder_pick_adds_one_marks_used_and_keeps_limit(tkroot, src, root, monkeypatch):
+    monkeypatch.setitem(pack.LIMITS, "놀람", 2)       # 한도 2 인 셈으로 (11-21 부터 상호작용은 1)
     win = imp.PackImport(tkroot, root=root)
     win.char = CHAR
     win._from_folder("놀람", src)                     # 놀람 한도 2

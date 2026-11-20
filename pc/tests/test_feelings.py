@@ -270,7 +270,7 @@ def test_shy_when_rubbed(tkroot, base):
     for px in path:
         pos["p"] = (px, cy)
         run(b, clock, 0.08)
-    assert b.motion == "부끄럼"
+    assert b.motion == "간지럼"                                     # 11-21 부터 쓰다듬기는 간지럼
 
 
 def test_hover_without_rub_is_not_shy_right_away(tkroot, base):
@@ -289,7 +289,7 @@ def test_excited_after_double_jump(tkroot, base):
     b.react(*spot(b))
     clock.t += 0.2
     b.react(*spot(b))
-    assert b.motion == "점프"
+    assert b.motion == "깡충"
     got = seen(b, clock, 1.5)
     assert "신남" in got
 

@@ -307,6 +307,12 @@ class Skin:
         if ch is not None and hasattr(ch, "wheel"):
             ch.wheel(*ch.to_local(self, x, y), delta)
 
+    def middle(self, x: float, y: float) -> None:
+        """캐릭터를 가운데 단추로 눌렀다 (창 기준 자리, 11-21 하트). 캐릭터 밖이면 아무 일 없음."""
+        ch = self._char()
+        if ch is not None and hasattr(ch, "middle"):
+            ch.middle(*ch.to_local(self, x, y))
+
     def set_away(self, away: bool) -> None:
         """PC 입력이 한참 없다(참) / 돌아왔다(거짓). 앱의 `AwayWatch` 가 바뀔 때만 부른다."""
         ch = self._char()

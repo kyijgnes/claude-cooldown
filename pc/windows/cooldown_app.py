@@ -1055,6 +1055,14 @@ class App:
         widget.bind("<ButtonRelease-1>", self._release)
         widget.bind("<Button-3>", self._popup)
         widget.bind("<MouseWheel>", self._wheel)
+        widget.bind("<Button-2>", self._middle)
+
+    def _middle(self, e):
+        """캐릭터를 가운데 단추로 누르면 하트 (11-21). 캐릭터 밖이면 아무 일 없음."""
+        try:
+            self.skin.middle(e.x_root - self.root.winfo_rootx(), e.y_root - self.root.winfo_rooty())
+        except Exception:  # noqa: BLE001
+            pass
 
     def _wheel(self, e):
         """캐릭터 위에서 휠을 굴리면 빙글 돈다 (11-20 넷째). 캐릭터 밖이면 아무 일 없음."""

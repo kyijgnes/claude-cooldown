@@ -28,15 +28,27 @@
 - 냠냠: 바 안 사용량 막대 위(캐릭터 칸 왼쪽)에 놓으면 그 자리에서 냠냠 씹고(「냠」 글자가 오름) 축하 뒤 돌아간다.
 - 휠 굴리기: 캐릭터 위에서 휠을 굴리면 빙글 돈다(굴린 쪽으로). 3초 안에 `SPIN_FAINT` 번 넘게 굴리면 어지러워 기절.
 - 쳐다보기: 마우스 커서가 가까이 오면 그쪽으로 돌아보고, 오래(`WATCH_GREET`) 대고 있으면 부끄럼.
-- 쓰다듬기: 단추를 안 누르고 커서로 캐릭터 몸 위를 좌우로 문지르면(`RUB_TURNS`) 부끄럼.
+- 쓰다듬기: 단추를 안 누르고 커서로 캐릭터 몸 위를 좌우로 문지르면(`RUB_TURNS`) 간지럼.
+
+상호작용 하나에 그림 하나(11-21 사용자: 상호작용당 동작 1개, 대신 종류를 훨씬 많이). 칸이 비면 `pack.FALLBACK`.
+- 깡충: 두 번 누르기 · 빙글: 휠(빙글 그림이 없으면 지금 그림을 돌려 굽는다) · 날아감: 던져져 나는 동안 ·
+  꽈당: 던져져 화면 벽·천장·바 끝에 `BONK_SPEED` 넘게 부딪힌 순간(`BONK_SEC`, 세면 그 뒤 슬픔) ·
+  앉기: 창 제목 줄에 앉아 있는 동안 · 쳐다보기: 커서가 가까이(`WATCH_NEAR`) 온 동안 ·
+  간지럼: 쓰다듬기 · 갸웃: 커서가 몸 위에 `HOVER_SEC` 가만히 머묾 · 하트: 가운데 단추(「♥」가 오름) ·
+  빼꼼: 바 양 끝 바로 밖(`PEEK_RANGE`)에 놓으면 바 끝에 반쯤 숨어 들락날락 내다봄, 누르면 돌아옴 ·
+  밀기: 거닐다 왼쪽 끝(사용량 막대)에 닿으면 가끔(`PUSH_P`) 미는 시늉 · 깸: 잠·자리비움 중에 누름 ·
+  허우적: 화면 위쪽(`FLAIL_TOP`)에 놓으면 허우적대며 바로 떨어져 내려앉음.
+- 겹칠 때는 하나만: 커서는 간지럼 > 갸웃 > 부끄럼(오래 가까이) > 쳐다보기. 던지기는 흔들려 어지러우면
+  기절만(던지지 않음), 부딪히면 꽈당 > 슬픔 > 날아감. 놓는 자리는 던지기 > 바 위(기절 > 냠냠 > 복귀) >
+  빼꼼 > 창 제목 줄 > 허우적 > 날아 돌아옴. 누르기는 깸 > 포기 > 깡충 > 놀람·짜증·화남.
 
 감정(11-20 넷째, `pack.FEELINGS`, 그림이 없으면 `pack.FALLBACK` 으로 빌린다)
 - 슬픔: 한도가 다 차 잠들기 전 · 포기에서 회복하기 전 · 던져져 벽·천장에 세게(`OUCH_SPEED`) 부딪혀 날며 울고
   내려앉아 잠깐 더 울다 돌아감 · 자리비움이 `AWAY_SAD` 넘게 이어지면 가끔.
 - 당황: 잡히는 순간 `FLUSTER_SEC`(그 뒤 끌림) · 5시간 사용량이 `JUMP_WINDOW` 안에 `JUMP_PCT` 넘게 뛰었을 때(`note_usage`).
 - 먹기: 사용량 막대 위 냠냠을 먹기 그림으로(없으면 서기를 쭈그려 구움) · 먹기 그림이 제 것이면 평소 가끔(`SNACK_P`) 간식.
-- 부끄럼: 커서를 오래 대고 있을 때 · 쓰다듬기.
-- 신남: 두 번 누르기 점프 뒤 · 한도 풀림 축하 뒤 이어서(`_after`).
+- 부끄럼: 커서를 오래 대고 있을 때.
+- 신남: 두 번 누르기 깡충 뒤 · 한도 풀림 축하 뒤 이어서(`_after`).
 - 심심: 아무도 안 건드린 지 `BORED_LONG` 넘으면 딴짓 대신.
 - 그림: 후보(`pack.pick_clip`) 하나 = 그림 한 장(고정 그림은 효과를 구워 움직인다) 또는 이어 붙이기 묶음.
   평소 동작은 후보가 많으면 최근에 튼 절반은 피해 고른다(`_avoid`). 어두운 바에서는 둘레에 1px 밝은
@@ -113,6 +125,25 @@ JUMP_WINDOW = 900.0
 RUB_TURNS = 4       # 커서로 캐릭터 위를 좌우로 이만큼 오가면(쓰다듬기) 부끄럼
 RUB_SWING = 6.0
 RUB_WINDOW = 2.0
+# 상호작용 하나에 그림 하나 (11-21)
+BONK_SPEED = 600.0  # 던져져 벽·천장·바 끝에 이보다 세게 부딪히면 꽈당
+BONK_SEC = 0.6
+WATCH_LOOK = 0.4    # 커서가 이만큼 가까이 머물면 쳐다보기 그림
+HOVER_SEC = 2.0     # 커서가 몸 위에 이만큼 가만히 있으면 갸웃
+HOVER_STILL = 4.0   # 이만큼(px) 안에서 움직이면 가만히 있는 것
+HOVER_COOL = 15.0
+HEART_SEC = 2.2
+HEART_N = 3         # 「♥」 글자 수
+HEART_EVERY = 0.35
+HEART_COLOR = "#ff6f91"
+PEEK_RANGE = 90.0   # 바 끝에서 이만큼 밖에 놓으면 빼꼼
+PEEK_DEEP = 0.25    # 깊이 숨을 때 몸 폭의 이만큼 더 밖으로
+PEEK_SEC = (1.5, 3.5)
+PUSH_P = 0.25       # 거닐 곳을 고를 때 사용량 막대 끝으로 가서 미는 몫 (밀기)
+PUSH_SEC = 1.8
+WAKE_SEC = 1.0
+FLAIL_TOP = 0.35    # 화면 위쪽 이만큼(몫) 안에 놓으면 허우적대며 떨어진다
+FLAIL_DROP = 200.0  # 그리고 바 바닥보다 이만큼 넘게 위여야
 TAG = "buddy"
 FX_TAG = "buddy_fx"
 
@@ -192,6 +223,11 @@ class Buddy:
         self._away_since: float | None = None
         self._usage: list[tuple[float, float]] = []  # (때, 5시간 %)
         self._rub: dict = {"x": None, "dir": 0, "peak": 0.0, "turns": []}
+        self._hover: tuple[float, float, float] | None = None  # 커서가 몸 위에 머문 (때, x, y)
+        self._hovered = -999.0
+        self._hearts: list[float] = []  # 아직 안 띄운 「♥」 글자의 때
+        self._peek: dict | None = None  # 바 끝에 숨어 내다보는 중: {"side": -1·1, "deep": bool}
+        self._push_next = False  # 이번 거닐기 끝(왼쪽 끝)에 닿으면 민다
         try:  # 어두운 바면 그림 둘레에 밝은 테두리
             rgb = canvas.winfo_rgb(P.bg)
             self._halo = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 65535 < 0.5
@@ -231,8 +267,16 @@ class Buddy:
         self._touched = now
         if self.mode in ("기절", "포기", "냠냠"):  # 뻗었거나 체념했거나 먹는 동안은 받기만 하고 아무 일 없음
             return
-        if self.mode == "자리비움":  # 누른 사람이 곧 돌아온 사람이다
-            self.set_away(False)
+        if self.mode == "자리비움":  # 누른 사람이 곧 돌아온 사람이다: 화들짝 깨고 반긴다
+            self.set_away(False, woke=True)
+            return
+        if self.mode == "빼꼼":  # 숨어 있다 들켰다: 제자리로 뛰어간다
+            self._peek = None
+            self.vy += POKE_VY * 0.6
+            self._go_home()
+            return
+        if self.mode == "" and self.motion == "잠":  # 한도가 차 자고 있다: 화들짝 깼다가 다시 잔다
+            self._wake()
             return
         double = now - self._tap_at <= DOUBLE_SEC
         self._tap_at = now
@@ -243,14 +287,35 @@ class Buddy:
         self.target = None
         self._ret = None
         self.mode = "" if self.mode == "복귀" else self.mode
-        if double and stage < 2:  # 두 번 눌렀다: 높이 점프
+        if double and stage < 2:  # 두 번 눌렀다: 높이 깡충
             self._tap_at = -99.0
             self.vy += POKE_VY * 1.8
-            self._play("점프", 0.9, busy=True, restart=True)
+            self._play("깡충", 0.9, busy=True, restart=True)
             self._after = ("신남", 2.0)
             return
         self.vy += POKE_VY * (1.0, 0.6, 0.35)[stage]
         self._play(("놀람", "짜증", "화남")[stage], busy=True)
+
+    def _wake(self) -> None:
+        """자다가 눌렸다: 화들짝 깬다 (짜증 단계는 안 센다)."""
+        self.target = None
+        self.vy += POKE_VY * 1.4
+        self._play("깸", WAKE_SEC, busy=True, restart=True)
+
+    def middle(self, x: float | None = None, y: float | None = None) -> None:
+        """가운데 단추로 눌렀다: 하트 (「♥」 글자가 오른다)."""
+        if not self._hit(x, y) or self.mode not in ("", "복귀") or self.held:
+            return
+        now = self.now()
+        self._played = True
+        self._touched = now
+        self.target = None
+        self._ret = None
+        self._then_home = self.mode == "복귀" or abs(self.x - self.home_x) > 2
+        self.mode = ""
+        self.vy += POKE_VY * 0.5
+        self._play("하트", HEART_SEC, busy=True, restart=True)
+        self._hearts = [now + i * HEART_EVERY for i in range(HEART_N)]
 
     def _give_up(self) -> None:
         """자꾸 눌러 체념했다. 한동안 축 처져 아무 반응 안 하다 회복한다."""
@@ -261,7 +326,7 @@ class Buddy:
         self._play("포기", GIVEUP_SEC, busy=True)
 
     def hold(self, x: float, y: float) -> None:
-        if self.mode in ("기절", "끌림", "자리비움", "포기", "냠냠") or not self._hit(x, y):
+        if self.mode in ("기절", "끌림", "자리비움", "포기", "냠냠", "빼꼼") or not self._hit(x, y):
             return
         self._ret = None
         self._played = True
@@ -294,6 +359,7 @@ class Buddy:
             return
         if self.mode != "끌림":
             self._clear_yum()
+            self._peek = None
             self.mode = "끌림"
             self.held = False
             self.target = None
@@ -392,7 +458,12 @@ class Buddy:
             else:
                 self._go_home()
             return
-        # 바 밖에 놓았다: 창 제목 줄 위면 걸터앉고, 아니면 그 자리에서 제자리로 뛰어온다
+        # 바 밖에 놓았다: 바 끝 바로 옆이면 빼꼼, 창 제목 줄 위면 걸터앉고, 화면 위쪽이면 허우적대며
+        # 떨어지고, 아니면 그 자리에서 제자리로 뛰어온다
+        side = self._peek_side(nx, bottom)
+        if side:
+            self._start_peek(side)
+            return
         try:
             found = wins.title_bar_at(*carry.screen_of(self.c, nx, bottom))
         except Exception:  # noqa: BLE001
@@ -400,7 +471,59 @@ class Buddy:
         if found:
             self._sit(found)
             return
+        if self._flail_drop():
+            return
         self._return_home()
+
+    def _peek_side(self, nx: float, bottom: float) -> int:
+        """놓은 자리(캔버스 좌표)가 바 왼쪽 끝 바로 밖이면 -1, 오른쪽 끝 바로 밖이면 1, 아니면 0."""
+        cw, ch = self._area()
+        if not (-self.height * 0.6 <= bottom <= ch + self.height):
+            return 0
+        if -PEEK_RANGE <= nx < 0:
+            return -1
+        if cw < nx <= cw + PEEK_RANGE:
+            return 1
+        return 0
+
+    def _start_peek(self, side: int) -> None:
+        """바 끝에 반쯤 숨는다 (그림 반이 바 밖으로 잘린다). 누르면 돌아온다."""
+        self._land()
+        self.mode = "빼꼼"
+        self.target = None
+        self._ret = None
+        self.y = self.vy = 0.0
+        self._peek = {"side": side, "deep": True}
+        self._face(-side)  # 바 안쪽을 본다
+        self._peek_step()
+
+    def _peek_step(self) -> None:
+        """깊이 숨었다가 빼꼼 내다봤다가를 번갈아 (처음은 내다본다)."""
+        p = self._peek
+        cw, _ = self._area()
+        edge = 0.0 if p["side"] < 0 else cw
+        p["deep"] = not p["deep"]
+        self._play("빼꼼", random.uniform(*PEEK_SEC), busy=True)
+        self.x = edge + p["side"] * (self.w * PEEK_DEEP if p["deep"] else 0.0)
+        self._dirty = True
+
+    def _flail_drop(self) -> bool:
+        """화면 위쪽 높은 곳에 놓였다: 허우적대며 바(제자리)로 떨어진다. 떨어지면 참."""
+        if self._carry is None:
+            return False
+        try:
+            x, y = self._carry.at
+            fx, floor = carry.screen_of(self.c, self.home_x, self.y1)
+            box = wins.screen_box(self.c)
+        except (tk.TclError, TypeError, ValueError):
+            return False
+        top, bottom = box[1], box[3]
+        if floor - y < FLAIL_DROP or not top <= y <= top + (bottom - top) * FLAIL_TOP:
+            return False
+        fall = math.sqrt(2 * (floor - y) / GRAVITY)
+        vx = max(-THROW_MAX, min(THROW_MAX, (fx - x) / max(0.1, fall)))
+        self._start_toss(vx, 0.0, flail=True)
+        return True
 
     def _return_home(self) -> None:
         """지금 자리에서 제자리로 뛰어간다. 떠 있는 창에 타 있으면 곧은 줄로(화면 위), 아니면 바 안에서."""
@@ -433,7 +556,7 @@ class Buddy:
         self._ret = (self.x, self.now(), carry.return_time(self.home_x - self.x))
 
     # -------------------------------------------------- 던지기 (중력·튕김)
-    def _start_toss(self, vx: float, vy: float) -> None:
+    def _start_toss(self, vx: float, vy: float, flail: bool = False) -> None:
         if self._carry is None:
             self._go_home()
             return
@@ -445,15 +568,22 @@ class Buddy:
             self._land()
             self.mode = ""
             return
+        try:  # 바 양 끝 (화면 x) · 바 윗변 (화면 y): 낮게 날다 바 끝에 부딪힌다
+            cw, _ = self._area()
+            bl, btop = carry.screen_of(self.c, 0, 0)
+            bar = (bl, bl + cw, btop)
+        except (tk.TclError, TypeError, ValueError):
+            bar = None
         if y > floor + 2:  # 바보다 아래에서 던졌다 (바가 화면 위쪽): 화면 바닥까지 떨어진다
             floor = box[3]
         self.mode = "던짐"
         self.target = None
         self._toss = {"x": x, "y": y, "vx": vx, "vy": vy, "t": self.now(), "start": self.now(),
-                      "floor": floor, "box": box, "bounces": 0}
+                      "floor": floor, "box": box, "bounces": 0, "bar": bar, "flail": flail,
+                      "bonk": 0.0}
         if vx:
             self._face(1 if vx > 0 else -1)
-        self._play("놀람", 3600, busy=True, restart=True)
+        self._play("허우적" if flail else "날아감", 3600, busy=True, restart=True)
 
     def _tossing(self, now: float) -> bool:
         t = self._toss
@@ -479,18 +609,22 @@ class Buddy:
         if t["y"] - self.height < top:
             hit = max(hit, abs(t["vy"]))
             t["y"], t["vy"] = top + self.height, abs(t["vy"]) * 0.5
-        if hit > OUCH_SPEED and not t.get("ouch"):  # 아야: 세게 부딪혀 운다
+        hit = max(hit, self._bar_end_hit(t, half))
+        if hit > OUCH_SPEED:  # 아야: 세게 부딪혔다. 꽈당 뒤에 운다
             t["ouch"] = True
-            self._play("슬픔", 3600, busy=True, restart=True)
+        if hit > BONK_SPEED and not t["flail"]:  # 꽈당 (부딪힌 순간)
+            t["bonk"] = now + BONK_SEC
+            self._play("꽈당", 3600, busy=True, restart=True)
+        elif t["bonk"] and now >= t["bonk"]:  # 꽈당이 끝났다: 아프면 울며, 아니면 그냥 난다
+            t["bonk"] = 0.0
+            self._play("슬픔" if t.get("ouch") else "날아감", 3600, busy=True, restart=True)
         settled = False
         if t["y"] >= t["floor"]:
             t["y"] = t["floor"]
-            if t["vy"] > 260:  # 바닥에 튕긴다
+            if t["vy"] > 260 and not t["flail"]:  # 바닥에 튕긴다 (허우적대며 떨어진 건 그대로 내려앉는다)
                 t["vy"] = -t["vy"] * BOUNCE
                 t["vx"] *= 0.75
                 t["bounces"] += 1
-                if not t.get("ouch"):
-                    self._play("놀람", 3600, busy=True, restart=True)
             else:
                 settled = True
         try:
@@ -505,6 +639,27 @@ class Buddy:
             self._return_home()
         return True
 
+    @staticmethod
+    def _bar_end_hit(t: dict, half: float) -> float:
+        """바 높이로 낮게 날다 바 밖에서 바 끝으로 들어오면 튕긴다. 부딪힌 빠르기 (안 부딪혔으면 0)."""
+        bar = t.get("bar")
+        px = t.get("px", t["x"])
+        t["px"] = t["x"]
+        if not bar:
+            return 0.0
+        bl, br, btop = bar
+        if t["y"] <= btop + 2:
+            return 0.0
+        hit = 0.0
+        if px <= bl - half < t["x"]:  # 왼쪽 밖에서 오른쪽으로 들어왔다
+            hit = abs(t["vx"])
+            t["x"], t["vx"] = bl - half, -abs(t["vx"]) * WALL_BOUNCE
+        elif px >= br + half > t["x"]:
+            hit = abs(t["vx"])
+            t["x"], t["vx"] = br + half, abs(t["vx"]) * WALL_BOUNCE
+        t["px"] = t["x"]
+        return hit
+
     # -------------------------------------------------- 창 제목 줄에 앉기
     def _sit(self, found) -> None:
         hwnd, (l, t, r, b) = found
@@ -518,7 +673,7 @@ class Buddy:
         self.mode = "앉음"
         self.target = None
         self._perch = {"hwnd": hwnd, "rect": (l, t, r, b), "since": self.now()}
-        self._play("인사", 2.4, busy=True)
+        self._play("앉기", 2.4, busy=True)  # 앉기 그림이 없으면 인사(손 흔들며 앉음)를 빌린다
 
     def _hop_off(self) -> None:
         """앉은 창에서 폴짝 내려온다 (눌렀을 때 · 오래 앉아 있었을 때)."""
@@ -540,6 +695,9 @@ class Buddy:
             self._hop_off()
             return True
         if now >= self.until:
+            if pack.own(self.name, "앉기", self.root):  # 제 앉기 그림이 있으면 내내 그것
+                self._play("앉기", random.uniform(3.0, 6.0), busy=True)
+                return True
             long = now - p["since"] > 15
             pool = [m for m in ("서기", "딴짓") + (("잠",) if long else ()) if pack.own(self.name, m, self.root)]
             self._play(random.choice(pool or ["서기"]), random.uniform(3.0, 6.0), busy=True)
@@ -580,7 +738,9 @@ class Buddy:
             self._cache[key] = out
         return self._cache[key]
 
-    def _eating(self, now: float) -> bool:
+    def _float_texts(self, now: float) -> bool:
+        """오르는 글자(「냠」·「♥」)를 올리고 다 된 것은 지운다. 띄울 「♥」가 남았으면 띄운다."""
+        moved = bool(self._yum)
         for item, born in list(self._yum):
             if now - born > YUM_LIFE:
                 self._drop_item(item)
@@ -590,6 +750,24 @@ class Buddy:
                     self.c.move(item, 0, -0.8)
                 except tk.TclError:
                     pass
+        while self._hearts and now >= self._hearts[0]:
+            self._hearts.pop(0)
+            if self.motion == "하트" and self._carry is None:
+                self._pop_text("♥", HEART_COLOR, now)
+                moved = True
+        return moved
+
+    def _pop_text(self, text: str, color: str, now: float) -> None:
+        try:
+            top = self.y1 + self.y - self.height
+            item = self.c.create_text(self.x + random.uniform(-self.w / 3, self.w / 3), top + 6,
+                                      text=text, fill=color, font=("Malgun Gothic", 8, "bold"),
+                                      tags=FX_TAG)
+            self._yum.append((item, now))
+        except tk.TclError:
+            pass
+
+    def _eating(self, now: float) -> bool:
         if now >= self._eat_until:
             self._clear_yum()
             self.mode = ""
@@ -599,14 +777,7 @@ class Buddy:
             return True
         if now >= self._yum_next:
             self._yum_next = now + YUM_EVERY
-            try:
-                top = self.y1 + self.y - self.height
-                item = self.c.create_text(self.x + random.uniform(-self.w / 3, self.w / 3), top + 6,
-                                          text="냠", fill=P.title, font=("Malgun Gothic", 8, "bold"),
-                                          tags=FX_TAG)
-                self._yum.append((item, now))
-            except tk.TclError:
-                pass
+            self._pop_text("냠", P.title, now)
         return True
 
     def _drop_item(self, item) -> None:
@@ -619,6 +790,7 @@ class Buddy:
         for item, _ in self._yum:
             self._drop_item(item)
         self._yum = []
+        self._hearts = []
 
     # -------------------------------------------------- 휠 → 빙글
     def wheel(self, x: float | None, y: float | None, delta: int) -> None:
@@ -633,6 +805,13 @@ class Buddy:
             return
         if self.motion == "빙글" and self.busy:
             self.until = min(now + 3.0, self.until + 0.5)
+            return
+        if pack.own(self.name, "빙글", self.root):  # 제 빙글 그림이 있으면 그것 (효과는 움직임.json 대로)
+            self.mode = ""
+            self.target = None
+            self._ret = None
+            self._then_home = abs(self.x - self.home_x) > 2
+            self._play("빙글", SPIN_SEC, busy=True, restart=True)
             return
         frames = self._spin_frames(delta > 0)
         if not frames:
@@ -699,20 +878,46 @@ class Buddy:
         if abs(px - cx) > WATCH_NEAR or abs(py - cy) > WATCH_NEAR:
             self._near_since = None
             self._rub["x"] = None
+            self._hover = None
+            if self.motion == "쳐다보기":  # 커서가 갔다: 쳐다보기를 접는다
+                self.until = 0
             return
-        if self._rubbed(px, py, cx, cy, now):  # 커서로 쓰다듬었다: 부끄럼
+        # 겹치면 하나만: 간지럼 > 갸웃 > 부끄럼 > 쳐다보기
+        free = self.motion in SHOWS + ("쳐다보기",) or not self.busy
+        if self._rubbed(px, py, cx, cy, now):  # 커서로 쓰다듬었다: 간지럼
             self._greeted = now
             self._near_since = now
-            self._show("부끄럼", 2.5)
+            self._hover = None
+            self._show("간지럼", 2.5)
+            return
+        if self._hovering(px, py, cx, cy, now) and free:  # 몸 위에 가만히 머문다: 갸웃
+            self._hovered = self._greeted = now
+            self._show("갸웃", 2.0)
             return
         if abs(px - cx) > 6:
             self._face(1 if px > cx else -1)
         if self._near_since is None:
             self._near_since = now
-        elif (now - self._near_since >= WATCH_GREET and now - self._greeted >= WATCH_COOL
-              and (self.motion in SHOWS or not self.busy)):
+        elif now - self._near_since >= WATCH_GREET and now - self._greeted >= WATCH_COOL and free:
             self._greeted = now
             self._show("부끄럼", 2.0)
+        elif (now - self._near_since >= WATCH_LOOK and self.motion != "쳐다보기"
+              and (self.motion == "서기" or not self.busy)):
+            self._show("쳐다보기", 30.0)  # 커서가 있는 동안 (가면 위에서 접는다)
+
+    def _hovering(self, px: float, py: float, cx: float, cy: float, now: float) -> bool:
+        """커서가 몸 위에 HOVER_SEC 넘게 거의 가만히 있었나."""
+        if abs(px - cx) > self.w / 2 + 2 or abs(py - cy) > self.height / 2 + 2:
+            self._hover = None
+            return False
+        h = self._hover
+        if h is None or abs(px - h[1]) > HOVER_STILL or abs(py - h[2]) > HOVER_STILL:
+            self._hover = (now, px, py)
+            return False
+        if now - h[0] >= HOVER_SEC and now - self._hovered >= HOVER_COOL:
+            self._hover = None
+            return True
+        return False
 
     def _rubbed(self, px: float, py: float, cx: float, cy: float, now: float) -> bool:
         """커서가 캐릭터 몸 위에서 좌우로 RUB_TURNS 번 넘게 오갔나 (단추 안 누르고 문지르기)."""
@@ -741,12 +946,14 @@ class Buddy:
         return False
 
     # -------------------------------------------------- 자리비움 (PC 입력 없음)
-    def set_away(self, away: bool) -> None:
+    def set_away(self, away: bool, woke: bool = False) -> None:
+        """`woke` 는 자리비움 중에 캐릭터를 눌러 돌아왔다 (화들짝 깬 뒤 반긴다)."""
         if away:
             if self.mode in ("기절", "끌림", "날기", "던짐", "앉음", "냠냠"):
                 return  # 지금 손에 잡혀 있거나 뻗어 있거나 바 밖이다. 다음에 앱이 다시 알려 준다
             self._ret = None
             self._clear_yum()
+            self._peek = None
             self.mode = "자리비움"
             self._away_since = self.now()
             self.held = False
@@ -759,9 +966,14 @@ class Buddy:
         self._away_since = None
         self.mode = ""
         self._touched = self.now()
-        self.vy += POKE_VY
         self.target = None
-        self._play("점프" if pack.own(self.name, "점프", self.root) else "인사", WELCOME_SEC, busy=True)
+        welcome = "점프" if pack.own(self.name, "점프", self.root) else "인사"
+        if woke:  # 화들짝 깼다가 반긴다
+            self._wake()
+            self._after = (welcome, WELCOME_SEC)
+            return
+        self.vy += POKE_VY
+        self._play(welcome, WELCOME_SEC, busy=True)
 
     # -------------------------------------------------- 사용량
     def set_mood(self, mood: str) -> None:
@@ -969,6 +1181,9 @@ class Buddy:
             else:
                 self.mode = ""
             return
+        if self.mode == "빼꼼" and self._peek is not None:  # 숨었다 내다봤다 (누를 때까지)
+            self._peek_step()
+            return
         if self.mode == "자리비움" or self._mood in ("잠", "오류"):
             if abs(self.x - self.home_x) > 2:
                 self.target = self.home_x
@@ -1018,7 +1233,11 @@ class Buddy:
         elif r < 0.2 + wave and pack.own(self.name, "인사", self.root):
             self._show("인사", self._want("인사", idle))
         elif r < 0.2 + wave + stroll and hi > lo:
-            self.target = random.uniform(lo, hi)
+            if random.random() < PUSH_P:  # 왼쪽 끝 사용량 막대까지 가서 밀어 본다
+                self.target = lo
+                self._push_next = True
+            else:
+                self.target = random.uniform(lo, hi)
         elif (self._mood == "여유" and r < 0.2 + wave + stroll + JOY_P
               and pack.own(self.name, "점프", self.root)):
             self._show("점프", 0.5)
@@ -1105,6 +1324,8 @@ class Buddy:
                 self.mode = ""
                 self._return_home()
             return True
+        if self._yum or self._hearts:
+            dirty = self._float_texts(now) or dirty
         if self.mode == "냠냠":
             dirty = self._eating(now) or dirty
         if self.mode != "끌림" and (abs(self.y) > 0.05 or abs(self.vy) > 0.05):
@@ -1160,6 +1381,11 @@ class Buddy:
                 self._walk_clip = None
                 if self.mode == "복귀":
                     self.mode = ""
+                # 사용량 막대 끝에 닿았다: 민다 (가다가 다른 일로 끊겼다 다른 곳에 닿은 것은 아님)
+                if self._push_next and not self.mode and abs(self.x - self._bounds()[0]) < 1:
+                    self._face(-1)
+                    self._play("밀기", PUSH_SEC, busy=True)
+                self._push_next = False
             else:
                 self._face(1 if d > 0 else -1)
                 walk = self._walk_motion()
@@ -1234,6 +1460,7 @@ class Buddy:
                     canvas.tag_lower(item)  # 알림 칸에서는 글자 아래에 깐다
                 else:
                     canvas.tag_raise(item)
+                    canvas.tag_raise(FX_TAG)  # 오르는 글자(「냠」·「♥」)는 그림 위에
             except tk.TclError:
                 pass
 

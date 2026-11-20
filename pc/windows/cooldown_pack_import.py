@@ -17,8 +17,8 @@
   `Animator`: 창 하나에 타이머 하나, 창을 닫으면 멈춘다).
 아래: 그림이 보는 쪽(걷는 쪽에 맞춰 뒤집을 때 씀) · [이 캐릭터 빼기].
 
-★ 한 번에 한 장이다. 후보 수는 동작마다 한도가 다르다(`pack.LIMITS`: 누르면 나오는 동작 2 · 상태 4 ·
-  평소 16, 이어 붙이기 묶음은 한 개). 묶음째 받거나 다른 프로그램의 저장 파일을 뒤지는 기능은
+★ 한 번에 한 장이다. 후보 수는 동작마다 한도가 다르다(`pack.LIMITS`: 상호작용 1 · 평소·자리비움 16 ·
+  잠 8 · 나머지 4, 이어 붙이기 묶음은 한 개. 한도를 넘게 든 칸은 앞에서부터 한도만큼만 쓴다). 묶음째 받거나 다른 프로그램의 저장 파일을 뒤지는 기능은
   넣지 않는다(사용자 지시 11-19: 필요한 일부만 골라 넣기). 묶음·효과는 동작 폴더의 `움직임.json` 이
   정하고, 여기서는 묶음을 그림 하나처럼(첫 장 + 장 수) 보여 주고 지운다. 그림을 지우면
   `움직임.json` 의 그 이름도 걷어 낸다(`pack.delete_candidate`).
@@ -52,6 +52,7 @@ from skins.buddy import WIDE_FX, WIDE_K  # noqa: E402
 THUMB = 40
 THUMB_W = 48  # 작은 그림 칸 폭 (바 그림은 높이보다 넓다)
 THUMBS_PER_LINE = 8  # 평소 동작은 16개까지라 두 줄로 접는다
+TWO_COLS_OVER = 8  # 한 묶음 동작이 이보다 많고 모두 한도 2 이하면 두 열로 세운다
 BGS = ((0, "끔"), (12, "약하게"), (28, "보통"), (48, "강하게"))
 CAPTURES = ((0, "멈춘 그림"), (2, "2초 담기"), (4, "4초 담기"))
 GRAB_MS = 70  # 움직임 담을 때 한 장 간격
@@ -307,8 +308,17 @@ class PackImport:
                          fg=P.green, font=(KR, 10, "bold"), anchor="w").pack(fill="x", pady=(0, 4))
             self._groups()
             self._viewer()
-            for motion in dict(pack.GROUPS)[self.group]:
-                self._row(motion)
+            motions = dict(pack.GROUPS)[self.group]
+            if len(motions) > TWO_COLS_OVER and all(pack.limit(m) <= 2 for m in motions):
+                # 그림 한두 장짜리 줄이 많으면(상호작용 스무 가지) 두 열로 세운다. 한 열이면 창이 화면보다 길어진다
+                cols = tk.Frame(self.body, bg=P.bg)
+                cols.pack(fill="x")
+                half = (len(motions) + 1) // 2
+                for i, motion in enumerate(motions):
+                    self._row(motion, cols, (i % half, i // half))
+            else:
+                for motion in motions:
+                    self._row(motion)
             self._char_foot()
         foot = tk.Frame(self.body, bg=P.bg)
         foot.pack(fill="x", pady=(10, 0))
@@ -481,9 +491,13 @@ class PackImport:
         self.char = chars[0] if chars else None
         self._changed()
 
-    def _row(self, motion: str) -> None:
-        row = tk.Frame(self.body, bg=P.bg)
-        row.pack(fill="x", pady=2)
+    def _row(self, motion: str, parent: tk.Frame | None = None, at: tuple[int, int] | None = None) -> None:
+        """동작 한 줄. `at` (줄, 열) 을 주면 `parent` 안 격자에 앉힌다 (두 열)."""
+        row = tk.Frame(parent or self.body, bg=P.bg)
+        if at is None:
+            row.pack(fill="x", pady=2)
+        else:
+            row.grid(row=at[0], column=at[1], sticky="w", pady=2, padx=(0 if at[1] == 0 else 12, 0))
         name = tk.Frame(row, bg=P.bg, width=220, height=THUMB + 4)
         name.pack(side="left")
         name.pack_propagate(False)

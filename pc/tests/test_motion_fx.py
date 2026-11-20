@@ -158,13 +158,16 @@ def test_group_clip_frames(tmp_path):
 
 # ------------------------------------------------ 동작별 한도
 def test_limits_per_kind():
-    assert all(pack.limit(m) == 2 for m in ("놀람", "눌림", "기절", "끌림"))
-    assert all(pack.limit(m) == 4 for m in ("허둥", "잠", "축하", "자리비움"))
-    assert all(pack.limit(m) == 16 for m in ("서기", "걷기", "인사", "딴짓"))
+    """11-21: 상호작용 1 · 평소·자리비움 16 · 잠 8 · 나머지 이동·상태·감정 4."""
+    assert all(pack.limit(m) == 1 for m in pack.INTERACT)
+    assert all(pack.limit(m) == 4 for m in ("뛰기", "점프", "허둥", "축하", "슬픔", "심심"))
+    assert all(pack.limit(m) == 16 for m in ("서기", "걷기", "인사", "딴짓", "자리비움"))
+    assert pack.limit("잠") == 8
     assert set(pack.LIMITS) == set(pack.MOTIONS)
 
 
-def test_room_left_counts_groups_as_one(tmp_path):
+def test_room_left_counts_groups_as_one(tmp_path, monkeypatch):
+    monkeypatch.setitem(pack.LIMITS, "놀람", 2)  # 한도 2 인 셈으로 (11-21 부터 상호작용은 1)
     root = str(tmp_path)
     for n in ("a.png", "b.png", "c.png"):
         blob(os.path.join(root, CHAR, "놀람", n))

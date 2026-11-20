@@ -226,7 +226,8 @@ def test_perch_on_title_bar_then_fall_when_window_moves(tkroot, basic, monkeypat
     assert b.catch(x, y)
     b.drag(x, y - 400)
     b.put_down()
-    assert b.mode == "앉음" and b.motion == "인사"
+    assert b.mode == "앉음" and b.motion == "앉기"                 # 앉기 칸이 비면 인사를 빌린다
+    assert os.sep + "인사" + os.sep in b.clip.files[0]
     assert b._carry.at[1] == pytest.approx(-499)                     # 창 위 테두리에 섰다
     run(b, clock, 5.0)
     assert b.mode == "앉음"
@@ -292,7 +293,7 @@ def test_double_tap_jumps(tkroot, basic):
     assert b.motion == "놀람"
     clock.t += 0.2
     b.react(*spot(b))
-    assert b.motion == "점프" and b.vy < -10
+    assert b.motion == "깡충" and b.vy < -10                        # 깡충 칸이 비면 점프를 빌린다
     clock.t += 1.0
     b.react(*spot(b))
     assert b.motion == "놀람"                                        # 띄엄띄엄은 그냥 누르기
