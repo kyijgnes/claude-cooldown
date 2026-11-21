@@ -124,7 +124,7 @@ def test_buddy_drag_inside_bar_walks_home(tkroot, packdir, pressed):
     assert not b.catch(x - 120, y)           # 캐릭터 밖: 끌면 창이 움직인다
     assert b.catch(x, y)
     b.drag(x - 60, y)                        # 캐릭터 칸 안 (왼쪽 사용량 막대 위가 아님)
-    assert b.mode == "끌림" and b.motion == "당황"     # 잡히는 순간 잠깐 당황
+    assert b.mode == "끌림" and b.motion == "끌림"     # 잡히는 순간 곧바로 끌림 (11-21 1모션)
     assert b._carry is not None and b._carry.alive()   # 떠 있는 창에 탔다
     run(b, clock, 1.0)
     assert b.mode == "끌림" and b.motion == "끌림"     # 손에 잡혀 있는 동안은 끌림

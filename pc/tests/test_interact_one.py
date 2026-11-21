@@ -24,7 +24,7 @@ import cooldown_pack as pack  # noqa: E402
 from skins import buddy as buddy_mod  # noqa: E402
 from skins import carry, wins  # noqa: E402
 from skins.base import set_palette  # noqa: E402
-from skins.buddy import HEART_SEC, HOVER_SEC, SAD_SEC, TICK_MS, YUM_LIFE, Buddy  # noqa: E402
+from skins.buddy import HEART_SEC, HOVER_SEC, TICK_MS, YUM_LIFE, Buddy  # noqa: E402
 
 CHAR = "시험떡"
 W, H = 460, 48
@@ -114,6 +114,12 @@ def spot(b):
     return b.x, b.y1 + b.y - b.height / 2
 
 
+def tap(b):
+    """한 번 누르고 뗀다 (누르기 반응은 뗄 때 정한다, 11-21)."""
+    b.react(*spot(b))
+    b.tap_up()
+
+
 def screen_mid(b):
     return b.c.winfo_rootx() + b.x, b.c.winfo_rooty() + b.y1 + b.y - b.height / 2
 
@@ -134,14 +140,14 @@ def test_new_interactions_listed_with_labels_fallback_fx():
         assert pack.FALLBACK[m][-1] == "서기"               # 끝내 서기 한 장만 있어도 돈다
         assert pack.DEFAULT_FX[m][0] in pack.EFFECTS
     assert pack.FALLBACK["깡충"][0] == "점프"                # 지금까지 두 번 누르기는 점프였다
-    assert pack.FEELINGS == pack.MOTIONS[-6:]
+    assert not hasattr(pack, "FEELINGS")                  # 감정 묶음은 11-21 에 뺐다
 
 
 def test_limits():
     assert {pack.limit(m) for m in pack.INTERACT} == {1}
     assert [pack.limit(m) for m in pack.EVERYDAY] == [16] * 4
     assert pack.limit("자리비움") == 16 and pack.limit("잠") == 8
-    assert {pack.limit(m) for m in pack.MOVES + ("허둥", "축하") + pack.FEELINGS} == {4}
+    assert {pack.limit(m) for m in pack.MOVES + ("허둥", "축하")} == {4}
     assert set(pack.LIMITS) == set(pack.MOTIONS)
 
 
@@ -165,7 +171,7 @@ def test_over_limit_pack_uses_first_and_keeps_files(tmp_path):
     ("깡충", ("놀람", "서기"), "놀람"),
     ("꽈당", ("기절", "놀람"), "기절"),
     ("앉기", ("인사", "서기"), "인사"),
-    ("간지럼", ("부끄럼", "서기"), "부끄럼"),
+    ("간지럼", ("인사", "서기"), "인사"),
     ("하트", ("서기",), "서기"),
     ("깸", ("놀람", "서기"), "놀람"),
     ("허우적", ("허둥", "끌림"), "허둥"),
@@ -193,10 +199,23 @@ def test_old_pack_round_trip_and_new_folder(tmp_path):
 def test_double_tap_hops_with_own_picture(tkroot, tmp_path):
     root = make_pack(str(tmp_path), BASE + ("깡충",))
     b, clock = make(tkroot, root)
-    b.react(*spot(b))
+    tap(b)
     clock.t += 0.2
-    b.react(*spot(b))
+    tap(b)
+    run(b, clock, 0.4)
     assert b.motion == "깡충" and os.sep + "깡충" + os.sep in b.clip.files[0]
+
+
+def test_fast_triple_tap_is_mash_not_hop(tkroot, tmp_path):
+    """빠르게 셋 넘게 누르면 연타: 깡충이 아니라 놀람 하나로 시작한다."""
+    root = make_pack(str(tmp_path), BASE + ("깡충",))
+    b, clock = make(tkroot, root)
+    got = []
+    for _ in range(4):
+        tap(b)
+        run(b, clock, 0.15, lambda: got.append(b.motion) if not got or got[-1] != b.motion else None)
+    run(b, clock, 0.6, lambda: got.append(b.motion) if not got or got[-1] != b.motion else None)
+    assert got == ["서기", "놀람"]
 
 
 def test_heart_on_middle_click(tkroot, base):
@@ -221,25 +240,26 @@ def test_heart_ignored_while_held_or_fainted(tkroot, base):
 def test_wake_when_sleeping(tkroot, base):
     b, clock = make(tkroot, base)
     b.set_mood("잠")
-    run(b, clock, SAD_SEC + 0.5)
-    assert b.motion == "잠"
-    b.react(*spot(b))
+    run(b, clock, 0.5)
+    assert b.motion == "잠"                               # 슬픔 없이 바로 잔다 (감정은 뺐다)
+    tap(b)
     assert b.motion == "깸" and b.vy < 0
-    b.react(*spot(b))                                    # 깬 뒤 바로 또 누르면 그냥 놀람 (잠 그림이 아니다)
+    tap(b)                                               # 깬 뒤 바로 또 누르면 그냥 놀람 (잠 그림이 아니다)
+    run(b, clock, 0.5)
     assert b.motion == "놀람"
     run(b, clock, 4.0)
     assert b.motion == "잠"                               # 다시 잔다
 
 
-def test_wake_when_away_then_welcome(tkroot, base):
+def test_wake_when_away_is_one_motion(tkroot, base):
     b, clock = make(tkroot, base)
     b.set_away(True)
     run(b, clock, 4.0)
     assert b.mode == "자리비움"
-    b.react(*spot(b))
+    tap(b)
     assert b.mode == "" and b.motion == "깸"
-    got = seen(b, clock, 2.0)
-    assert "점프" in got                                  # 깬 뒤 반긴다
+    got = seen(b, clock, 1.4)
+    assert got == ["깸"]                                  # 깸 하나 (반기는 그림을 잇지 않는다)
 
 
 def test_away_ends_by_input_without_wake(tkroot, base):
@@ -251,21 +271,20 @@ def test_away_ends_by_input_without_wake(tkroot, base):
 
 
 # ------------------------------------------------------------------ 커서
-def test_look_then_shy_and_leave(tkroot, base):
+def test_look_stays_one_motion_and_leave(tkroot, base):
     b, clock = make(tkroot, base)
     cx, cy = screen_mid(b)
     pos = {"p": (cx - 50, cy)}
     b.pointer = lambda: pos["p"]
     b.until = clock.t + 100
     run(b, clock, 0.6)
-    assert b.motion == "쳐다보기" and b.dir == -1
-    run(b, clock, 2.5)
-    assert b.motion == "부끄럼"                            # 오래 가까이 있으면 부끄럼이 이긴다
+    assert b.motion == "쳐다보기" and b.dir == -1 and b.mode == "봄"
+    pos["p"] = (cx + 50, cy)                               # 반대쪽으로 옮겨도 같은 그림을 돌릴 뿐
+    got = seen(b, clock, 20.0)
+    assert got == ["쳐다보기"] and b.dir == 1              # 오래 있어도 평소 그림·부끄럼이 안 낀다
     pos["p"] = (cx + 600, cy)
-    b.until = clock.t + 100
-    b._play("쳐다보기", 30.0, busy=True)
     run(b, clock, 0.2)
-    assert b.motion != "쳐다보기"                          # 커서가 가면 접는다
+    assert b.motion != "쳐다보기" and b.mode == ""        # 커서가 가면 접는다
 
 
 def test_tilt_when_cursor_rests_on_body(tkroot, base):
@@ -323,6 +342,7 @@ def test_peek_at_bar_end_then_click_returns(tkroot, base, side):
     assert b.mode == "빼꼼" and len(xs) == 2             # 깊이 숨었다 내다봤다 번갈아
     assert any(abs(v - edge) > 1 for v in xs) and all((v - edge) * side >= -0.1 for v in xs)
     b.react(b.x - side * b.w / 4, y)                     # 보이는 쪽을 누르면 돌아온다
+    b.tap_up()
     assert b.mode == "복귀"
     until_home(b, clock)
     assert b.mode == "" and b.x == pytest.approx(b.home_x)
@@ -410,21 +430,23 @@ def throw_right(b, clock, step, up=200):
     b.put_down()
 
 
-def test_flying_then_bonk_then_flying(tkroot, base, monkeypatch):
+def test_flying_then_bonk_stays_bonk(tkroot, base, monkeypatch):
     monkeypatch.setattr(wins, "screen_box", lambda w: (-3000.0, -3000.0, 900.0, 3000.0))
     b, clock = make(tkroot, base)
-    throw_right(b, clock, 26, up=1200)                   # 1300px/초: 꽈당은 하되 울 만큼은 아님 (높이 던져 오래 난다)
+    throw_right(b, clock, 26, up=1200)                   # 1300px/초: 꽈당은 하되 세게는 아님 (높이 던져 오래 난다)
     assert b.mode == "던짐" and b.motion == "날아감"
-    got = seen(b, clock, 3.0)
-    assert got[:3] == ["날아감", "꽈당", "날아감"] and "슬픔" not in got
+    got = seen(b, clock, 4.0)
+    assert got[:3] == ["날아감", "꽈당", "뛰기"]          # 부딪히면 내려앉을 때까지 꽈당 (날아감으로 안 돌아감)
 
 
-def test_hard_bonk_then_cry(tkroot, base, monkeypatch):
+def test_hard_bonk_stays_bonk_after_landing(tkroot, base, monkeypatch):
     monkeypatch.setattr(wins, "screen_box", lambda w: (-3000.0, -3000.0, 900.0, 3000.0))
     b, clock = make(tkroot, base)
     throw_right(b, clock, 90)                            # 4500px/초
-    got = seen(b, clock, 4.0)
-    assert got.index("꽈당") < got.index("슬픔")          # 꽈당 > 슬픔: 먼저 꽈당, 그 뒤 운다
+    got = seen(b, clock, 3.0)
+    assert got[:2] == ["날아감", "꽈당"] and b.mode == "울음"   # 내려앉아서도 잠깐 꽈당 그대로
+    got = seen(b, clock, 3.0)
+    assert got[0] == "꽈당" and "뛰기" in got and "슬픔" not in got
 
 
 def test_bar_end_bounces():

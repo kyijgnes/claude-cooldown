@@ -104,6 +104,12 @@ def spot(b):
     return b.x, b.y1 + b.y - b.height / 2
 
 
+def tap(b):
+    """한 번 누르고 뗀다 (누르기 반응은 뗄 때 정한다, 11-21)."""
+    b.react(*spot(b))
+    b.tap_up()
+
+
 def drag_to(b, clock, pts, dt=0.03):
     for px, py in pts:
         clock.t += dt
@@ -280,8 +286,7 @@ def test_drop_on_gauge_eats_then_runs_home(tkroot, basic):
     assert b.c.itemcget(b.c.find_withtag("buddy_fx")[0], "text") == "냠"
     run(b, clock, EAT_SEC)
     assert not b.c.find_withtag("buddy_fx")
-    assert b.motion in ("축하", "뛰기")
-    run(b, clock, 1.3)
+    assert b.motion == "뛰기"                                         # 다 먹으면 곧장 뛰어 돌아간다 (축하를 안 끼운다)
     until_home(b, clock)
     assert b.mode == "" and b.x == pytest.approx(b.home_x)
 
@@ -289,13 +294,21 @@ def test_drop_on_gauge_eats_then_runs_home(tkroot, basic):
 # ------------------------------------------------------------------ 두 번 누르기 · 휠
 def test_double_tap_jumps(tkroot, basic):
     b, clock = make(tkroot, basic)
-    b.react(*spot(b))
-    assert b.motion == "놀람"
+    tap(b)
+    assert b.motion == "서기"                                        # 첫 누름은 두 번 누르기인지 기다린다
     clock.t += 0.2
-    b.react(*spot(b))
-    assert b.motion == "깡충" and b.vy < -10                        # 깡충 칸이 비면 점프를 빌린다
-    clock.t += 1.0
-    b.react(*spot(b))
+    tap(b)
+    assert b.motion == "서기"                                        # 셋째가 오면 연타라 또 기다린다
+    vys = []
+    run(b, clock, 0.4, lambda: vys.append(b.vy))
+    assert b.motion == "깡충" and min(vys) < -5                     # 깡충 칸이 비면 점프를 빌린다
+    run(b, clock, 0.4)
+    tap(b)                                                          # 연타 안: 깡충 그대로 (놀람이 안 낀다)
+    run(b, clock, 0.4)
+    assert b.motion == "깡충"
+    run(b, clock, 3.0)
+    tap(b)
+    run(b, clock, 0.5)
     assert b.motion == "놀람"                                        # 띄엄띄엄은 그냥 누르기
 
 
@@ -323,11 +336,14 @@ def test_looks_at_cursor_and_waves(tkroot, basic):
     cy = b.c.winfo_rooty() + b.y1 - b.height / 2
     b.pointer = lambda: (cx - 50, cy)
     b.until = clock.t + 100                                         # 다른 일은 안 하게
-    run(b, clock, 0.3)
-    assert b.dir == -1                                              # 왼쪽 커서를 본다
-    run(b, clock, 3.0)
-    assert b.motion == "부끄럼"                                      # 오래 대고 있으면 배시시
+    run(b, clock, 0.6)
+    assert b.dir == -1 and b.motion == "쳐다보기"                   # 왼쪽 커서를 본다
+    seen = set()
+    run(b, clock, 6.0, each=lambda: seen.add(b.motion))
+    assert seen == {"쳐다보기"}                                      # 가까이 있는 동안 쳐다보기만
     b.pointer = lambda: (cx + 500, cy)
+    run(b, clock, 0.3)
+    assert b.mode == "" and b.motion != "쳐다보기"                   # 커서가 가면 접는다
     b.until = clock.t + 100
     b.dir = -1
     run(b, clock, 0.3)

@@ -1443,6 +1443,10 @@ class App:
             #   · **클로디 밖을 누름** = 메인 화면. 로그인이 막혀 있으면 메인 화면 맨 위에
             #     로그인 잇기 띠가 선다(`cooldown_main`). 클로디가 없는 스킨은 어디를 눌러도
             #     메인 화면이고, 새로고침은 메인 화면 `사용량` 탭의 [새로고침] 단추로 한다.
+            try:  # 팩 캐릭터는 누를 때 받아 둔 반응을 뗄 때 정한다 (끌려던 것이면 아무 그림도 안 비친다)
+                self.skin.tap_up()
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 played = self.skin.absorbed()
             except Exception:  # noqa: BLE001

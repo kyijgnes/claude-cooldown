@@ -21,7 +21,7 @@ from PIL import Image  # noqa: E402
 
 import cooldown_pack as pack  # noqa: E402
 from skins import carry, wins  # noqa: E402
-from skins.base import ANNOY_COOL, ANNOY_STEPS, Annoy, Shake, set_palette  # noqa: E402
+from skins.base import ANNOY_COOL, ANNOY_STEPS, Annoy, Shake, ShakeMeter, set_palette  # noqa: E402
 from skins.buddy import FADE, FADE_MS, GIVEUP_SEC, REST_MAX, TICK_MS, Buddy  # noqa: E402
 from skins.claudi import FAINT_FRAMES, Claudi  # noqa: E402
 
@@ -112,10 +112,10 @@ def basic(tmp_path):
 
 # ------------------------------------------------------------------ 약속
 def test_seventeen_motions():
-    """열일곱 + 감정 여섯 + 상호작용 열셋 = 서른여섯 (11-21)."""
-    assert len(pack.MOTIONS) == 36 and len(set(pack.MOTIONS)) == 36
-    assert sum(len(ms) for _, ms in pack.GROUPS) == 36
-    assert [g for g, _ in pack.GROUPS] == ["평소", "이동", "상호작용", "상태", "감정"]
+    """열일곱 + 상호작용 열다섯(어질·헤롱 포함) = 서른둘 (11-21, 감정 여섯은 뺐다)."""
+    assert len(pack.MOTIONS) == 32 and len(set(pack.MOTIONS)) == 32
+    assert sum(len(ms) for _, ms in pack.GROUPS) == 32
+    assert [g for g, _ in pack.GROUPS] == ["평소", "이동", "상호작용", "상태"]
     for m in pack.MOTIONS:
         assert pack.MOTION_LABELS[m] and m in pack.FALLBACK and m in pack.DEFAULT_FX
         assert "\n" not in pack.MOTION_LABELS[m] and "—" not in pack.MOTION_LABELS[m]
@@ -191,47 +191,67 @@ def test_annoy_steps_up_and_down():
     assert all(a.tap(i * 2.0) == 0 for i in range(30))              # 2초에 한 번(새로고침)은 안 쌓인다
 
 
+def tap(b):
+    """한 번 누르고 뗀다 (누르기 반응은 뗄 때 정한다, 11-21)."""
+    b.react(*spot(b))
+    b.tap_up()
+
+
 def test_buddy_click_stages_giveup_and_recover(tkroot, basic):
     b, clock = make_buddy(tkroot, basic)
     seen = []
-    for _ in range(60):
-        b.react(*spot(b))
-        seen.append(b.motion if b.mode != "포기" else "포기")
-        run(b, clock, 0.2)
+    for _ in range(80):
+        tap(b)
+        run(b, clock, 0.2, lambda: seen.append(b.motion if b.mode != "포기" else "포기"))
         if b.mode == "포기":
             break
-    assert seen[0] == "놀람" and "짜증" in seen and "화남" in seen and seen[-1] == "포기"
-    assert seen.index("짜증") < seen.index("화남") < seen.index("포기")
+    order = [m for i, m in enumerate(seen) if i == 0 or seen[i - 1] != m]
+    assert order[0] == "서기" and order[1:] == ["놀람", "짜증", "화남", "포기"]   # 첫 누름만 놀람, 번갈지 않는다
     assert b.mode == "포기" and b.motion == "포기"     # 그림이 없으면 빌린다 (서기)
-    b.react(*spot(b))                                 # 체념한 동안은 받기만 한다
+    tap(b)                                            # 체념한 동안은 받기만 한다
     assert b.absorbed() and b.mode == "포기" and b.motion == "포기"
     b.hold(*spot(b))
     assert not b.held
     run(b, clock, GIVEUP_SEC + 0.3)
-    assert b.mode == ""                               # 회복
-    b.react(*spot(b))
+    assert b.mode == ""                               # 회복 (슬픔을 끼우지 않는다)
+    tap(b)
+    run(b, clock, 0.5)
     assert b.motion == "놀람"                          # 처음부터 다시
+
+
+def test_mash_never_flips_back_to_surprise(tkroot, basic):
+    """자꾸 누름(11-21 사용자: 놀람과 짜증이 번갈아 나온다): 짜증에 닿으면 놀람이 다시 안 나온다.
+    누르는 빠르기가 짜증 문턱 언저리에서 오르내려도 그렇다."""
+    b, clock = make_buddy(tkroot, basic)
+    seen = []
+    for i in range(40):
+        tap(b)
+        run(b, clock, 0.3 if i % 3 else 0.6, lambda: seen.append(b.motion))
+    order = [m for i, m in enumerate(seen) if i == 0 or seen[i - 1] != m]
+    assert "짜증" in order and order.index("짜증") == order.index("놀람") + 1
+    assert "놀람" not in order[order.index("짜증"):] and "서기" not in order[order.index("놀람"):]
 
 
 def test_buddy_click_stage_cools_down(tkroot, basic):
     b, clock = make_buddy(tkroot, basic)
     for _ in range(5):
-        b.react(*spot(b))
+        tap(b)
         run(b, clock, 0.15)
     assert b._annoy.level(clock.t) == 0               # 몇 번 누르는 것으로는 짜증 안 남
     for _ in range(7):
-        b.react(*spot(b))
+        tap(b)
         run(b, clock, 0.15)
     assert b._annoy.level(clock.t) >= 1
     run(b, clock, 20)
-    b.react(*spot(b))
+    tap(b)
+    run(b, clock, 0.5)
     assert b.motion == "놀람"
 
 
 def test_no_tap_faint_anymore(tkroot, basic):
     b, clock = make_buddy(tkroot, basic)
     for _ in range(30):
-        b.react(*spot(b))
+        tap(b)
         run(b, clock, 0.08)
         assert b.mode != "기절"
 
@@ -271,8 +291,8 @@ def test_buddy_shaken_off_bar_faints_where_dropped(tkroot, basic, pressed):
     def feed(px, py, t):
         clock.t = t
         b.drag(px, py - 400)
-    clock.t = shake(feed, x, y, clock.t)
-    assert b._held_dizzy and b.motion == "기절"      # 잡힌 채로 벌써 헤롱
+    clock.t = shake(feed, x, y, clock.t, n=60)
+    assert b._stage == 3 and b.motion == "기절"      # 잡힌 채로 셋째 단계
     at = b._carry.at
     b.put_down()
     assert b.mode == "기절" and b._carry is not None   # 바 밖 놓은 그 자리에서 뻗는다
@@ -284,7 +304,7 @@ def test_buddy_shaken_off_bar_faints_where_dropped(tkroot, basic, pressed):
     b.react(*spot(b))
     assert b.mode == "기절"
     run(b, clock, cyc - 0.9)
-    assert b.mode == "날기" and b.motion == "뛰기"     # 깨어나 뛰어 돌아온다
+    assert b.mode == "날기" and b.motion == "뛰기"     # 깨어나 곧장 뛰어 돌아온다
     run(b, clock, carry.RUN_MAX + 0.2)
     assert b.mode == "" and b._carry is None and b.x == pytest.approx(home)
 
@@ -310,7 +330,7 @@ def test_shake_two_or_three_swings_is_enough():
     assert not s.dizzy(t)
 
 
-def test_held_dizzy_wears_off(tkroot, basic, pressed):
+def test_held_dizzy_wears_off_slowly(tkroot, basic, pressed):
     b, clock = make_buddy(tkroot, basic)
     x, y = spot(b)
     assert b.catch(x, y)
@@ -318,10 +338,75 @@ def test_held_dizzy_wears_off(tkroot, basic, pressed):
     def feed(px, py, t):
         clock.t = t
         b.drag(px, py - 400)
-    clock.t = shake(feed, x, y, clock.t)
+    clock.t = shake(feed, x, y, clock.t, n=60)
     assert b.motion == "기절"
-    run(b, clock, 3.5)                                # 들고 가만히 있으면 정신 차린다
-    assert b.mode == "끌림" and b.motion == "끌림" and not b._held_dizzy
+    got = []
+    run(b, clock, 25.0, lambda: got.append(b.motion) if not got or got[-1] != b.motion else None)
+    assert got == ["기절", "헤롱", "어질", "끌림"]       # 들고 가만히 있으면 한 단계씩 천천히 내려온다
+    assert b.mode == "끌림"
+
+
+def shake_for(b, clock, seconds, x, y, amp=60, dt=0.03, hz=4.0):
+    """사람이 마구 흔들듯: 초에 hz 번 좌우로 오간다 (끌기 신호는 dt 마다)."""
+    stages = []
+    t0 = clock.t
+    while clock.t - t0 < seconds:
+        clock.t += dt
+        phase = ((clock.t - t0) * hz) % 1.0
+        dx = amp * (4 * phase - 1 if phase < 0.5 else 3 - 4 * phase)
+        b.drag(x + dx, y - 400)
+        stages.append(b._stage)
+    return stages
+
+
+def test_shake_three_stages_need_real_shaking(tkroot, basic, pressed):
+    """흔들기 세 단계(11-21 사용자: 기절 역치가 너무 낮다): 어질 → 헤롱 → 기절 순서로,
+    어질도 1초 넘게 작정하고 세게 흔들어야 닿는다."""
+    b, clock = make_buddy(tkroot, basic)
+    x, y = spot(b)
+    assert b.catch(x, y)
+    stages = shake_for(b, clock, 1.0, x, y)
+    assert max(stages) == 0                           # 1초 흔든 것으로는 아직 끌림
+    stages += shake_for(b, clock, 6.0, x, y)
+    firsts = [stages.index(k) for k in (1, 2, 3)]
+    assert firsts == sorted(firsts)                   # 차례대로
+    assert b._stage == 3 and b.motion == "기절"
+    assert len([1 for i in range(1, len(stages)) if stages[i] != stages[i - 1]]) == 3   # 오르기만, 번갈지 않음
+
+
+def test_shake_meter_rules():
+    m = ShakeMeter()
+    t = 10.0
+    for i in range(80):                               # 한 방향으로 길게 빨리 끌기
+        m.feed(i * 30, 0, t + i * 0.02)
+    assert m.level(t + 2) == 0
+    m = ShakeMeter()
+    for i in range(60):                               # 느리게 오가기
+        m.feed(80 if i % 2 else -80, 0, t + i * 0.5)
+    assert m.level(t + 31) == 0
+    m = ShakeMeter()
+    for i in range(200):                              # 손 떨림 정도로 작게
+        m.feed(10 if i % 2 else -10, 6 if i % 2 else -6, t + i * 0.02)
+    assert m.level(t + 5) == 0
+
+
+@pytest.mark.parametrize("stage,motion", [(1, "어질"), (2, "헤롱")])
+def test_dizzy_release_wobbles_there_then_runs_home(tkroot, basic, pressed, stage, motion):
+    b, clock = make_buddy(tkroot, basic)
+    home = b.home_x
+    x, y = spot(b)
+    assert b.catch(x, y)
+    b.drag(x - 100, y)
+    b._shake.energy = (b._shake.stages[stage - 1] + b._shake.stages[stage]) / 2
+    b._shake.t = clock.t
+    b._shake.stage = stage
+    b.drag(x - 100, y)
+    assert b.motion == motion
+    b.put_down()                                      # 바 위: 그 자리에서 잠깐 비틀댄다 (그림 그대로)
+    assert b.mode == "기절" and b.motion == motion and abs(b.x - (home - 100)) < 1
+    got = []
+    run(b, clock, 3.5, lambda: got.append(b.motion) if not got or got[-1] != b.motion else None)
+    assert got[0] == motion and "놀람" not in got and "뛰기" in got
 
 
 def test_buddy_shaken_on_bar_faints_there_then_runs_home(tkroot, basic, pressed):
@@ -333,7 +418,7 @@ def test_buddy_shaken_on_bar_faints_there_then_runs_home(tkroot, basic, pressed)
     def feed(px, py, t):
         clock.t = t
         b.drag(px - 100, py)
-    clock.t = shake(feed, x, y, clock.t, amp=30)
+    clock.t = shake(feed, x, y, clock.t, n=48, amp=30)
     b.drag(x - 100, y)                                # 바 위 그 자리로
     b.put_down()
     assert b.mode == "기절" and abs(b.x - (home - 100)) < 1

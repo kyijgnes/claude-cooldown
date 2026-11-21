@@ -158,9 +158,9 @@ def test_group_clip_frames(tmp_path):
 
 # ------------------------------------------------ 동작별 한도
 def test_limits_per_kind():
-    """11-21: 상호작용 1 · 평소·자리비움 16 · 잠 8 · 나머지 이동·상태·감정 4."""
+    """11-21: 상호작용 1 · 평소·자리비움 16 · 잠 8 · 나머지 이동·상태 4."""
     assert all(pack.limit(m) == 1 for m in pack.INTERACT)
-    assert all(pack.limit(m) == 4 for m in ("뛰기", "점프", "허둥", "축하", "슬픔", "심심"))
+    assert all(pack.limit(m) == 4 for m in ("뛰기", "점프", "허둥", "축하"))
     assert all(pack.limit(m) == 16 for m in ("서기", "걷기", "인사", "딴짓", "자리비움"))
     assert pack.limit("잠") == 8
     assert set(pack.LIMITS) == set(pack.MOTIONS)

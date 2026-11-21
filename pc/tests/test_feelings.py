@@ -1,6 +1,8 @@
 """
-감정 묶음 (11-20 넷째): 슬픔·당황·먹기·부끄럼·신남·심심 — 팩 약속(한도·빌리기)과 엔진에서 나오는 때.
+감정 묶음 빼기 (11-21 사용자: 각종 감정이 언제 쓰이는지 모르겠다, 상호작용 그림으로) 와
+1모션 원칙 (상호작용 하나가 끝날 때까지 그 그림 하나).
 
+감정 폴더(슬픔·당황·먹기·부끄럼·신남·심심)가 팩에 남아 있어도 안 쓰이고 오류가 없어야 한다.
 그림은 코드로 만든다(공개 저장소).
 """
 
@@ -20,15 +22,15 @@ import tkinter as tk  # noqa: E402
 from PIL import Image  # noqa: E402
 
 import cooldown_pack as pack  # noqa: E402
-from skins import buddy as buddy_mod  # noqa: E402
 from skins import carry, wins  # noqa: E402
 from skins.base import set_palette  # noqa: E402
-from skins.buddy import FLUSTER_SEC, GIVEUP_SEC, SAD_SEC, TICK_MS, Buddy  # noqa: E402
+from skins.buddy import DOUBLE_SEC, GIVEUP_SEC, TICK_MS, Buddy  # noqa: E402
 
 CHAR = "시험떡"
 W, H = 460, 48
 BOX = (300, 0, 450, H)
-FEELINGS = ("슬픔", "당황", "먹기", "부끄럼", "신남", "심심")
+OLD_FEELINGS = ("슬픔", "당황", "먹기", "부끄럼", "신남", "심심")
+BASE = ("서기", "걷기", "뛰기", "놀람", "끌림", "점프", "인사", "축하", "잠", "딴짓")
 
 
 def _png(path, color):
@@ -88,7 +90,8 @@ def run(b, clock, seconds, each=None):
             each()
 
 
-def seen(b, clock, seconds):
+def changes(b, clock, seconds):
+    """그 동안 바뀐 그림 차례 (이어진 같은 것은 하나로)."""
     got = []
     run(b, clock, seconds, lambda: got.append(b.motion) if not got or got[-1] != b.motion else None)
     return got
@@ -98,7 +101,13 @@ def spot(b):
     return b.x, b.y1 + b.y - b.height / 2
 
 
-BASE = ("서기", "걷기", "뛰기", "놀람", "끌림", "점프", "인사", "축하", "잠", "딴짓")
+def mid(b):
+    return b.c.winfo_rootx() + b.x, b.c.winfo_rooty() + b.y1 - b.height / 2
+
+
+def tap(b):
+    b.react(*spot(b))
+    b.tap_up()
 
 
 @pytest.fixture
@@ -106,216 +115,215 @@ def base(tmp_path):
     return make_pack(str(tmp_path), BASE)
 
 
+@pytest.fixture
+def with_feelings(tmp_path):
+    """옛 팩: 감정 폴더가 그대로 남아 있다."""
+    return make_pack(str(tmp_path / "팩"), BASE + OLD_FEELINGS)
+
+
 # ------------------------------------------------------------------ 팩 약속
-def test_feelings_group_limits_labels():
-    assert dict(pack.GROUPS)["감정"] == FEELINGS
-    assert pack.MOTIONS[-6:] == FEELINGS
-    for m in FEELINGS:
-        assert pack.limit(m) == 4
-        assert pack.MOTION_LABELS[m] and "—" not in pack.MOTION_LABELS[m]
-        assert m in pack.DEFAULT_FX
-    assert pack.FALLBACK["슬픔"][:2] == ("잠", "포기")
-    assert pack.FALLBACK["당황"][:2] == ("허둥", "놀람")
-    assert pack.FALLBACK["먹기"][:2] == ("딴짓", "축하")
-    assert pack.FALLBACK["부끄럼"][:2] == ("인사", "서기")
-    assert pack.FALLBACK["신남"][:2] == ("축하", "점프")
-    assert pack.FALLBACK["심심"][:2] == ("딴짓", "서기")
+def test_feelings_gone_from_pack():
+    for m in OLD_FEELINGS:
+        assert m not in pack.MOTIONS and m not in pack.LIMITS and m not in pack.MOTION_LABELS
+        assert m not in pack.FALLBACK and m not in pack.DEFAULT_FX
+        assert all(m not in fb for fb in pack.FALLBACK.values())     # 빌리는 길에도 없다
+    assert "감정" not in dict(pack.GROUPS)
 
 
-@pytest.mark.parametrize("motion,have,want", [
-    ("슬픔", ("잠", "포기", "서기"), "잠"),
-    ("슬픔", ("포기", "서기"), "포기"),
-    ("당황", ("허둥", "놀람"), "허둥"),
-    ("당황", ("놀람", "서기"), "놀람"),
-    ("먹기", ("딴짓", "축하"), "딴짓"),
-    ("먹기", ("축하", "서기"), "축하"),
-    ("부끄럼", ("인사", "서기"), "인사"),
-    ("부끄럼", ("서기",), "서기"),
-    ("신남", ("축하", "점프"), "축하"),
-    ("신남", ("점프", "서기"), "점프"),
-    ("심심", ("딴짓", "서기"), "딴짓"),
-    ("심심", ("서기",), "서기"),
-])
-def test_empty_feeling_borrows(tmp_path, motion, have, want):
-    root = make_pack(str(tmp_path), have)
-    got = pack.pick_clip(CHAR, motion, root)
-    assert os.sep + want + os.sep in got.files[0]
-    assert got.effect == pack.DEFAULT_FX[motion][0]
-    assert not pack.own(CHAR, motion, root)
+def test_old_feeling_folders_are_ignored(with_feelings):
+    root = with_feelings
+    assert pack.characters(root) == [CHAR]
+    for m in OLD_FEELINGS:
+        assert os.path.isdir(os.path.join(root, CHAR, m))            # 지우지는 않는다
+    for m in pack.MOTIONS:                                           # 어느 동작도 감정 그림을 고르지 않는다
+        for _ in range(5):
+            got = pack.pick_clip(CHAR, m, root)
+            assert got is not None and not any(os.sep + f + os.sep in got.files[0] for f in OLD_FEELINGS)
 
 
-def test_feeling_pack_roundtrip(tmp_path):
-    a, b = str(tmp_path / "a"), str(tmp_path / "b")
-    make_pack(a, ("서기",) + FEELINGS)
-    f = pack.export_pack(CHAR, str(tmp_path / ("x" + pack.PACK_SUFFIX)), a)
-    pack.import_pack(f, b)
-    for m in FEELINGS:
-        assert pack.own(CHAR, m, b)
+def test_old_feeling_folders_round_trip(with_feelings, tmp_path):
+    path = pack.export_pack(CHAR, str(tmp_path / "시험떡.캐릭터팩.zip"), with_feelings)
+    dest = str(tmp_path / "받는 곳")
+    os.makedirs(dest)
+    assert pack.import_pack(path, dest) == CHAR                     # 모르는 동작 폴더는 건너뛴다
+    assert not any(os.path.isdir(os.path.join(dest, CHAR, m)) for m in OLD_FEELINGS)
 
 
-# ------------------------------------------------------------------ 슬픔
-def test_sad_after_giving_up(tkroot, base):
-    b, clock = make(tkroot, base)
-    for _ in range(80):
-        b.react(*spot(b))
-        run(b, clock, 0.12)
-        if b.mode == "포기":
-            break
-    assert b.mode == "포기"
-    run(b, clock, GIVEUP_SEC + 0.1)
-    assert b.mode == "" and b.motion == "슬픔"
-
-
-def test_sad_before_sleep_when_full(tkroot, base):
-    b, clock = make(tkroot, base)
+# ------------------------------------------------------------------ 감정으로 나오던 자리
+def test_no_feeling_ever_plays(tkroot, with_feelings):
+    """감정 그림이 있어도 어떤 일로도 안 나온다 (잡힘·한도·포기·자리비움·축하·오래 둠·커서·먹기)."""
+    b, clock = make(tkroot, with_feelings)
+    got = set()
+    watch = lambda: got.add(b.motion)  # noqa: E731
+    x, y = spot(b)
+    assert b.catch(x, y)
+    b.drag(x - 30, y)
+    run(b, clock, 1.0, watch)
+    b.put_down()
+    run(b, clock, 3.0, watch)
     b.set_mood("잠")
-    assert b.motion == "슬픔"
-    got = seen(b, clock, SAD_SEC + 3.5)
-    assert "잠" in got                                              # 슬퍼한 뒤 잔다
-
-
-def test_sad_after_hard_wall_hit(tkroot, base, monkeypatch):
-    monkeypatch.setattr(wins, "screen_box", lambda w: (-3000.0, -3000.0, 900.0, 3000.0))
-    b, clock = make(tkroot, base)
-    x, y = spot(b)
-    assert b.catch(x, y)
-    for i in range(6):
-        clock.t += 0.02
-        b.drag(x + 90 * i, y - 200)                                # 오른쪽 벽으로 세게
-    b.put_down()
-    assert b.mode == "던짐"
-    got = seen(b, clock, 4.0)
-    assert "슬픔" in got
-    n = 0
-    while b.mode != "" and n < 300:
-        clock.t += TICK_MS / 1000
-        b.step()
-        n += 1
-    assert b.mode == "" and b._carry is None
-
-
-def test_sad_sometimes_when_away_long(tkroot, base, monkeypatch):
-    b, clock = make(tkroot, base)
+    run(b, clock, 3.0, watch)
+    b.set_mood("여유")
+    for _ in range(60):
+        tap(b)
+        run(b, clock, 0.12, watch)
+    run(b, clock, GIVEUP_SEC + 2.0, watch)
     b.set_away(True)
-    monkeypatch.setattr(buddy_mod.random, "random", lambda: 0.0)
-    run(b, clock, 4.0)
-    assert b.motion == "자리비움" or b.motion != "슬픔"            # 처음엔 그냥 자리비움
-    clock.t += buddy_mod.AWAY_SAD
-    b._last = clock.t
-    b.until = 0
-    run(b, clock, 0.2)
-    assert b.motion == "슬픔"
+    run(b, clock, 10.0, watch)
+    b.set_away(False)
+    b.celebrate()
+    b._touched = clock.t - 5000
+    run(b, clock, 40.0, watch)
+    cx, cy = mid(b)
+    b.pointer = lambda: (cx - 40, cy)
+    run(b, clock, 10.0, watch)
+    assert not got & set(OLD_FEELINGS)
+    assert not hasattr(b, "note_usage")                               # 사용량 급등 당황도 없앴다
 
 
-# ------------------------------------------------------------------ 당황
-def test_fluster_when_caught(tkroot, base):
-    b, clock = make(tkroot, base)
+def test_gauge_eat_bakes_stand_even_with_old_eat_folder(tkroot, with_feelings):
+    b, clock = make(tkroot, with_feelings)
     x, y = spot(b)
     assert b.catch(x, y)
-    b.drag(x, y - 300)
-    assert b.motion == "당황"
-    run(b, clock, FLUSTER_SEC + 0.1)
-    assert b.mode == "끌림" and b.motion == "끌림"
-
-
-def test_fluster_on_usage_jump(tkroot, base):
-    b, clock = make(tkroot, base)
-    b.note_usage(20.0)
-    clock.t += 120
-    b.note_usage(24.0)
-    assert b.motion != "당황"                                       # 조금 오르는 건 괜찮다
-    clock.t += 120
-    b.note_usage(31.0)
-    assert b.motion == "당황"
-    b, clock = make(tkroot, base)
-    b.note_usage(20.0)
-    clock.t += 3600
-    b.note_usage(40.0)
-    assert b.motion != "당황"                                       # 천천히 오른 건 아니다
-
-
-# ------------------------------------------------------------------ 먹기
-def test_gauge_eat_uses_eat_picture(tkroot, tmp_path):
-    root = make_pack(str(tmp_path), BASE + ("먹기",))
-    b, clock = make(tkroot, root)
-    x, y = spot(b)
-    assert b.catch(x, y)
-    b.drag(120, y)
+    b.drag(150, y)
     b.put_down()
-    assert b.mode == "냠냠" and b.motion == "먹기"
+    assert b.mode == "냠냠" and b.motion == "냠냠" and b.clip is None   # 서기를 쭈그려 구운 장면
 
 
-def test_snack_time_only_with_own_picture(tkroot, tmp_path, base, monkeypatch):
-    monkeypatch.setattr(buddy_mod, "SNACK_P", 1.0)
+# ------------------------------------------------------------------ 1모션
+def test_drag_start_shows_only_drag(tkroot, base):
+    """누르는 순간 놀람·눌림이 비치지 않고, 끌기로 판정되면 곧바로 끌림."""
     b, clock = make(tkroot, base)
-    b.until = 0
-    got = seen(b, clock, 6.0)
-    assert "먹기" not in got                                        # 먹기 그림이 없으면 간식 시간도 없다
-    root = make_pack(str(tmp_path / "eat"), BASE + ("먹기",))
-    b, clock = make(tkroot, root)
-    b.until = 0
-    got = seen(b, clock, 0.5)
-    assert "먹기" in got
+    got = []
+    x, y = spot(b)
+    b.react(x, y)                                                     # 앱 _press
+    assert b.catch(x, y)
+    run(b, clock, 0.2, lambda: got.append(b.motion))
+    b.drag(x - 20, y)                                                  # 앱 _drag (DRAG_SLOP 넘음)
+    run(b, clock, 1.0, lambda: got.append(b.motion))
+    assert set(got[:5]) == {"서기"} and set(got[5:]) == {"끌림"}
+    b.put_down()
+    run(b, clock, 0.2)
+    assert b._pending is None and b.motion != "놀람"                 # 놓은 뒤에도 받아 둔 누르기가 안 튀어나온다
 
 
-# ------------------------------------------------------------------ 부끄럼
-def test_shy_when_rubbed(tkroot, base):
+def test_long_press_then_drag_shows_no_press_picture(tkroot, base):
+    """앱이 꾹 누름을 알린 직후 끌기 시작하면 눌림도 안 비친다."""
     b, clock = make(tkroot, base)
-    b.until = clock.t + 100
-    cx = b.c.winfo_rootx() + b.x
-    cy = b.c.winfo_rooty() + b.y1 - b.height / 2
-    path = [cx - 8, cx + 8] * 4
+    x, y = spot(b)
+    b.react(x, y)
+    b.catch(x, y)
+    run(b, clock, 0.34)
+    b.hold(x, y)
+    got = []
+    run(b, clock, 0.12, lambda: got.append(b.motion))
+    b.drag(x - 20, y)
+    run(b, clock, 0.4, lambda: got.append(b.motion))
+    assert "눌림" not in got and "놀람" not in got and got[-1] == "끌림"
+
+
+def test_long_press_is_press_only(tkroot, base):
+    b, clock = make(tkroot, base)
+    x, y = spot(b)
+    b.react(x, y)
+    run(b, clock, 0.34)
+    b.hold(x, y)
+    got = changes(b, clock, 1.5)
+    b.let_go()
+    b.tap_up()
+    got += changes(b, clock, 0.5)
+    assert got[:2] == ["서기", "눌림"] and "놀람" not in got         # 놓아도 눌림 그대로 튕긴다
+
+
+def test_single_tap_is_one_surprise(tkroot, base):
+    b, clock = make(tkroot, base)
+    tap(b)
+    got = changes(b, clock, 3.0)
+    assert got[:2] == ["서기", "놀람"] and got.count("놀람") == 1
+    assert b._tap_wait is None
+
+
+def test_tap_waits_double_sec_then_surprise(tkroot, base):
+    b, clock = make(tkroot, base)
+    tap(b)
+    run(b, clock, DOUBLE_SEC - 0.1)
+    assert b.motion == "서기"
+    run(b, clock, 0.2)
+    assert b.motion == "놀람"
+
+
+def test_watch_waits_for_cursor_to_leave_after_tap(tkroot, base):
+    """누른 손이 곧 커서라 놀람이 끝나자마자 쳐다보기가 섞이지 않는다. 한 번 떠났다 오면 본다."""
+    b, clock = make(tkroot, base)
+    cx, cy = mid(b)
     pos = {"p": (cx, cy)}
     b.pointer = lambda: pos["p"]
-    for px in path:
-        pos["p"] = (px, cy)
-        run(b, clock, 0.08)
-    assert b.motion == "간지럼"                                     # 11-21 부터 쓰다듬기는 간지럼
-
-
-def test_hover_without_rub_is_not_shy_right_away(tkroot, base):
-    b, clock = make(tkroot, base)
-    b.until = clock.t + 100
-    cx = b.c.winfo_rootx() + b.x
-    cy = b.c.winfo_rooty() + b.y1 - b.height / 2
-    b.pointer = lambda: (cx + 2, cy)
+    tap(b)
+    got = set()
+    run(b, clock, 4.0, lambda: got.add(b.motion))
+    assert "놀람" in got and not got & {"쳐다보기", "갸웃", "간지럼"}
+    pos["p"] = (cx + 500, cy)
+    run(b, clock, 0.2)
+    pos["p"] = (cx + 40, cy)
     run(b, clock, 1.0)
-    assert b.motion != "부끄럼"
+    assert b.motion == "쳐다보기"
 
 
-# ------------------------------------------------------------------ 신남
-def test_excited_after_double_jump(tkroot, base):
+def test_watch_tilt_when_resting_on_body(tkroot, base):
+    """몸 위에 가만히 머물면 갸웃 하나 (쳐다보기를 거치지 않는다)."""
     b, clock = make(tkroot, base)
-    b.react(*spot(b))
-    clock.t += 0.2
-    b.react(*spot(b))
-    assert b.motion == "깡충"
-    got = seen(b, clock, 1.5)
-    assert "신남" in got
+    cx, cy = mid(b)
+    b.pointer = lambda: (cx + 2, cy)
+    assert changes(b, clock, 6.0) == ["서기", "갸웃"]
 
 
-def test_excited_after_celebrate(tkroot, base):
+def test_rub_upgrades_look_once(tkroot, base):
     b, clock = make(tkroot, base)
-    b.celebrate()
-    assert b.motion == "축하"
-    got = seen(b, clock, 3.2)
-    assert "신남" in got
+    cx, cy = mid(b)
+    pos = {"p": (cx - 50, cy)}
+    b.pointer = lambda: pos["p"]
+    run(b, clock, 0.8)
+    assert b.motion == "쳐다보기"
+    got = []
+    for i in range(30):
+        pos["p"] = (cx + (8 if i % 2 else -8), cy)
+        got += changes(b, clock, 0.08)
+    got += changes(b, clock, 2.4)                                      # 문지른 뒤 가만있어도 간지럼 그대로
+    got = [m for i, m in enumerate(got) if i == 0 or got[i - 1] != m]
+    assert got[-1] == "간지럼" and got.count("간지럼") == 1 and "갸웃" not in got
 
 
-# ------------------------------------------------------------------ 심심
-def test_bored_after_long_untouched(tkroot, base, monkeypatch):
+def test_mood_change_waits_for_interaction(tkroot, base):
     b, clock = make(tkroot, base)
-    monkeypatch.setattr(buddy_mod.random, "random", lambda: 0.1)
-    b.x = b.home_x
-    clock.t += buddy_mod.BORED_LONG + 5
-    b._last = clock.t
-    b.until = 0
-    run(b, clock, 0.1)
-    assert b.motion == "심심"
-    b2, clock2 = make(tkroot, base)
-    b2.x = b2.home_x
-    clock2.t += 100
-    b2._last = clock2.t
-    b2.until = 0
-    run(b2, clock2, 0.1)
-    assert b2.motion == "딴짓"                                      # 덜 오래면 그냥 딴짓
+    tap(b)
+    run(b, clock, 0.5)
+    assert b.motion == "놀람"
+    b.set_mood("허둥")
+    run(b, clock, 0.2)
+    assert b.motion == "놀람"                                         # 기분이 바뀌어도 누르기 반응을 끊지 않는다
+
+
+def test_perch_keeps_one_picture(tkroot, base, monkeypatch):
+    b, clock = make(tkroot, base)
+    monkeypatch.setattr(wins, "rect_of", lambda h: (0, 0, 800, 600))
+    x, y = spot(b)
+    assert b.catch(x, y)
+    b.drag(x, y - 400)
+    monkeypatch.setattr(wins, "title_bar_at", lambda sx, sy: (1, (0, 0, 800, 600)))
+    b.put_down()
+    assert b.mode == "앉음"
+    clip = b.clip
+    assert changes(b, clock, 30.0) == ["앉기"] and b.clip == clip    # 빌린 그림(인사)도 바꿔 가며 틀지 않는다
+
+
+def test_faint_wakes_without_surprise(tkroot, base):
+    b, clock = make(tkroot, base)
+    x, y = spot(b)
+    b.catch(x, y)
+    b.drag(x - 80, y)
+    b._shake.energy, b._shake.t, b._shake.stage = 40.0, clock.t, 3
+    b.drag(x - 80, y)
+    assert b.motion == "기절"
+    b.put_down()
+    got = changes(b, clock, 8.0)
+    assert got[0] == "기절" and "놀람" not in got

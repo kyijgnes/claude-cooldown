@@ -276,6 +276,13 @@ class Skin:
         """`hold()` 뒤에 손을 뗐을 때(선택). 끌기로 접힐 때도 불린다."""
         pass
 
+    def tap_up(self) -> None:
+        """누른 손을 끌지 않고 뗐다(앱 `_release` 의 클릭 길). 팩 캐릭터는 누를 때가 아니라 이때
+        반응을 정한다(11-21: 끌려던 것인데 놀람이 먼저 비치지 않게)."""
+        ch = self._char()
+        if ch is not None and hasattr(ch, "tap_up"):
+            ch.tap_up()
+
     # ---------------------------------------------- 바 캐릭터 상호작용 (11-20)
     # 캐릭터(클로디·팩 캐릭터)가 있는 스킨은 `self.claudi` 를 두면 아래가 그대로 넘긴다.
     # 캐릭터 없는 스킨은 전부 아무 일 없음(`catch` 거짓 = 끌면 창이 움직인다).
@@ -325,8 +332,6 @@ class Skin:
         if ch is None or not hasattr(ch, "set_mood"):
             return
         ch.set_mood(char_mood(usage.five.pct, usage.week.pct))
-        if hasattr(ch, "note_usage"):  # 사용량이 짧은 새 크게 뛰면 당황
-            ch.note_usage(usage.five.pct)
         before = getattr(self, "_feel_five", None)
         if cooldown_pack.was_reset(before, usage.five.pct) and hasattr(ch, "celebrate"):
             ch.celebrate()
@@ -439,7 +444,8 @@ class Shake:
         self.peak = [0.0, 0.0]
         self.dir = [0, 0]
         self.turns: list[float] = []
-        self.path: list[tuple[float, float]] = []  # (때, 움직인 거리)
+        self.path: list[tuple[float, float]] = []  # (때, 그 앞 점에서 움직인 거리)
+        self.prev_t: float | None = None
         self.hit_at: float | None = None
 
     def feed(self, x: float, y: float, now: float) -> bool:
@@ -473,6 +479,83 @@ class Shake:
 
     def dizzy(self, now: float) -> bool:
         return self.hit_at is not None and now - self.hit_at <= SHAKE_KEEP
+
+
+# 흔들기 세 단계(11-21 사용자: 기절 역치가 너무 낮다, 단계를 나누자). 끄는 동안 **세게** 휘둘러
+# 방향을 바꿀 때마다(폭 SHAKE_HARD_SWING px 넘게, 그 무렵 빠르기 SHAKE_HARD_SPEED px/초 넘게) 1 씩 쌓이고
+# 초마다 SHAKE_DECAY 씩 식는다. 쌓인 것이 SHAKE_STAGES 에 닿으면 어질 · 헤롱 · 기절.
+# 마구 흔들면(초에 3~4번 오감) 방향이 초에 6~8번 바뀌므로 어질은 1.5~2초, 헤롱은 3~4초, 기절은 5~7초쯤
+# 작정하고 흔들어야 닿는다. 옛 기준(1.2초 안에 세 번)은 살짝 흔들어도 기절했다.
+SHAKE_HARD_SWING = 36.0
+SHAKE_HARD_SPEED = 650.0
+SHAKE_STAGES = (9.0, 20.0, 32.0)
+SHAKE_DECAY = 1.5
+SHAKE_SPEED_SPAN = 0.35  # 빠르기를 재는 사이 (초)
+SHAKE_HYST = 3.0  # 내려올 때는 문턱보다 이만큼 더 식어야 한 단계 내린다 (문턱 언저리에서 그림이 깜빡이지 않게)
+
+
+class ShakeMeter:
+    """끄는 동안 흔든 정도 → 단계 0(그냥 끌림)·1(어질)·2(헤롱)·3(기절). 시계는 바깥에서 받는다.
+    `feed(x, y, now)` 를 끌 때마다 부르면 지금 단계를 낸다. 멈추면 `level(now)` 이 천천히 내려온다."""
+
+    def __init__(self, stages=SHAKE_STAGES, decay: float = SHAKE_DECAY):
+        self.stages, self.decay = stages, decay
+        self.reset()
+
+    def reset(self) -> None:
+        self.energy = 0.0
+        self.stage = 0
+        self.t: float | None = None
+        self.last: tuple[float, float] | None = None
+        self.peak = [0.0, 0.0]
+        self.dir = [0, 0]
+        self.path: list[tuple[float, float]] = []  # (때, 그 앞 점에서 움직인 거리)
+        self.prev_t: float | None = None
+
+    def _cool(self, now: float) -> None:
+        if self.t is not None:
+            self.energy = max(0.0, self.energy - self.decay * max(0.0, now - self.t))
+        self.t = now
+
+    def level(self, now: float) -> int:
+        self._cool(now)
+        return self._stage()
+
+    def _stage(self) -> int:
+        up = sum(self.energy >= s for s in self.stages)
+        if up > self.stage:
+            self.stage = up
+        while self.stage > 0 and self.energy < self.stages[self.stage - 1] - SHAKE_HYST:
+            self.stage -= 1
+        return self.stage
+
+    def feed(self, x: float, y: float, now: float) -> int:
+        self._cool(now)
+        if self.last is not None:
+            lx, ly = self.last
+            self.path.append((self.prev_t, ((x - lx) ** 2 + (y - ly) ** 2) ** 0.5))
+        else:
+            self.peak = [x, y]
+        self.last = (x, y)
+        self.prev_t = now
+        # 빠르기 = 최근 SHAKE_SPEED_SPAN 동안 움직인 길이 ÷ 그 시간 (점 사이가 길면 그 시간까지 친다)
+        self.path = [p for p in self.path if now - p[0] <= SHAKE_SPEED_SPAN]
+        span = max(0.05, now - self.path[0][0]) if self.path else SHAKE_SPEED_SPAN
+        fast = sum(d for _, d in self.path) / span >= SHAKE_HARD_SPEED
+        for i, v in enumerate((x, y)):
+            d = self.dir[i]
+            if d == 0:
+                if abs(v - self.peak[i]) >= SHAKE_HARD_SWING:
+                    self.dir[i] = 1 if v > self.peak[i] else -1
+                    self.peak[i] = v
+            elif (v - self.peak[i]) * d > 0:
+                self.peak[i] = v
+            elif abs(v - self.peak[i]) >= SHAKE_HARD_SWING:
+                if fast:
+                    self.energy = min(self.stages[-1] + 2.0, self.energy + 1.0)
+                self.dir[i] = -d
+                self.peak[i] = v
+        return self._stage()
 
 
 def idle_seconds() -> float:
