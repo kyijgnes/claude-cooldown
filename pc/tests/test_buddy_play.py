@@ -295,10 +295,10 @@ def test_drop_on_gauge_eats_then_runs_home(tkroot, basic):
 def test_double_tap_jumps(tkroot, basic):
     b, clock = make(tkroot, basic)
     tap(b)
-    assert b.motion == "서기"                                        # 첫 누름은 두 번 누르기인지 기다린다
+    assert b.motion == "놀람"                                        # 떼자마자 놀람 (기다리지 않는다)
     clock.t += 0.2
     tap(b)
-    assert b.motion == "서기"                                        # 셋째가 오면 연타라 또 기다린다
+    assert b.motion == "놀람" and b.fi == 0                          # 둘째도 놀람을 처음부터, 셋째가 오는지 본다
     vys = []
     run(b, clock, 0.4, lambda: vys.append(b.vy))
     assert b.motion == "깡충" and min(vys) < -5                     # 깡충 칸이 비면 점프를 빌린다
@@ -324,7 +324,7 @@ def test_wheel_spins_and_too_much_faints(tkroot, basic):
     for _ in range(SPIN_FAINT):
         clock.t += 0.1
         b.wheel(*spot(b), -120)
-    assert b.mode == "기절"
+    assert b.mode == "기절" and b.motion == "헤롱"                  # 어지러워 비틀댄다 (기절 그림은 흔들기 3단계 전용)
 
 
 # ------------------------------------------------------------------ 쳐다보기
@@ -345,6 +345,7 @@ def test_looks_at_cursor_and_waves(tkroot, basic):
     run(b, clock, 0.3)
     assert b.mode == "" and b.motion != "쳐다보기"                   # 커서가 가면 접는다
     b.until = clock.t + 100
+    b.target = None                                                 # 접을 때 고른 거닐 곳이 있으면 돌아선다 (가끔 실패하던 것)
     b.dir = -1
     run(b, clock, 0.3)
     assert b.dir == -1                                              # 멀면 상관 안 함

@@ -77,7 +77,7 @@ MOTION_LABELS = {
     "깡충": "두 번 누름",
     "빙글": "휠 굴림",
     "날아감": "던져서 나는 동안",
-    "꽈당": "던져져 벽·바 끝에 쾅",
+    "꽈당": "부딪히거나 떨어져 쓰러짐",
     "앉기": "창 제목 줄에 앉아 있음",
     "쳐다보기": "커서가 가까이 옴",
     "간지럼": "커서로 좌우로 문지름",
@@ -86,7 +86,7 @@ MOTION_LABELS = {
     "빼꼼": "바 끝 밖에 놓아 숨음",
     "밀기": "걷다 막대 끝을 밂",
     "깸": "자는 중에 누름",
-    "허우적": "화면 위쪽에서 떨어짐",
+    "허우적": "높은 데서 떨어지는 동안",
     "허둥": "사용량 80% 넘음",
     "잠": "한도 다 참",
     "축하": "한도 풀림",
@@ -108,11 +108,11 @@ FALLBACK = {
     "끌림": ("놀람", "허둥", "서기"),
     "어질": ("끌림", "놀람", "서기"),
     "헤롱": ("기절", "어질", "끌림", "서기"),
-    "기절": ("잠", "눌림", "서기"),
+    "기절": ("잠", "눌림", "서기"),  # ★ 기절은 흔들기 3단계 전용. 꽈당을 빌리지 않는다 (11-21)
     "깡충": ("점프", "놀람", "서기"),
     "빙글": ("놀람", "서기"),
     "날아감": ("끌림", "놀람", "서기"),
-    "꽈당": ("기절", "놀람", "서기"),
+    "꽈당": ("놀람", "눌림", "서기"),  # ★ 기절을 빌리지 않는다. 빌린 그림은 쓰러졌다 일어난다 (11-21)
     "앉기": ("인사", "서기"),
     "쳐다보기": ("서기",),
     "간지럼": ("인사", "서기"),
@@ -252,7 +252,7 @@ DEFAULT_FX = {
     "놀람": ("쭈그러짐", 2), "눌림": ("쭈그러짐", 1), "짜증": ("떨기", 1), "화남": ("떨기", 3),
     "포기": ("숨쉬기", 1), "끌림": ("흔들", 3),
     "어질": ("흔들", 3), "헤롱": ("헤롱", 2), "기절": ("헤롱", 3),
-    "깡충": ("통통", 3), "빙글": ("빙글", 2), "날아감": ("흔들", 2), "꽈당": ("쭈그러짐", 3),
+    "깡충": ("통통", 3), "빙글": ("빙글", 2), "날아감": ("흔들", 2), "꽈당": ("쓰러짐", 2),
     "앉기": ("숨쉬기", 1), "쳐다보기": ("숨쉬기", 1), "간지럼": ("떨기", 1), "갸웃": ("좌우", 1),
     "하트": ("통통", 2), "빼꼼": ("좌우", 1), "밀기": ("떨기", 1), "깸": ("떨기", 3),
     "허우적": ("흔들", 3),
@@ -449,15 +449,30 @@ def was_reset(before: float | None, after: float | None) -> bool:
 
 
 # ---------------------------------------------------------------- 그림 읽기·맞추기
+FRAME_MIN_MS = 10   # 이보다 짧은 장면 길이는 이만큼으로 (0·없음은 FRAME_ZERO_MS)
+FRAME_ZERO_MS = 100
+
+
+def frame_ms(ms) -> int:
+    """파일에 든 장면 길이 → 틀 길이(ms). 길이가 없거나 0 이면 브라우저처럼 100ms."""
+    try:
+        ms = int(round(float(ms)))
+    except (TypeError, ValueError):
+        return FRAME_ZERO_MS
+    return FRAME_ZERO_MS if ms <= 0 else max(FRAME_MIN_MS, ms)
+
+
 def read_frames(path: str):
-    """그림 파일 → [(RGBA, ms), ...] (크기 그대로)."""
+    """그림 파일 → [(RGBA, ms), ...] (크기 그대로). ms 는 **그 장면의** 길이(파일에 든 그대로).
+    ★ WebP 는 장면을 읽어야(`convert`·`load`) 그 장면 길이가 info 에 담긴다. 읽기 전에 보면 앞 장면
+    길이가 나와 한 장씩 밀리고 첫 장은 100ms 가 됐다(11-21 사용자: 놀람이 원래보다 느리다)."""
     from PIL import Image, ImageSequence
 
     out = []
     with Image.open(path) as im:
         for frame in ImageSequence.Iterator(im):
-            ms = frame.info.get("duration") or im.info.get("duration") or 100
-            out.append((frame.convert("RGBA"), int(ms)))
+            rgba = frame.convert("RGBA")
+            out.append((rgba, frame_ms(frame.info.get("duration"))))
     return out
 
 
@@ -547,7 +562,7 @@ def fit_frames(frames, height: int, speed: float = 1.0, width: int | None = None
     for f, ms in frames:
         canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         canvas.paste(f, ((w - f.width) // 2, h - f.height))
-        out.append((canvas.resize((tw, th), Image.LANCZOS), max(20, int(ms / max(0.1, speed)))))
+        out.append((canvas.resize((tw, th), Image.LANCZOS), max(FRAME_MIN_MS, round(ms / max(0.1, speed)))))
     return out
 
 
@@ -567,6 +582,8 @@ FX_FRAMES = {  # 효과: (장면 수, 한 장면 ms). 쓰러짐·빙글은 아�
 FALL_STEPS, FALL_MS = 7, 45      # 쓰러지는 장면
 FALL_BOUNCE = (78, 90, 85, 90)   # 바닥에 닿고 한 번 들썩 (도)
 FALL_TAIL, FALL_TAIL_MS = 4, 160  # 누운 채 별이 도는 장면 (여기만 되돌아 돈다)
+# 꽈당(11-21): 쓰러짐 뒤에 털고 일어나는 장면을 붙인다. 누운 장면만 돌다가 바 캐릭터가 일어날 때
+# 마지막 RISE 장면을 튼다(`buddy`). 붙였는지는 `rise_steps`.
 SPIN_STEPS, SPIN_MS, SPIN_REST = 12, 45, 700
 # 헤롱: 비틀비틀 기울며 머리 위로 별이 돌다가(점점 크게) 픽 쓰러져 잠깐 누워 있고, 털고 일어난다.
 # 한 번 도는 데 약 3초. 기절이 이 길이만큼 이어진다(`buddy._faint`).
@@ -575,6 +592,21 @@ DIZZY_LIE, DIZZY_LIE_MS = 8, 140  # 누워서 별이 도는 장면
 DIZZY_UP, DIZZY_UP_MS = 6, 55     # 일어나는 장면
 STAR = (255, 213, 74, 255)
 STAR_EDGE = (90, 60, 10, 255)
+
+
+_RISEN: dict = {}  # 일어나는 장면을 붙여 구운 후보 key → 그 장면 수
+
+
+def kapow(clip: Clip) -> bool:
+    """꽈당 칸의 후보인가 (제 것이든 빌린 것이든)."""
+    if clip.key.startswith("꽈당<"):
+        return True
+    return bool(clip.files) and os.path.basename(os.path.dirname(clip.files[0])) == "꽈당"
+
+
+def rise_steps(clip: Clip) -> int:
+    """이 후보를 구운 장면 끝에 일어나는 장면이 몇 장 붙었나 (`load_clip` 뒤에 묻는다). 없으면 0."""
+    return _RISEN.get(clip.key, 0)
 
 
 def fx_count(effect: str, power: int = 2) -> int:
@@ -631,9 +663,10 @@ def _stars(frame, center, rx, ry, r, count, phase):
     return frame
 
 
-def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300):
+def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300, rise: bool = False):
     """고정 그림(들) → ([(RGBA, ms)], 되감을 자리). 그림이 여럿이면(이어 붙이기) `gap_ms` 마다 갈아 끼우며
-    효과를 같이 준다. 그림은 크기가 같아야 한다(`same_height`)."""
+    효과를 같이 준다. 그림은 크기가 같아야 한다(`same_height`). `rise` 면 쓰러짐 끝에 일어나는 장면
+    `DIZZY_UP` 장을 붙인다 (되감을 자리는 그대로 누운 장면 처음)."""
     import math
 
     imgs = list(imgs) if isinstance(imgs, (list, tuple)) else [imgs]
@@ -700,6 +733,11 @@ def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300):
                    h * 0.06, max(2.0, h * 0.06), count, j * math.tau / FALL_TAIL / count)
             out.append((f, FALL_TAIL_MS))
             t_ms += FALL_TAIL_MS
+        if rise:
+            for j in range(DIZZY_UP):  # 털고 일어난다 (끝은 똑바로 선다)
+                ang = 90 * (1 - (j + 1) / DIZZY_UP) ** 1.5
+                out.append((_pose(img_at(t_ms), size, base, angle=ang, pivot=pivot), DIZZY_UP_MS))
+                t_ms += DIZZY_UP_MS
         return out, loop_from
     if effect == "헤롱":
         return _dizzy(img_at, size, base, w, h, k, power), 0
@@ -776,11 +814,17 @@ def same_height(imgs, height: int):
 def clip_frames(clip: Clip, work_h: int = 140):
     """후보 하나 → ([(RGBA, ms)], 되감을 자리), 크기는 아직 안 맞춘 것. 움직이는 그림(여러 장)은
     그대로 쓰고 효과는 안 준다. 고정 그림·이어 붙이기는 `work_h` 높이로 맞춘 뒤 굽는다."""
+    rise = clip.effect == "쓰러짐" and kapow(clip)
+    _RISEN.pop(clip.key, None)
     if len(clip.files) == 1:
         raw = read_frames(clip.files[0])
-        if len(raw) > 1 or clip.effect == "없음":
+        # 움직이는 그림은 효과를 안 준다. 단 꽈당이 빌린 움직이는 그림(놀람 등)은 첫 장을 쓰러뜨린다
+        if (len(raw) > 1 and not (rise and "<" in clip.key)) or clip.effect == "없음":
             return raw, 0
-        return bake(same_height([raw[0][0]], work_h), clip.effect, clip.power)
+        got = bake(same_height([raw[0][0]], work_h), clip.effect, clip.power, rise=rise)
+        if rise:
+            _RISEN[clip.key] = DIZZY_UP
+        return got
     stills = []
     for p in clip.files:
         try:
@@ -791,7 +835,10 @@ def clip_frames(clip: Clip, work_h: int = 140):
             stills.append(raw[0][0])
     if not stills:
         return [], 0
-    return bake(same_height(stills, work_h), clip.effect, clip.power, int(clip.gap * 1000))
+    got = bake(same_height(stills, work_h), clip.effect, clip.power, int(clip.gap * 1000), rise=rise)
+    if rise:
+        _RISEN[clip.key] = DIZZY_UP
+    return got
 
 
 def load_clip(clip: Clip, height: int, width: int | None = None):

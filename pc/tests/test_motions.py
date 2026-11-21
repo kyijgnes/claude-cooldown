@@ -206,7 +206,7 @@ def test_buddy_click_stages_giveup_and_recover(tkroot, basic):
         if b.mode == "포기":
             break
     order = [m for i, m in enumerate(seen) if i == 0 or seen[i - 1] != m]
-    assert order[0] == "서기" and order[1:] == ["놀람", "짜증", "화남", "포기"]   # 첫 누름만 놀람, 번갈지 않는다
+    assert order == ["놀람", "짜증", "화남", "포기"]   # 떼자마자 놀람, 단계가 오르면 번갈지 않는다
     assert b.mode == "포기" and b.motion == "포기"     # 그림이 없으면 빌린다 (서기)
     tap(b)                                            # 체념한 동안은 받기만 한다
     assert b.absorbed() and b.mode == "포기" and b.motion == "포기"

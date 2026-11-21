@@ -24,7 +24,7 @@ from PIL import Image  # noqa: E402
 import cooldown_pack as pack  # noqa: E402
 from skins import carry, wins  # noqa: E402
 from skins.base import set_palette  # noqa: E402
-from skins.buddy import DOUBLE_SEC, GIVEUP_SEC, TICK_MS, Buddy  # noqa: E402
+from skins.buddy import GIVEUP_SEC, TICK_MS, Buddy  # noqa: E402
 
 CHAR = "시험떡"
 W, H = 460, 48
@@ -238,18 +238,15 @@ def test_long_press_is_press_only(tkroot, base):
 def test_single_tap_is_one_surprise(tkroot, base):
     b, clock = make(tkroot, base)
     tap(b)
-    got = changes(b, clock, 3.0)
-    assert got[:2] == ["서기", "놀람"] and got.count("놀람") == 1
-    assert b._tap_wait is None
+    got = [b.motion] + changes(b, clock, 3.0)
+    assert got[:2] == ["놀람", "놀람"] and got.count("놀람") == 2 and got[2] != "놀람"   # 놀람 한 번 뒤 평소
 
 
-def test_tap_waits_double_sec_then_surprise(tkroot, base):
+def test_tap_surprises_at_once(tkroot, base):
+    """떼자마자 놀람 (두 번 누르기를 기다리지 않는다, 11-21 사용자: 놀람이 느리다)."""
     b, clock = make(tkroot, base)
     tap(b)
-    run(b, clock, DOUBLE_SEC - 0.1)
-    assert b.motion == "서기"
-    run(b, clock, 0.2)
-    assert b.motion == "놀람"
+    assert b.motion == "놀람" and b.fi == 0
 
 
 def test_watch_waits_for_cursor_to_leave_after_tap(tkroot, base):

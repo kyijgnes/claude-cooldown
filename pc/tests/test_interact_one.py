@@ -169,7 +169,8 @@ def test_over_limit_pack_uses_first_and_keeps_files(tmp_path):
 @pytest.mark.parametrize("motion,have,want", [
     ("깡충", ("점프", "놀람"), "점프"),
     ("깡충", ("놀람", "서기"), "놀람"),
-    ("꽈당", ("기절", "놀람"), "기절"),
+    ("꽈당", ("기절", "놀람"), "놀람"),                  # 기절은 흔들기 전용이라 꽈당이 안 빌린다
+    ("꽈당", ("기절", "서기"), "서기"),
     ("앉기", ("인사", "서기"), "인사"),
     ("간지럼", ("인사", "서기"), "인사"),
     ("하트", ("서기",), "서기"),
@@ -215,7 +216,7 @@ def test_fast_triple_tap_is_mash_not_hop(tkroot, tmp_path):
         tap(b)
         run(b, clock, 0.15, lambda: got.append(b.motion) if not got or got[-1] != b.motion else None)
     run(b, clock, 0.6, lambda: got.append(b.motion) if not got or got[-1] != b.motion else None)
-    assert got == ["서기", "놀람"]
+    assert got == ["놀람"]                                # 떼자마자 놀람, 셋 넘게 빠르면 깡충이 안 끼고 놀람만
 
 
 def test_heart_on_middle_click(tkroot, base):
@@ -435,8 +436,9 @@ def test_flying_then_bonk_stays_bonk(tkroot, base, monkeypatch):
     b, clock = make(tkroot, base)
     throw_right(b, clock, 26, up=1200)                   # 1300px/초: 꽈당은 하되 세게는 아님 (높이 던져 오래 난다)
     assert b.mode == "던짐" and b.motion == "날아감"
-    got = seen(b, clock, 4.0)
-    assert got[:3] == ["날아감", "꽈당", "뛰기"]          # 부딪히면 내려앉을 때까지 꽈당 (날아감으로 안 돌아감)
+    got = seen(b, clock, 6.0)
+    assert got[:3] == ["날아감", "꽈당", "뛰기"]          # 부딪히면 내려앉아 일어날 때까지 꽈당 (날아감으로 안 돌아감)
+    assert "기절" not in got
 
 
 def test_hard_bonk_stays_bonk_after_landing(tkroot, base, monkeypatch):
@@ -444,9 +446,9 @@ def test_hard_bonk_stays_bonk_after_landing(tkroot, base, monkeypatch):
     b, clock = make(tkroot, base)
     throw_right(b, clock, 90)                            # 4500px/초
     got = seen(b, clock, 3.0)
-    assert got[:2] == ["날아감", "꽈당"] and b.mode == "울음"   # 내려앉아서도 잠깐 꽈당 그대로
+    assert got[:2] == ["날아감", "꽈당"] and b.mode == "꽈당"   # 내려앉아서도 누운 채 꽈당 그대로
     got = seen(b, clock, 3.0)
-    assert got[0] == "꽈당" and "뛰기" in got and "슬픔" not in got
+    assert got[0] == "꽈당" and "뛰기" in got and "기절" not in got
 
 
 def test_bar_end_bounces():
