@@ -112,9 +112,9 @@ def basic(tmp_path):
 
 # ------------------------------------------------------------------ 약속
 def test_seventeen_motions():
-    """열일곱 + 상호작용 열다섯(어질·헤롱 포함) = 서른둘 (11-21, 감정 여섯은 뺐다)."""
-    assert len(pack.MOTIONS) == 32 and len(set(pack.MOTIONS)) == 32
-    assert sum(len(ms) for _, ms in pack.GROUPS) == 32
+    """열일곱 + 상호작용 열다섯(어질·헤롱 포함) = 서른둘 (11-21, 감정 여섯은 뺐다), 헉헉·먹기 더해 서른넷 (11-22)."""
+    assert len(pack.MOTIONS) == 34 and len(set(pack.MOTIONS)) == 34
+    assert sum(len(ms) for _, ms in pack.GROUPS) == 34
     assert [g for g, _ in pack.GROUPS] == ["평소", "이동", "상호작용", "상태"]
     for m in pack.MOTIONS:
         assert pack.MOTION_LABELS[m] and m in pack.FALLBACK and m in pack.DEFAULT_FX
@@ -147,6 +147,11 @@ def test_empty_motion_borrows(tmp_path, motion, have, want):
     assert got.key != pack.candidates(CHAR, want, root)[0].key  # 제 것과 캐시가 안 겹친다
 
 
+def tall_of(im):
+    box = im.getbbox()
+    return box[3] - box[1]
+
+
 def test_dizzy_bake_shape():
     im = Image.new("RGBA", (30, 40), (0, 0, 0, 0))
     for x in range(5, 25):
@@ -158,6 +163,10 @@ def test_dizzy_bake_shape():
     total = sum(ms for _, ms in frames)
     assert 2.5 <= total / 1000 <= 3.6
     # 별이 돈다 (노란 점이 있다) · 끝 장면은 똑바로 서 있다 (처음과 같은 높이)
+    # ★ 넘어지지 않는다 (11-22): 어느 장면도 누운 꼴(폭이 키보다 큼)이 아니다
+    for f, _ in frames:
+        l, t, r, btm = f.getbbox()
+        assert (btm - t) >= tall_of(im) * 0.9
     def yellow(f):
         px = f.tobytes()
         return sum(1 for i in range(0, len(px), 4)
@@ -165,7 +174,8 @@ def test_dizzy_bake_shape():
     assert yellow(frames[0][0]) > 0
     first, last = frames[0][0].getbbox(), frames[-1][0].getbbox()
     tall = im.getbbox()[3] - im.getbbox()[1]
-    assert abs((last[3] - last[1]) - tall) <= 2 and (first[3] - first[1]) > tall  # 처음엔 별까지 높다
+    assert (first[3] - first[1]) > tall                                 # 별까지 높다
+    assert abs((last[3] - last[1]) - (first[3] - first[1])) <= 4       # 끝이 처음과 이어진다 (되풀이)
 
 
 # ------------------------------------------------------------------ 자꾸 누르기

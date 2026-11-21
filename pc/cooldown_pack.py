@@ -9,11 +9,12 @@
         설정.json                  {"바 캐릭터": "<이름>"}   비었거나 "클로디"면 클로디
         <캐릭터 이름>/              이름은 사용자가 정한다 (폴더 이름 = 캐릭터 이름)
             서기/ 딴짓/ 걷기/ 인사/  뛰기/ 점프/
-            놀람/ 눌림/ 짜증/ 화남/ 포기/ 끌림/ 어질/ 헤롱/ 기절/ 깡충/ 빙글/ 날아감/ 꽈당/ 앉기/
-            쳐다보기/ 간지럼/ 갸웃/ 하트/ 빼꼼/ 밀기/ 깸/ 허우적/
+            놀람/ 눌림/ 짜증/ 화남/ 포기/ 끌림/ 어질/ 헤롱/ 기절/ 깡충/ 빙글/ 날아감/ 헉헉/ 꽈당/
+            앉기/ 쳐다보기/ 간지럼/ 갸웃/ 하트/ 빼꼼/ 밀기/ 깸/ 허우적/ 먹기/
             허둥/ 잠/ 축하/ 자리비움/
-                                       (`MOTIONS` 서른둘, 묶음 넷은 `GROUPS`.
-                                        11-21 에 뺀 감정 폴더(슬픔·당황 등)가 남아 있어도 안 읽는다)
+                                       (`MOTIONS` 서른넷, 묶음 넷은 `GROUPS`.
+                                        11-21 에 뺀 감정 폴더(슬픔·당황 등)가 남아 있어도 안 읽는다.
+                                        먹기는 11-22 에 상호작용으로 되살렸다)
             설정.json              {"보는 쪽": "오른쪽"}  그림 속 캐릭터가 보는 쪽
 
 - 동작 폴더마다 그림(png·gif·webp, 움직이는 것도 됨)을 넣는다. 그 동작을 할 때 후보 하나를 골라 튼다.
@@ -51,10 +52,10 @@ EVERYDAY = ("서기", "딴짓", "걷기", "인사")
 MOVES = ("뛰기", "점프")
 # 상호작용(11-21 사용자: 상호작용 하나에 그림 하나, 대신 종류를 훨씬 많이). 뒤 열셋은 11-21 에 더한 것,
 # 이름은 팩 고르기 화면과 맞춘 것이라 그대로 둔다. 그림이 없으면 FALLBACK 으로 빌리고 효과를 입힌다.
-# 어질·헤롱·기절은 끌며 흔든 세 단계(11-21).
+# 어질·헤롱·기절은 끌며 흔든 세 단계(11-21). 헉헉(던져져 땅에 닿음)·먹기(막대 위에 놓음)는 11-22.
 INTERACT = ("놀람", "눌림", "짜증", "화남", "포기", "끌림", "어질", "헤롱", "기절",
-            "깡충", "빙글", "날아감", "꽈당", "앉기", "쳐다보기", "간지럼",
-            "갸웃", "하트", "빼꼼", "밀기", "깸", "허우적")
+            "깡충", "빙글", "날아감", "헉헉", "꽈당", "앉기", "쳐다보기", "간지럼",
+            "갸웃", "하트", "빼꼼", "밀기", "깸", "허우적", "먹기")
 STATES = ("허둥", "잠", "축하", "자리비움")
 MOTIONS = EVERYDAY + MOVES + INTERACT + STATES
 GROUPS = (("평소", EVERYDAY), ("이동", MOVES), ("상호작용", INTERACT), ("상태", STATES))
@@ -76,17 +77,19 @@ MOTION_LABELS = {
     "기절": "끝까지 흔듦 (3단계)",
     "깡충": "두 번 누름",
     "빙글": "휠 굴림",
-    "날아감": "던져서 나는 동안",
-    "꽈당": "부딪히거나 떨어져 쓰러짐",
+    "날아감": "던져서 버둥대며 날아감",
+    "헉헉": "날아가 닿은 뒤 숨 고름",
+    "꽈당": "높이서 떨어져 쓰러짐",
     "앉기": "창 제목 줄에 앉아 있음",
-    "쳐다보기": "커서가 가까이 옴",
+    "쳐다보기": "커서가 가까이 2초 머묾",
     "간지럼": "커서로 좌우로 문지름",
-    "갸웃": "커서가 위에 2초 머묾",
+    "갸웃": "몸 위에 커서 4초 멈춤",
     "하트": "가운데 단추 누름",
     "빼꼼": "바 끝 밖에 놓아 숨음",
     "밀기": "걷다 막대 끝을 밂",
     "깸": "자는 중에 누름",
     "허우적": "높은 데서 떨어지는 동안",
+    "먹기": "사용량 막대 위에 놓음",
     "허둥": "사용량 80% 넘음",
     "잠": "한도 다 참",
     "축하": "한도 풀림",
@@ -112,6 +115,7 @@ FALLBACK = {
     "깡충": ("점프", "놀람", "서기"),
     "빙글": ("놀람", "서기"),
     "날아감": ("끌림", "놀람", "서기"),
+    "헉헉": ("놀람", "눌림", "서기"),  # 기절·꽈당을 빌리지 않는다 (쓰러지지 않는다)
     "꽈당": ("놀람", "눌림", "서기"),  # ★ 기절을 빌리지 않는다. 빌린 그림은 쓰러졌다 일어난다 (11-21)
     "앉기": ("인사", "서기"),
     "쳐다보기": ("서기",),
@@ -122,6 +126,7 @@ FALLBACK = {
     "밀기": ("걷기", "서기"),
     "깸": ("놀람", "서기"),
     "허우적": ("허둥", "끌림", "놀람", "서기"),
+    "먹기": (),  # 비면 빌리지 않고 서기 그림을 쭈그렸다 폈다 굽어 씹는다 (바 캐릭터가 한다)
     "허둥": ("뛰기", "걷기", "서기"),
     "잠": ("서기",),
     "축하": ("점프", "인사", "서기"),
@@ -243,8 +248,9 @@ def pick(char: str, motion: str, root: str = PACK_DIR, avoid: str | None = None)
 
 # ---------------------------------------------------------------- 움직임.json · 후보
 META = "움직임.json"
-EFFECTS = ("없음", "통통", "좌우", "흔들", "떨기", "숨쉬기", "쭈그러짐", "쓰러짐", "빙글", "헤롱")
-# 움직임.json 에 안 적힌 고정 그림이 받는 효과 (동작에 알맞게). 기절은 헤롱헤롱 비틀대다 쓰러진다.
+EFFECTS = ("없음", "통통", "좌우", "흔들", "떨기", "숨쉬기", "쭈그러짐", "쓰러짐", "빙글", "헤롱", "버둥")
+# 움직임.json 에 안 적힌 고정 그림이 받는 효과 (동작에 알맞게). 기절은 제자리에서 헤롱헤롱 비틀댄다(11-22: 안 넘어짐).
+# 날아감은 버둥(팔다리 허우적대듯 빠르게 뒤틀림). 버둥은 움직이는 그림에도 장면마다 덧입힌다.
 # ★ 빌려 온 그림도 **빌린 동작의 기본 효과**를 받는다(`pick_clip`): 기절 그림이 없어 서기를 빌려도 헤롱.
 DEFAULT_FX = {
     "서기": ("숨쉬기", 1), "딴짓": ("좌우", 1), "걷기": ("통통", 1), "인사": ("흔들", 2),
@@ -252,7 +258,8 @@ DEFAULT_FX = {
     "놀람": ("쭈그러짐", 2), "눌림": ("쭈그러짐", 1), "짜증": ("떨기", 1), "화남": ("떨기", 3),
     "포기": ("숨쉬기", 1), "끌림": ("흔들", 3),
     "어질": ("흔들", 3), "헤롱": ("헤롱", 2), "기절": ("헤롱", 3),
-    "깡충": ("통통", 3), "빙글": ("빙글", 2), "날아감": ("흔들", 2), "꽈당": ("쓰러짐", 2),
+    "깡충": ("통통", 3), "빙글": ("빙글", 2), "날아감": ("버둥", 2), "헉헉": ("숨쉬기", 2),
+    "꽈당": ("쓰러짐", 2), "먹기": ("통통", 1),
     "앉기": ("숨쉬기", 1), "쳐다보기": ("숨쉬기", 1), "간지럼": ("떨기", 1), "갸웃": ("좌우", 1),
     "하트": ("통통", 2), "빼꼼": ("좌우", 1), "밀기": ("떨기", 1), "깸": ("떨기", 3),
     "허우적": ("흔들", 3),
@@ -577,7 +584,7 @@ def load_frames(path: str, height: int, speed: float = 1.0, width: int | None = 
 #   한 번 쓰러진 뒤 누운 채로만 도는 효과에 쓴다(처음부터 다시 쓰러지지 않게).
 FX_FRAMES = {  # 효과: (장면 수, 한 장면 ms). 쓰러짐·빙글은 아래 셈에서 따로 붙는다
     "통통": (12, 55), "좌우": (16, 80), "흔들": (16, 70), "떨기": (8, 40),
-    "숨쉬기": (20, 90), "쭈그러짐": (12, 60),
+    "숨쉬기": (20, 90), "쭈그러짐": (12, 60), "버둥": (8, 55),
 }
 FALL_STEPS, FALL_MS = 7, 45      # 쓰러지는 장면
 FALL_BOUNCE = (78, 90, 85, 90)   # 바닥에 닿고 한 번 들썩 (도)
@@ -585,11 +592,10 @@ FALL_TAIL, FALL_TAIL_MS = 4, 160  # 누운 채 별이 도는 장면 (여기만 �
 # 꽈당(11-21): 쓰러짐 뒤에 털고 일어나는 장면을 붙인다. 누운 장면만 돌다가 바 캐릭터가 일어날 때
 # 마지막 RISE 장면을 튼다(`buddy`). 붙였는지는 `rise_steps`.
 SPIN_STEPS, SPIN_MS, SPIN_REST = 12, 45, 700
-# 헤롱: 비틀비틀 기울며 머리 위로 별이 돌다가(점점 크게) 픽 쓰러져 잠깐 누워 있고, 털고 일어난다.
-# 한 번 도는 데 약 3초. 기절이 이 길이만큼 이어진다(`buddy._faint`).
-DIZZY_WOBBLE, DIZZY_MS = 16, 70   # 비틀거리는 장면
-DIZZY_LIE, DIZZY_LIE_MS = 8, 140  # 누워서 별이 도는 장면
-DIZZY_UP, DIZZY_UP_MS = 6, 55     # 일어나는 장면
+# 헤롱: 제자리에서 비틀비틀 기울며 머리 위로 별이 돈다(11-22 사용자: 기절해도 넘어지지 않는다).
+# 한 번 도는 데 2.8초(바 캐릭터 기절 시간과 같다), 끝 장면이 처음과 이어진다(되풀이해 돈다).
+DIZZY_WOBBLE, DIZZY_MS = 40, 70   # 비틀거리는 장면
+DIZZY_UP, DIZZY_UP_MS = 6, 55     # 꽈당에서 일어나는 장면
 STAR = (255, 213, 74, 255)
 STAR_EDGE = (90, 60, 10, 255)
 
@@ -618,7 +624,7 @@ def fx_count(effect: str, power: int = 2) -> int:
     if effect == "빙글":
         return SPIN_STEPS * (2 if power >= 3 else 1) + 1
     if effect == "헤롱":
-        return DIZZY_WOBBLE + FALL_STEPS + len(FALL_BOUNCE) + DIZZY_LIE + DIZZY_UP
+        return DIZZY_WOBBLE
     return 1
 
 
@@ -711,6 +717,8 @@ def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300, rise: bool = Fals
             elif effect == "숨쉬기":
                 s = math.sin(math.tau * p)
                 f = _pose(im, size, base, sx=1 - 0.015 * k * s, sy=1 + 0.04 * k * s)
+            elif effect == "버둥":
+                f = _flutter(im, size, base, i, k)
             else:  # 쭈그러짐
                 squash = 0.22 * k * math.sin(math.pi * p)
                 f = _pose(im, size, base, sx=1 + squash * 0.7, sy=1 - squash)
@@ -753,7 +761,8 @@ def bake(imgs, effect: str, power: int = 2, gap_ms: int = 300, rise: bool = Fals
 
 
 def _dizzy(img_at, size, base, w, h, k, power):
-    """헤롱헤롱 기절 장면들: 비틀비틀(별이 머리 위를 돎) → 픽 쓰러짐 → 누워 별 → 일어남."""
+    """헤롱헤롱 장면들: 제자리에서 비틀비틀(별이 머리 위를 돎). 쓰러지지 않는다(11-22).
+    휘청임이 사인 두 바퀴라 끝 장면이 처음과 이어져 되풀이해 돌아도 튀지 않는다."""
     import math
 
     out = []
@@ -762,33 +771,40 @@ def _dizzy(img_at, size, base, w, h, k, power):
     head = (base[0], base[1] - h - h * 0.10)  # 서 있을 때 머리 위
     for i in range(DIZZY_WOBBLE):
         p = i / DIZZY_WOBBLE
-        amp = (0.55 + 0.45 * p) * k  # 점점 크게 휘청인다
-        a = 13 * amp * math.sin(math.tau * 2 * p)
-        dx = 0.08 * w * amp * math.sin(math.tau * 2 * p + 0.8)
+        amp = (0.8 + 0.2 * math.sin(math.tau * p)) * k  # 크게 작게 휘청인다
+        a = 13 * amp * math.sin(math.tau * 4 * p)
+        dx = 0.08 * w * amp * math.sin(math.tau * 4 * p + 0.8)
         f = _pose(img_at(t_ms), size, base, angle=a, dx=dx, pivot=(w / 2, h))
         _stars(f, (head[0] + dx * 1.6 + h * math.sin(math.radians(a)), head[1]),
-               w * 0.42, h * 0.07, max(2.0, h * 0.055), count, i * math.tau / 10)
+               w * 0.42, h * 0.07, max(2.0, h * 0.055), count, i * math.tau / 16)
         out.append((f, DIZZY_MS))
         t_ms += DIZZY_MS
-    pivot = (w, h)  # 오른쪽 발끝을 축으로 옆으로 픽
-    steps = [90 * ((i + 1) / FALL_STEPS) ** 2 for i in range(FALL_STEPS)] + list(FALL_BOUNCE)
-    for j, ang in enumerate(steps):
-        ms = FALL_MS if j < FALL_STEPS else 50
-        out.append((_pose(img_at(t_ms), size, base, angle=ang, pivot=pivot), ms))
-        t_ms += ms
-    bx, by = base[0] + w / 2, base[1]
-    for j in range(DIZZY_LIE):
-        f = _pose(img_at(t_ms), size, base, angle=90, pivot=pivot)
-        _stars(f, (bx + h * 0.78, by - w - h * 0.12), h * 0.18 * (0.8 + 0.2 * k),
-               h * 0.06, max(2.0, h * 0.06), count, j * math.tau / DIZZY_LIE / count * 2)
-        out.append((f, DIZZY_LIE_MS))
-        t_ms += DIZZY_LIE_MS
-    for j in range(DIZZY_UP):  # 털고 일어난다 (끝은 똑바로 서서 다음 장면과 이어진다)
-        p = (j + 1) / DIZZY_UP
-        ang = 90 * (1 - p) ** 1.5
-        out.append((_pose(img_at(t_ms), size, base, angle=ang, pivot=pivot), DIZZY_UP_MS))
-        t_ms += DIZZY_UP_MS
     return out
+
+
+FLUTTER = ((-11, -0.06, 0.03), (9, 0.05, -0.02), (-6, 0.03, 0.04), (12, -0.05, -0.03),
+           (-9, 0.06, 0.02), (7, -0.03, -0.04), (-12, -0.04, 0.03), (8, 0.05, -0.02))
+
+
+def _flutter(im, size, base, i, k):
+    """버둥: 몸 가운데를 축으로 빠르게 이리저리 뒤틀고 살짝 늘었다 줄었다 (팔다리 허우적대는 느낌)."""
+    a, dx, sq = FLUTTER[i % len(FLUTTER)]
+    iw, ih = im.size
+    return _pose(im, size, base, angle=a * k, dx=dx * iw * k, sx=1 + sq * k, sy=1 - sq * k,
+                 pivot=(iw / 2, ih / 2))
+
+
+def flutter_frames(raw, power: int = 2):
+    """움직이는 그림(장면 여러 장)에 버둥을 덧입힌다. 장면 길이는 그대로 두고 장면마다 뒤튼다.
+    판 크기는 `bake` 와 같은 셈이라 `fit_frames` 가 장면 전체에 걸친 네모로 맞춘다."""
+    if not raw:
+        return raw
+    w = max(im.width for im, _ in raw)
+    h = max(im.height for im, _ in raw)
+    size = (2 * (w + h), 2 * (w + h))
+    base = (size[0] / 2, size[1] * 0.7)
+    k = _k(power)
+    return [(_flutter(im.convert("RGBA"), size, base, i, k), ms) for i, (im, ms) in enumerate(raw)]
 
 
 def same_height(imgs, height: int):
@@ -818,7 +834,10 @@ def clip_frames(clip: Clip, work_h: int = 140):
     _RISEN.pop(clip.key, None)
     if len(clip.files) == 1:
         raw = read_frames(clip.files[0])
-        # 움직이는 그림은 효과를 안 준다. 단 꽈당이 빌린 움직이는 그림(놀람 등)은 첫 장을 쓰러뜨린다
+        # 움직이는 그림은 효과를 안 준다. 단 꽈당이 빌린 움직이는 그림(놀람 등)은 첫 장을 쓰러뜨리고,
+        # 버둥(날아감)은 장면마다 덧입힌다
+        if len(raw) > 1 and clip.effect == "버둥":
+            return flutter_frames(raw, clip.power), 0
         if (len(raw) > 1 and not (rise and "<" in clip.key)) or clip.effect == "없음":
             return raw, 0
         got = bake(same_height([raw[0][0]], work_h), clip.effect, clip.power, rise=rise)

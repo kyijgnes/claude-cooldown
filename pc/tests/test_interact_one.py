@@ -24,7 +24,7 @@ import cooldown_pack as pack  # noqa: E402
 from skins import buddy as buddy_mod  # noqa: E402
 from skins import carry, wins  # noqa: E402
 from skins.base import set_palette  # noqa: E402
-from skins.buddy import HEART_SEC, HOVER_SEC, TICK_MS, YUM_LIFE, Buddy  # noqa: E402
+from skins.buddy import HEART_SEC, HOVER_SEC, TICK_MS, WATCH_LOOK, YUM_LIFE, Buddy  # noqa: E402
 
 CHAR = "시험떡"
 W, H = 460, 48
@@ -131,7 +131,7 @@ def texts(b):
 # ------------------------------------------------------------------ 팩 약속
 def test_new_interactions_listed_with_labels_fallback_fx():
     group = dict(pack.GROUPS)["상호작용"]
-    assert group[-len(NEW):] == NEW                    # 이름은 고르기 화면과 같다
+    assert tuple(m for m in group if m in NEW) == NEW   # 이름은 고르기 화면과 같다
     for m in NEW:
         assert m in pack.MOTIONS and m in pack.INTERACT
         assert pack.MOTION_LABELS[m] and "—" not in pack.MOTION_LABELS[m] and "–" not in pack.MOTION_LABELS[m]
@@ -278,7 +278,7 @@ def test_look_stays_one_motion_and_leave(tkroot, base):
     pos = {"p": (cx - 50, cy)}
     b.pointer = lambda: pos["p"]
     b.until = clock.t + 100
-    run(b, clock, 0.6)
+    run(b, clock, WATCH_LOOK + 0.2)
     assert b.motion == "쳐다보기" and b.dir == -1 and b.mode == "봄"
     pos["p"] = (cx + 50, cy)                               # 반대쪽으로 옮겨도 같은 그림을 돌릴 뿐
     got = seen(b, clock, 20.0)
@@ -431,24 +431,14 @@ def throw_right(b, clock, step, up=200):
     b.put_down()
 
 
-def test_flying_then_bonk_stays_bonk(tkroot, base, monkeypatch):
+def test_flying_hits_wall_stays_flying_then_pants(tkroot, base, monkeypatch):
     monkeypatch.setattr(wins, "screen_box", lambda w: (-3000.0, -3000.0, 900.0, 3000.0))
     b, clock = make(tkroot, base)
-    throw_right(b, clock, 26, up=1200)                   # 1300px/초: 꽈당은 하되 세게는 아님 (높이 던져 오래 난다)
+    throw_right(b, clock, 26, up=1200)                   # 1300px/초, 높이 던져 오래 난다
     assert b.mode == "던짐" and b.motion == "날아감"
     got = seen(b, clock, 6.0)
-    assert got[:3] == ["날아감", "꽈당", "뛰기"]          # 부딪히면 내려앉아 일어날 때까지 꽈당 (날아감으로 안 돌아감)
-    assert "기절" not in got
-
-
-def test_hard_bonk_stays_bonk_after_landing(tkroot, base, monkeypatch):
-    monkeypatch.setattr(wins, "screen_box", lambda w: (-3000.0, -3000.0, 900.0, 3000.0))
-    b, clock = make(tkroot, base)
-    throw_right(b, clock, 90)                            # 4500px/초
-    got = seen(b, clock, 3.0)
-    assert got[:2] == ["날아감", "꽈당"] and b.mode == "꽈당"   # 내려앉아서도 누운 채 꽈당 그대로
-    got = seen(b, clock, 3.0)
-    assert got[0] == "꽈당" and "뛰기" in got and "기절" not in got
+    assert got[:3] == ["날아감", "헉헉", "뛰기"]          # 부딪혀도 날아감 그대로, 닿으면 숨 고르고 뛴다
+    assert "기절" not in got and "꽈당" not in got
 
 
 def test_bar_end_bounces():

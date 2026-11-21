@@ -2,7 +2,8 @@
 감정 묶음 빼기 (11-21 사용자: 각종 감정이 언제 쓰이는지 모르겠다, 상호작용 그림으로) 와
 1모션 원칙 (상호작용 하나가 끝날 때까지 그 그림 하나).
 
-감정 폴더(슬픔·당황·먹기·부끄럼·신남·심심)가 팩에 남아 있어도 안 쓰이고 오류가 없어야 한다.
+감정 폴더(슬픔·당황·부끄럼·신남·심심)가 팩에 남아 있어도 안 쓰이고 오류가 없어야 한다.
+먹기는 11-22 에 상호작용(사용량 막대 위에 놓음)으로 되살렸다: 옛 먹기 폴더가 그대로 쓰인다.
 그림은 코드로 만든다(공개 저장소).
 """
 
@@ -24,12 +25,12 @@ from PIL import Image  # noqa: E402
 import cooldown_pack as pack  # noqa: E402
 from skins import carry, wins  # noqa: E402
 from skins.base import set_palette  # noqa: E402
-from skins.buddy import GIVEUP_SEC, TICK_MS, Buddy  # noqa: E402
+from skins.buddy import GIVEUP_SEC, TICK_MS, WATCH_LOOK, Buddy  # noqa: E402
 
 CHAR = "시험떡"
 W, H = 460, 48
 BOX = (300, 0, 450, H)
-OLD_FEELINGS = ("슬픔", "당황", "먹기", "부끄럼", "신남", "심심")
+OLD_FEELINGS = ("슬픔", "당황", "부끄럼", "신남", "심심")
 BASE = ("서기", "걷기", "뛰기", "놀람", "끌림", "점프", "인사", "축하", "잠", "딴짓")
 
 
@@ -118,7 +119,7 @@ def base(tmp_path):
 @pytest.fixture
 def with_feelings(tmp_path):
     """옛 팩: 감정 폴더가 그대로 남아 있다."""
-    return make_pack(str(tmp_path / "팩"), BASE + OLD_FEELINGS)
+    return make_pack(str(tmp_path / "팩"), BASE + OLD_FEELINGS + ("먹기",))
 
 
 # ------------------------------------------------------------------ 팩 약속
@@ -181,13 +182,20 @@ def test_no_feeling_ever_plays(tkroot, with_feelings):
     assert not hasattr(b, "note_usage")                               # 사용량 급등 당황도 없앴다
 
 
-def test_gauge_eat_bakes_stand_even_with_old_eat_folder(tkroot, with_feelings):
+def test_old_eat_folder_is_used_again(tkroot, with_feelings, tmp_path):
+    """옛 먹기 폴더는 되살린 먹기 칸으로 쓰인다 (막대 위에 놓으면 그 그림, 내보내기·넣기에도 실린다)."""
+    assert "먹기" in pack.INTERACT and pack.own(CHAR, "먹기", with_feelings)
     b, clock = make(tkroot, with_feelings)
     x, y = spot(b)
     assert b.catch(x, y)
     b.drag(150, y)
     b.put_down()
-    assert b.mode == "냠냠" and b.motion == "냠냠" and b.clip is None   # 서기를 쭈그려 구운 장면
+    assert b.mode == "냠냠" and b.motion == "먹기"
+    path = pack.export_pack(CHAR, str(tmp_path / "먹기.캐릭터팩.zip"), with_feelings)
+    dest = str(tmp_path / "먹기 받는 곳")
+    os.makedirs(dest)
+    assert pack.import_pack(path, dest) == CHAR
+    assert os.path.isdir(os.path.join(dest, CHAR, "먹기"))
 
 
 # ------------------------------------------------------------------ 1모션
@@ -262,7 +270,7 @@ def test_watch_waits_for_cursor_to_leave_after_tap(tkroot, base):
     pos["p"] = (cx + 500, cy)
     run(b, clock, 0.2)
     pos["p"] = (cx + 40, cy)
-    run(b, clock, 1.0)
+    run(b, clock, WATCH_LOOK + 0.5)
     assert b.motion == "쳐다보기"
 
 
@@ -279,7 +287,7 @@ def test_rub_upgrades_look_once(tkroot, base):
     cx, cy = mid(b)
     pos = {"p": (cx - 50, cy)}
     b.pointer = lambda: pos["p"]
-    run(b, clock, 0.8)
+    run(b, clock, WATCH_LOOK + 0.4)
     assert b.motion == "쳐다보기"
     got = []
     for i in range(30):

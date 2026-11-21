@@ -6,7 +6,7 @@ v0.60 을 써 본 사용자 말 셋 (11-21):
 - 움직이는 그림 빠르기: 파일에 든 장면 길이와 실제로 넘어가는 시간을 재어 대조한다 (WebP·GIF).
   옛 `read_frames` 는 WebP 장면 길이를 한 장씩 밀려 읽고 첫 장을 100ms 로 두었다.
 - 놀람: 누를 때마다 처음부터 한 번, 떼자마자.
-- 던지기: 나는 동안 날아감만, 부딪히면 꽈당(쓰러져 누웠다 일어남), 기절 그림은 안 나온다.
+- 던지기: 나는 동안 날아감만, 기절 그림은 안 나온다. (11-22: 부딪혀도 꽈당 없이 날아감, 닿으면 헉헉. `test_land_eat.py`)
 - 높은 데서 떨어뜨리기: 떨어지는 동안 허우적, 닿으면 꽈당.
 
 그림은 코드로 만든다(공개 저장소).
@@ -281,37 +281,37 @@ def test_bonk_borrowing_animated_surprise_still_falls(tmp_path):
 
 
 def test_throw_flies_only_flying_never_faint(tkroot, base):
-    """던져서 나는 동안은 날아감 하나. 기절 그림이 있어도 안 나온다 (부딪히지 않으면 꽈당도 없다)."""
+    """던져서 나는 동안은 날아감 하나. 기절 그림이 있어도 안 나온다. 땅에 닿으면 헉헉 뒤 뛰기 (11-22)."""
     b, clock = make(tkroot, base)
     throw_right(b, clock, 26, up=300)
     assert b.mode == "던짐" and b.motion == "날아감"
     got = seen(b, clock, 6.0)
-    assert got[0] == "날아감" and "기절" not in got and "꽈당" not in got and "뛰기" in got
-    assert got.index("뛰기") == 1
+    assert got[:3] == ["날아감", "헉헉", "뛰기"] and "기절" not in got and "꽈당" not in got
 
 
-def test_bonk_lies_then_rises_then_runs_home(tkroot, base, monkeypatch):
+def test_hard_hit_keeps_flying_no_bonk(tkroot, base, monkeypatch):
+    """벽에 세게 부딪혀도 꽈당으로 안 바꾸고 날아감 그대로, 닿으면 헉헉 (11-22)."""
     monkeypatch.setattr(wins, "screen_box", lambda w: (-3000.0, -3000.0, 900.0, 3000.0))
     b, clock = make(tkroot, base)
-    throw_right(b, clock, 90)
-    got = seen(b, clock, 2.5)
-    assert got[:2] == ["날아감", "꽈당"] and "기절" not in got and b.mode == "꽈당"
-    n = pack.rise_steps(b.clip)
-    assert n and b._cut == n and b.fi < len(b.frames) - n   # 누워 있는 동안은 일어나는 장면이 안 나온다
-    got = seen(b, clock, KAPOW_LIE + 2.0)
-    assert got[0] == "꽈당" and "뛰기" in got and "기절" not in got   # 일어나서 뛰어 돌아온다
+    throw_right(b, clock, 90)                            # 4500px/초: 오른쪽 벽에 쾅
+    got = seen(b, clock, 6.0)
+    assert got[:3] == ["날아감", "헉헉", "뛰기"] and "꽈당" not in got and "기절" not in got
 
 
-def test_bonk_shows_rise_frames_before_leaving(tkroot, base, monkeypatch):
-    monkeypatch.setattr(wins, "screen_box", lambda w: (-3000.0, -3000.0, 900.0, 3000.0))
+def test_high_drop_bonk_shows_rise_frames_before_leaving(tkroot, base):
+    """꽈당(화면 위쪽에서 떨어짐): 누워 있는 동안은 일어나는 장면을 안 틀고, 다 거친 뒤 떠난다."""
     b, clock = make(tkroot, base)
-    throw_right(b, clock, 90)
-    run(b, clock, 0.05)
+    x, y = spot(b)
+    assert b.catch(x, y)
+    b.drag(x + 300, y - 2500)
+    b.put_down()
     while b.mode == "던짐":
         run(b, clock, 0.04)
     assert b.mode == "꽈당"
-    total = len(b.frames)
     n = pack.rise_steps(b.clip)
+    assert n and b._cut == n and b.fi < len(b.frames) - n
+    run(b, clock, 0.5)
+    total = len(b.frames)
     shown = set()
     while b.mode == "꽈당":
         run(b, clock, 0.02, tick=20)

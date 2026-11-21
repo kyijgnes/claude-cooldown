@@ -23,7 +23,7 @@ from PIL import Image  # noqa: E402
 import cooldown_pack as pack  # noqa: E402
 from skins import carry, wins  # noqa: E402
 from skins.base import set_palette  # noqa: E402
-from skins.buddy import EAT_SEC, PERCH_SEC, SPIN_FAINT, TICK_MS, Buddy  # noqa: E402
+from skins.buddy import EAT_SEC, PERCH_SEC, SPIN_FAINT, TICK_MS, WATCH_LOOK, Buddy  # noqa: E402
 
 CHAR = "시험떡"
 W, H = 460, 48
@@ -336,8 +336,8 @@ def test_looks_at_cursor_and_waves(tkroot, basic):
     cy = b.c.winfo_rooty() + b.y1 - b.height / 2
     b.pointer = lambda: (cx - 50, cy)
     b.until = clock.t + 100                                         # 다른 일은 안 하게
-    run(b, clock, 0.6)
-    assert b.dir == -1 and b.motion == "쳐다보기"                   # 왼쪽 커서를 본다
+    run(b, clock, WATCH_LOOK + 0.2)
+    assert b.dir == -1 and b.motion == "쳐다보기"                   # 왼쪽 커서를 본다 (WATCH_LOOK 머문 뒤)
     seen = set()
     run(b, clock, 6.0, each=lambda: seen.add(b.motion))
     assert seen == {"쳐다보기"}                                      # 가까이 있는 동안 쳐다보기만
