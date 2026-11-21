@@ -236,14 +236,8 @@ class MainScreen:
             pass
 
     def _ours(self) -> list:
-        """밖으로 치지 않는 창: 메인 화면과, 그 위에 띄운 팝업들, 캐릭터·그림 넣기 창
-        (그 창과 거기서 띄운 새 캐릭터·미리 보기 창까지)."""
-        ours = [self.top] + [t for t in self.app._panels if t is not None]
-        pack = getattr(self.app, "_pack_import", None)
-        if pack is not None and self._alive(pack.win):
-            ours.append(pack.win)
-            ours += [t for t in pack.win.winfo_children() if isinstance(t, tk.Toplevel)]
-        return ours
+        """밖으로 치지 않는 창: 메인 화면과, 그 위에 띄운 팝업들."""
+        return [self.top] + [t for t in self.app._panels if t is not None]
 
     def _away_check(self) -> None:
         if not self._away_on() or not self.is_open():
@@ -260,9 +254,6 @@ class MainScreen:
         if any(self._alive(t) for t in self.app._panels):
             # 메인 화면에서 띄운 팝업이 아직 떠 있다. 그 팝업이 닫힐 때 다시 본다(`panel_closed`)
             return
-        pack = getattr(self.app, "_pack_import", None)
-        if pack is not None and self._alive(pack.win):
-            return  # 캐릭터·그림 넣기 창이 떠 있는 동안은 밖을 눌러도 안 닫는다(11-20 지시)
         self.close_away()
 
     def close_away(self) -> None:
@@ -780,13 +771,11 @@ class MainScreen:
             self._look_row(rows2, 0, "바 캐릭터", lambda box: self._segments(box, [
                 (name, (now or cooldown_pack.CLAUDI) == name, lambda n=name: self._set_buddy(n))
                 for name in [cooldown_pack.CLAUDI, *chars]]))
-            # 넣기·만들기·내보내기 (11-20). 넣어도 바 캐릭터는 안 바뀐다. 위 고르기 칸에서 고른다
+            # 넣기·내보내기 (11-20). 넣어도 바 캐릭터는 안 바뀐다. 위 고르기 칸에서 고른다.
+            # 만들기 창은 11-21 에 뺐다(사용자: 팩은 고르기 화면에서 만들어 적용한 것만 넣는다)
             add_row = tk.Frame(wrap, bg=P.bg)
             add_row.pack(fill="x", pady=(2, 0))
-            all_chars = cooldown_pack.all_characters()
-            buttons = [("캐릭터팩 넣기", self._pack_in), ("캐릭터팩 만들기", self._pack_new)]
-            if all_chars:
-                buttons.append(("그림 고치기", a.open_pack_import))
+            buttons = [("캐릭터팩 넣기", self._pack_in)]
             if chars:
                 buttons.append(("내보내기", lambda: self._pack_out(add_row)))
             for i, (text, fn) in enumerate(reversed(buttons)):
@@ -805,7 +794,7 @@ class MainScreen:
         self.app.reload_pack()
         self._render()
 
-    # ---- 캐릭터팩 넣기·만들기·내보내기
+    # ---- 캐릭터팩 넣기·내보내기
     def _pack_dialog(self, fn):
         """파일 창을 띄우는 동안은 밖을 눌러 닫기(`_away_check`)를 쉰다(파일 창으로 포커스가 간다)."""
         self._dialog_open = True
@@ -817,9 +806,6 @@ class MainScreen:
     def _pack_changed(self, note: str, bad: bool = False) -> None:
         self._pack_note = (note, bad)
         self.app.reload_pack()
-        imp = getattr(self.app, "_pack_import", None)
-        if imp is not None and self._alive(imp.win):
-            imp._render()
         if self.is_open():
             self._render()
 
@@ -840,16 +826,6 @@ class MainScreen:
             self._pack_changed("넣지 못함: 캐릭터팩 파일이 아님", bad=True)
             return
         self._pack_changed(f"「{name}」 넣음 · 바 캐릭터에서 고르기")
-
-    def _pack_new(self) -> None:
-        """새 캐릭터 이름 정하기 → 그 캐릭터의 그림 넣기 창으로 바로 이어진다."""
-        if len(cooldown_pack.all_characters()) >= cooldown_pack.MAX_CHARS:
-            self._pack_changed(f"캐릭터는 {cooldown_pack.MAX_CHARS}명까지 · 그림 고치기에서 하나 빼기", bad=True)
-            return
-        self.app.open_pack_import()
-        imp = getattr(self.app, "_pack_import", None)
-        if imp is not None and self._alive(imp.win):
-            imp.win.after(50, imp._new_char)
 
     def _pack_out(self, anchor: tk.Widget) -> None:
         chars = cooldown_pack.characters()

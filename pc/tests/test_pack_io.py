@@ -22,7 +22,7 @@ def _char(root, name="솜구름", motions=("서기", "걷기", "잠"), per=2):
     for i, m in enumerate(motions):
         for j in range(per):
             _png(os.path.join(root, name, m, f"{j}.png"), (10 * i, 20 * j, 90, 255))
-    pack.set_char_setting(name, "보는 쪽", "왼쪽", root)
+    pack._write_json(os.path.join(root, name, "설정.json"), {"보는 쪽": "왼쪽"})
     return name
 
 
@@ -71,7 +71,7 @@ def test_chosen_char_stands_and_gone_char_falls_back(tmp_path):
     _char(root)
     pack.set_active("솜구름", root)
     assert pack.active(root) == "솜구름"
-    pack.remove_character("솜구름", root)
+    os.rename(os.path.join(root, "솜구름"), os.path.join(root, "_솜구름"))  # 빼 둔 캐릭터
     assert pack.active(root) is None
     pack.set_active(None, root)
     assert pack.active(root) is None
@@ -115,7 +115,7 @@ def test_same_name_gets_number(tmp_path):
 
 def test_export_needs_pictures(tmp_path):
     root = str(tmp_path)
-    pack.add_character("빈칸", root)
+    os.makedirs(os.path.join(root, "빈칸"))
     with pytest.raises(pack.PackError):
         pack.export_pack("빈칸", str(tmp_path / "x.zip"), root)
 

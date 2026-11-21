@@ -195,12 +195,6 @@ def char_settings(char: str, root: str = PACK_DIR) -> dict:
     return _read_json(os.path.join(root, char, "설정.json"))
 
 
-def set_char_setting(char: str, key: str, value, root: str = PACK_DIR) -> None:
-    data = char_settings(char, root)
-    data[key] = value
-    _write_json(os.path.join(root, char, "설정.json"), data)
-
-
 def faces_right(char: str, root: str = PACK_DIR) -> bool:
     """그림 속 캐릭터가 오른쪽을 보고 있나 (걷는 쪽에 맞춰 좌우를 뒤집을 때 쓴다)."""
     return char_settings(char, root).get("보는 쪽", "오른쪽") != "왼쪽"
@@ -208,7 +202,7 @@ def faces_right(char: str, root: str = PACK_DIR) -> bool:
 
 # ---------------------------------------------------------------- 캐릭터·그림 찾기
 def all_characters(root: str = PACK_DIR) -> list[str]:
-    """그림이 없어도 폴더가 있는 캐릭터까지 (그림 넣기 창이 쓴다)."""
+    """그림이 없어도 폴더가 있는 캐릭터까지 (팩 넣기·내보내기가 쓴다)."""
     if not os.path.isdir(root):
         return []
     return sorted(n for n in os.listdir(root)
@@ -356,16 +350,6 @@ def clean_meta(got) -> dict:
 def motion_meta(char: str, motion: str, root: str = PACK_DIR) -> dict:
     """그 동작 폴더의 움직임.json (걸러 낸 것). 없거나 깨졌으면 빈 약속."""
     return clean_meta(_read_json(os.path.join(root, char, motion, META)))
-
-
-def write_meta(char: str, motion: str, meta: dict, root: str = PACK_DIR) -> None:
-    meta = clean_meta(meta)
-    path = os.path.join(root, char, motion, META)
-    if meta_empty(meta):
-        if os.path.isfile(path):
-            os.remove(path)
-        return
-    _write_json(path, meta)
 
 
 def plan_clips(names: list[str], meta: dict, motion: str, folder: str = "") -> list[Clip]:
@@ -600,7 +584,7 @@ STAR_EDGE = (90, 60, 10, 255)
 
 
 def fx_count(effect: str, power: int = 2) -> int:
-    """고정 그림 한 장에 그 효과를 주면 나오는 장면 수 (시험·그림 넣기 창이 쓴다)."""
+    """고정 그림 한 장에 그 효과를 주면 나오는 장면 수 (시험이 쓴다)."""
     if effect in FX_FRAMES:
         return FX_FRAMES[effect][0]
     if effect == "쓰러짐":
@@ -822,183 +806,7 @@ def load_clip(clip: Clip, height: int, width: int | None = None):
     return fit_frames(frames, height, 1.0, width), loop_from
 
 
-# ---------------------------------------------------------------- 그림 넣기 창이 쓰는 것
-SENTINEL = (1, 254, 3)  # 바탕 칠하기 표시 색 (그림에 거의 없는 색)
-
-
-def remove_bg(img, tol: int):
-    """가장자리에서 이어진 바탕(채팅방 바탕색 등)을 투명하게. tol=0 이면 그대로.
-
-    가장자리 점마다 바탕색과 비슷하면 거기서 물들이기(floodfill)를 해서, **안쪽의
-    같은 색(캐릭터 흰 몸)은 안 지운다** — 테두리로 둘러싸여 이어지지 않기 때문.
-    """
-    from PIL import Image, ImageChops, ImageDraw
-
-    rgba = img.convert("RGBA")
-    if tol <= 0:
-        return rgba
-    rgb = rgba.convert("RGB")
-    w, h = rgb.size
-    edge = [(x, 0) for x in range(0, w, 3)] + [(x, h - 1) for x in range(0, w, 3)]
-    edge += [(0, y) for y in range(0, h, 3)] + [(w - 1, y) for y in range(0, h, 3)]
-    colors = [rgb.getpixel(p) for p in edge]
-    bg = max(set(colors), key=colors.count)  # 가장자리에 가장 많은 색 = 바탕
-    for p, c in zip(edge, colors):
-        if max(abs(a - b) for a, b in zip(c, bg)) <= tol and rgb.getpixel(p) != SENTINEL:
-            ImageDraw.floodfill(rgb, p, SENTINEL, thresh=tol)
-    diff = ImageChops.difference(rgb, Image.new("RGB", rgb.size, SENTINEL))
-    r, g, b = diff.split()
-    keep = ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 255 if v else 0)
-    rgba.putalpha(ImageChops.multiply(rgba.getchannel("A"), keep))
-    return rgba
-
-
-def tidy(frames):
-    """[(RGBA, ms)] 를 모든 프레임에 걸친 한 네모로 잘라 맞춘다(움직여도 자리가 안 흔들리게)."""
-    boxes = [b for b in (f.getbbox() for f, _ in frames) if b]
-    if not boxes:
-        return frames
-    box = (min(b[0] for b in boxes), min(b[1] for b in boxes),
-           max(b[2] for b in boxes), max(b[3] for b in boxes))
-    return [(f.crop(box), ms) for f, ms in frames]
-
-
-def dedupe(frames):
-    """잇달아 똑같은 프레임은 하나로 합치고 시간을 더한다(화면에서 담으면 같은 장면이 겹친다)."""
-    from PIL import ImageChops
-
-    out = []
-    for f, ms in frames:
-        if out and ImageChops.difference(out[-1][0], f).getbbox() is None:
-            out[-1] = (out[-1][0], out[-1][1] + ms)
-        else:
-            out.append((f, ms))
-    return out
-
-
-def all_candidates(char: str, motion: str, root: str) -> list[Clip]:
-    files = clips(char, motion, root)
-    if not files:
-        return []
-    return plan_clips([os.path.basename(p) for p in files], motion_meta(char, motion, root),
-                      motion, os.path.dirname(files[0]))
-
-
-def room_left(char: str, motion: str, root: str = PACK_DIR) -> int:
-    """그 동작에 더 넣을 수 있는 후보 수 (묶음은 하나로 센다)."""
-    if len(clips(char, motion, root)) >= MAX_FILES_PER_MOTION:
-        return 0
-    return max(0, limit(motion) - len(all_candidates(char, motion, root)))
-
-
-def _new_path(char: str, motion: str, ext: str, root: str) -> str:
-    if motion not in MOTIONS:
-        raise ValueError(motion)
-    if room_left(char, motion, root) <= 0:
-        raise ValueError(f"{motion} 은 {limit(motion)}개까지")
-    folder = os.path.join(root, char, motion)
-    os.makedirs(folder, exist_ok=True)
-    stem = time.strftime("%m%d_%H%M%S")
-    path, n = os.path.join(folder, stem + ext), 2
-    while os.path.exists(path):
-        path, n = os.path.join(folder, f"{stem}_{n}{ext}"), n + 1
-    return path
-
-
-def save_clip(char: str, motion: str, frames, root: str = PACK_DIR) -> str:
-    """따온 그림을 캐릭터·동작 폴더에 저장. 여러 장이면 움직이는 png."""
-    frames = tidy(frames)
-    path = _new_path(char, motion, ".png", root)
-    first, *rest = [f for f, _ in frames]
-    if rest:
-        first.save(path, save_all=True, append_images=rest,
-                   duration=[ms for _, ms in frames], loop=0, disposal=1)
-    else:
-        first.save(path)
-    return path
-
-
-def add_file(char: str, motion: str, src: str, root: str = PACK_DIR,
-             effect: str | None = None, power: int = 2) -> str:
-    """그림 파일 한 장을 그대로 복사해 넣는다(움직이는 webp·gif 를 다시 굽지 않는다).
-    `effect` 를 주면 움직임.json 의 「그림」에 효과·세기를 같이 적는다."""
-    path = _new_path(char, motion, os.path.splitext(src)[1].lower(), root)
-    shutil.copy2(src, path)
-    if effect is not None:
-        set_clip_fx(Clip(path, [path]), effect, power, root)
-    return path
-
-
-def set_clip_fx(clip: Clip, effect: str, power: int = 2, root: str = PACK_DIR) -> bool:
-    """후보 하나의 효과·세기를 그 동작 폴더 움직임.json 에 적는다. 묶음이면 그 묶음 칸에,
-    그림 하나면 「그림」 칸에. 팩 밖을 가리키거나 틀린 값이면 아무것도 안 하고 False."""
-    if effect not in EFFECTS or not clip.files:
-        return False
-    folder = os.path.dirname(clip.files[0])
-    real = os.path.realpath(folder)
-    if not real.startswith(os.path.realpath(root) + os.sep):
-        return False
-    char, motion = os.path.basename(os.path.dirname(real)), os.path.basename(real)
-    meta = motion_meta(char, motion, root)
-    conf = {"효과": effect, "세기": _power(power)}
-    if "|" in clip.key:
-        try:
-            idx = int(clip.key.split("|")[1])
-        except (IndexError, ValueError):
-            return False
-        if not 0 <= idx < len(meta["이어 붙이기"]):
-            return False
-        meta["이어 붙이기"][idx].update(conf)
-    else:
-        meta["그림"][os.path.basename(clip.files[0])] = conf
-    write_meta(char, motion, meta, root)
-    return True
-
-
-def is_moving(path: str) -> bool:
-    """여러 장짜리(움직이는) 그림인가. 이런 그림엔 효과가 안 먹는다."""
-    from PIL import Image
-
-    try:
-        with Image.open(path) as im:
-            return getattr(im, "n_frames", 1) > 1
-    except Exception:
-        return False
-
-
-def folder_pictures(folder: str) -> list[str]:
-    """폴더 하나(아래 폴더는 안 봄)에 든 그림 파일들, 이름 순."""
-    try:
-        names = os.listdir(folder)
-    except OSError:
-        return []
-    return sorted(os.path.join(folder, n) for n in names
-                  if n.lower().endswith(EXTS) and not n.startswith(".")
-                  and os.path.isfile(os.path.join(folder, n)))
-
-
-def file_digest(path: str) -> str | None:
-    """그림 파일 내용의 지문 (넣을 때 이름이 바뀌어도 같은 그림을 알아본다)."""
-    import hashlib
-
-    try:
-        with open(path, "rb") as f:
-            return hashlib.sha1(f.read()).hexdigest()
-    except OSError:
-        return None
-
-
-def used_pictures(char: str, root: str = PACK_DIR) -> dict[str, str]:
-    """그 캐릭터가 이미 넣은 그림들 {지문: 동작}."""
-    out: dict[str, str] = {}
-    for m in MOTIONS:
-        for p in clips(char, m, root):
-            d = file_digest(p)
-            if d and d not in out:
-                out[d] = m
-    return out
-
-
+# ---------------------------------------------------------------- 움직임.json 에서 이름 걷기 (팩 넣기)
 def _named(meta: dict) -> set:
     """움직임.json 에 적힌 그림 이름 전부."""
     return set(meta["그림"]) | {f for g in meta["이어 붙이기"] for f in g["그림"]}
@@ -1015,97 +823,6 @@ def _forget(meta: dict, names: set) -> dict:
     meta["이어 붙이기"] = groups
     meta["다음"] = {k: v for k, v in meta.get("다음", {}).items() if k not in names}
     return meta
-
-
-def _forget_refs(char_dir: str, motion: str, names: set) -> None:
-    """다른 평소 동작 폴더의 「다음」에 적힌 `<동작>/<이름>` 을 걷어 낸다 (그림을 지웠을 때)."""
-    gone = {f"{motion}/{n}" for n in names}
-    for m in EVERYDAY:
-        path = os.path.join(char_dir, m, META)
-        if not os.path.isfile(path):
-            continue
-        meta = clean_meta(_read_json(path))
-        nxt = {k: [t for t in v if t not in gone] for k, v in meta["다음"].items()}
-        nxt = {k: v for k, v in nxt.items() if v}
-        if nxt != meta["다음"]:
-            meta["다음"] = nxt
-            if meta_empty(meta):
-                os.remove(path)
-            else:
-                _write_json(path, meta)
-
-
-def delete_clip(path: str, root: str = PACK_DIR) -> None:
-    """팩 폴더 안의 그림만 지운다(밖을 가리키면 아무것도 안 함). 움직임.json 의 그 이름도 정리한다."""
-    real = os.path.realpath(path)
-    if real.startswith(os.path.realpath(root) + os.sep) and os.path.isfile(real):
-        os.remove(real)
-        folder = os.path.dirname(real)
-        _tidy_meta(folder, {os.path.basename(real)})
-        _forget_refs(os.path.dirname(folder), os.path.basename(folder), {os.path.basename(real)})
-
-
-def _tidy_meta(folder: str, names: set) -> None:
-    path = os.path.join(folder, META)
-    if os.path.isfile(path):
-        meta = _forget(clean_meta(_read_json(path)), names)
-        if not meta_empty(meta):
-            _write_json(path, meta)
-        else:
-            os.remove(path)
-
-
-def delete_candidate(clip: Clip, root: str = PACK_DIR) -> None:
-    """후보 하나를 지운다. 묶음이면 그 묶음을 움직임.json 에서 빼고, 다른 후보가 안 쓰는 그림만 지운다."""
-    if len(clip.files) == 1 and "|" not in clip.key:
-        delete_clip(clip.files[0], root)
-        return
-    folder = os.path.dirname(clip.files[0])
-    real = os.path.realpath(folder)
-    if not real.startswith(os.path.realpath(root) + os.sep):
-        return
-    path = os.path.join(folder, META)
-    meta = clean_meta(_read_json(path))
-    try:
-        idx = int(clip.key.split("|")[1])
-    except (IndexError, ValueError):
-        return
-    if not 0 <= idx < len(meta["이어 붙이기"]):
-        return
-    mine = set(meta["이어 붙이기"].pop(idx)["그림"])
-    keep = _named(meta)
-    gone = mine - keep
-    for name in gone:
-        p = os.path.join(folder, name)
-        if os.path.isfile(p):
-            os.remove(p)
-    meta = _forget(meta, gone)
-    _forget_refs(os.path.dirname(folder), os.path.basename(folder), gone)
-    if not meta_empty(meta):
-        _write_json(path, meta)
-    elif os.path.isfile(path):
-        os.remove(path)
-
-
-def add_character(name: str, root: str = PACK_DIR) -> str:
-    """새 캐릭터 폴더. 이름에 못 쓰는 글자는 뺀다. 만든(또는 있던) 이름을 돌려준다."""
-    clean = "".join(ch for ch in name.strip() if ch not in BAD_NAME).strip(" .")
-    if not clean or clean.startswith("_"):
-        raise ValueError("이름")
-    os.makedirs(os.path.join(root, clean), exist_ok=True)
-    return clean
-
-
-def remove_character(name: str, root: str = PACK_DIR) -> str | None:
-    """캐릭터를 지우지 않고 이름 앞에 `_` 를 붙여 빼 둔다. 옮긴 이름을 돌려준다."""
-    src = os.path.join(root, name)
-    if not os.path.isdir(src) or name.startswith("_"):
-        return None
-    dst, n = os.path.join(root, "_" + name), 2
-    while os.path.exists(dst):
-        dst, n = os.path.join(root, f"_{name} {n}"), n + 1
-    os.rename(src, dst)
-    return os.path.basename(dst)
 
 
 # ---------------------------------------------------------------- 캐릭터팩 파일 (내보내기·넣기)

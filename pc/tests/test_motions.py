@@ -543,13 +543,6 @@ def test_next_meta_clean_and_cleanup(tmp_path):
                    "../x.png": ["서기/a.png"], "b.png": "딴짓/d.png"}}
     meta = pack.clean_meta(raw)
     assert meta["다음"] == {"a.png": ["딴짓/d.png", "서기/b.png"]}
-    _meta(root, "서기", raw)
-    _meta(root, "딴짓", {"다음": {"d.png": ["서기/b.png"]}})
-    pack.delete_clip(os.path.join(root, CHAR, "서기", "b.png"), root)
-    assert pack.motion_meta(CHAR, "서기", root)["다음"] == {"a.png": ["딴짓/d.png"]}
-    assert not os.path.exists(os.path.join(root, CHAR, "딴짓", pack.META))  # 비었으면 파일째 없앤다
-    pack.delete_clip(os.path.join(root, CHAR, "서기", "a.png"), root)
-    assert not os.path.exists(os.path.join(root, CHAR, "서기", pack.META))
 
 
 def test_pack_roundtrip_keeps_next(tmp_path):

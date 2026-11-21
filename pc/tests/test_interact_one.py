@@ -154,7 +154,6 @@ def test_over_limit_pack_uses_first_and_keeps_files(tmp_path):
     got = pack.candidates(CHAR, "놀람", root)
     assert len(got) == 1 and got[0].files[0].endswith("a.png")   # 앞에서부터 한도만큼
     assert len(pack.clips(CHAR, "놀람", root)) == 3                # 지우지 않는다
-    assert pack.room_left(CHAR, "놀람", root) == 0
     for _ in range(20):
         assert pack.pick_clip(CHAR, "놀람", root).files[0].endswith("a.png")
     assert len(pack.candidates(CHAR, "잠", root)) == 8
@@ -518,22 +517,3 @@ def test_base_skin_passes_middle_click():
 
     Fake().middle(3, 4)
     assert got == [(3, 4)]
-
-
-# ------------------------------------------------------------------ 팩 만들기 화면
-def test_pack_screen_lists_interactions_in_two_columns(tkroot, base):
-    import cooldown_pack_import as imp
-
-    win = imp.PackImport(tkroot, root=base)
-    win.char = CHAR
-    win.group = "상호작용"
-    win._render()
-    grids = [w for w in win.body.winfo_children() if isinstance(w, tk.Frame) and w.grid_size() == (2, 10)]
-    assert len(grids) == 1                               # 스무 가지가 두 열 열 줄로 (창이 화면보다 길지 않게)
-    labels = {w.cget("text") for r in grids[0].winfo_children() for f in r.winfo_children()
-              for w in f.winfo_children() if isinstance(w, tk.Label)}
-    assert set(NEW) <= labels and "0/1" in labels
-    win.group = "평소"
-    win._render()
-    assert not [w for w in win.body.winfo_children() if isinstance(w, tk.Frame) and w.grid_size()[0] == 2]
-    win.close()

@@ -171,15 +171,9 @@ def test_room_left_counts_groups_as_one(tmp_path, monkeypatch):
     root = str(tmp_path)
     for n in ("a.png", "b.png", "c.png"):
         blob(os.path.join(root, CHAR, "놀람", n))
-    assert pack.room_left(CHAR, "놀람", root) == 0      # 셋 > 2: 꽉 참 (넘친 것은 안 튼다)
-    assert len(pack.candidates(CHAR, "놀람", root)) == 2
+    assert len(pack.candidates(CHAR, "놀람", root)) == 2   # 셋 > 2: 넘친 것은 안 튼다
     put_meta(root, "놀람", {"이어 붙이기": [{"그림": ["a.png", "b.png", "c.png"]}]})
-    assert len(pack.all_candidates(CHAR, "놀람", root)) == 1
-    assert pack.room_left(CHAR, "놀람", root) == 1
-    pack.add_file(CHAR, "놀람", blob(str(tmp_path / "x" / "new.png")), root)
-    assert pack.room_left(CHAR, "놀람", root) == 0
-    with pytest.raises(ValueError):
-        pack.add_file(CHAR, "놀람", str(tmp_path / "x" / "new.png"), root)
+    assert len(pack.candidates(CHAR, "놀람", root)) == 1   # 묶음 하나 = 후보 하나
 
 
 def test_avoid_recent(tmp_path):
@@ -192,27 +186,6 @@ def test_avoid_recent(tmp_path):
         assert got.key == keys[5]
     assert pack.pick_clip(CHAR, "딴짓", root, avoid=keys).key in keys   # 다 피하면 아무거나
 
-
-# ------------------------------------------------ 지우면 움직임.json 도 정리
-def test_delete_cleans_meta(tmp_path):
-    root = str(tmp_path)
-    for n in ("a.png", "b.png", "c.png"):
-        blob(os.path.join(root, CHAR, "서기", n))
-    put_meta(root, "서기", {"그림": {"a.png": {"효과": "떨기"}},
-                          "이어 붙이기": [{"이름": "둘", "그림": ["a.png", "b.png"]},
-                                     {"이름": "하나", "그림": ["c.png"]}]})
-    pack.delete_clip(os.path.join(root, CHAR, "서기", "a.png"), root)
-    meta = pack.motion_meta(CHAR, "서기", root)
-    assert "a.png" not in meta["그림"]
-    assert [g["그림"] for g in meta["이어 붙이기"]] == [["b.png"], ["c.png"]]
-    # 묶음 「하나」 지우기: 그 묶음만 쓰던 c.png 도 지운다
-    clip = next(c for c in pack.all_candidates(CHAR, "서기", root) if c.key.endswith("하나"))
-    pack.delete_candidate(clip, root)
-    assert not os.path.exists(os.path.join(root, CHAR, "서기", "c.png"))
-    clip = next(c for c in pack.all_candidates(CHAR, "서기", root) if "|" in c.key)
-    pack.delete_candidate(clip, root)
-    assert pack.clips(CHAR, "서기", root) == []
-    assert not os.path.exists(os.path.join(root, CHAR, "서기", pack.META))   # 비면 파일째 없앤다
 
 
 # ------------------------------------------------ 팩 내보내기·넣기에 같이 오간다
