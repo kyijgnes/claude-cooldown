@@ -189,15 +189,41 @@ def test_look_after_cursor_stays(tkroot, base):
     assert b.motion == "쳐다보기" and b.mode == "봄"
 
 
-def test_still_on_body_tilts_not_looks(tkroot, base):
-    """몸 위에 가만히: 2초에 쳐다보기로 새지 않고 HOVER_SEC 에 갸웃 하나."""
+JITTER = ((0, 0), (1, 0), (2, -1), (1, 1), (-1, 2), (-2, 1), (0, -2), (3, 0), (-3, -1), (1, -3))
+
+
+def test_still_on_body_looks_then_tilts(tkroot, base):
+    """몸 위에 올려 두면 WATCH_LOOK 에 쳐다보기, HOVER_SEC 에 갸웃으로 오른다."""
     b, clock = make(tkroot, base)
     cx, cy = mid(b)
     b.pointer = lambda: (cx + 1, cy)
-    got = seen(b, clock, HOVER_SEC - 0.3)
-    assert got == ["서기"]
-    got = seen(b, clock, 0.6)
-    assert got[-1] == "갸웃" and "쳐다보기" not in got
+    assert seen(b, clock, WATCH_LOOK - 0.2) == ["서기"]
+    assert seen(b, clock, HOVER_SEC - WATCH_LOOK) == ["서기", "쳐다보기"]
+    got = seen(b, clock, 3.0)
+    assert got[-1] == "갸웃" and got.count("갸웃") == 1               # 오른 뒤에는 그대로
+
+
+def test_shaky_hand_on_body_still_tilts(tkroot, base):
+    """실제 손처럼 커서가 몇 px 씩 떨려도 몸 위에 머문 것으로 본다 (11-22 사용자: 갸웃이 안 나옴)."""
+    b, clock = make(tkroot, base)
+    cx, cy = mid(b)
+    tick = {"i": 0}
+
+    def shaky():
+        tick["i"] += 1
+        dx, dy = JITTER[tick["i"] % len(JITTER)]
+        return cx + 2 + dx, cy + dy
+    b.pointer = shaky
+    got = seen(b, clock, HOVER_SEC + 0.5)
+    assert got == ["서기", "쳐다보기", "갸웃"]
+
+
+def test_near_but_off_body_only_looks(tkroot, base):
+    b, clock = make(tkroot, base)
+    cx, cy = mid(b)
+    b.pointer = lambda: (cx - 50, cy)
+    got = seen(b, clock, HOVER_SEC + 3.0)
+    assert got == ["서기", "쳐다보기"]                                # 몸 위가 아니면 갸웃으로 안 오른다
 
 
 def test_moving_on_body_looks_after_watch_time(tkroot, base):

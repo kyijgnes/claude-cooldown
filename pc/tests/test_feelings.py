@@ -275,11 +275,11 @@ def test_watch_waits_for_cursor_to_leave_after_tap(tkroot, base):
 
 
 def test_watch_tilt_when_resting_on_body(tkroot, base):
-    """몸 위에 가만히 머물면 갸웃 하나 (쳐다보기를 거치지 않는다)."""
+    """몸 위에 머물면 쳐다보기에서 갸웃으로 한 번 오르고 그대로 (11-22)."""
     b, clock = make(tkroot, base)
     cx, cy = mid(b)
     b.pointer = lambda: (cx + 2, cy)
-    assert changes(b, clock, 6.0) == ["서기", "갸웃"]
+    assert changes(b, clock, 6.0) == ["서기", "쳐다보기", "갸웃"]
 
 
 def test_rub_upgrades_look_once(tkroot, base):

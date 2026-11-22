@@ -42,7 +42,8 @@
   먹기 칸이 비었을 때만 냠냠: 서기 그림을 쭈그렸다 폈다 굽어 씹고 「냠」 글자가 오른다.
 - 휠 굴리기: 빙글(굴린 쪽으로, 빙글 그림이 없으면 지금 그림을 돌려 굽는다). `SPIN_WINDOW` 안에 `SPIN_FAINT` 번이면 헤롱.
 - 커서(`_watch`): 커서가 가까이(`WATCH_NEAR`) `WATCH_LOOK` 머물러야 쳐다보기(11-22: 지나가는 커서에는 안 본다).
-  몸 위에 `HOVER_SEC` 가만히 두면 쳐다보기 대신 갸웃. 그 전에는 하던 동작 그대로. 한 번 정하면 떠날 때까지 그것 하나. 그사이 몸 위를 좌우로 문지르면(`RUB_TURNS`) 간지럼으로 올라가 그대로.
+  몸 위에 (조금 떨려도) `HOVER_SEC` 머물면 쳐다보기에서 갸웃으로 오른다. 그 전에는 하던 동작 그대로.
+  오른 뒤에는 커서가 떠날 때까지 그것 하나. 그사이 몸 위를 좌우로 문지르면(`RUB_TURNS`) 간지럼으로 올라가 그대로.
   누르거나 끈 뒤에는 커서가 한 번 떠났다 와야 다시 본다(누른 손이 곧 커서라 놀람 뒤에 바로 섞이지 않게).
 - 하트: 가운데 단추(「♥」가 오름) · 빼꼼: 바 양 끝 바로 밖(`PEEK_RANGE`)에 놓으면 바 끝에 반쯤 숨어 들락날락,
   누르면 돌아옴 · 밀기: 거닐다 왼쪽 끝(사용량 막대)에 닿으면 가끔(`PUSH_P`) · 깸: 잠·자리비움 중에 누름 ·
@@ -130,9 +131,8 @@ RUB_SWING = 6.0
 RUB_WINDOW = 2.0
 # 상호작용 하나에 그림 하나 (11-21)
 WATCH_LOOK = 2.0    # 커서가 이만큼 가까이 머물러야 쳐다보기 그림 (11-22: 지나가는 커서에는 안 본다)
-HOVER_SEC = 4.0     # 커서가 몸 위에 이만큼 가만히 있으면 (쳐다보기 대신) 갸웃
-HOVER_STILL = 4.0   # 이만큼(px) 안에서 움직이면 가만히 있는 것
-HOVER_WAIT = 0.5    # 몸 위에서 이만큼 넘게 가만있으면 쳐다보기를 미루고 갸웃이 될지 본다
+HOVER_SEC = 4.0     # 커서가 몸 위에 이만큼 머물면 쳐다보기에서 갸웃으로 오른다
+HOVER_STILL = 8.0   # 처음 올린 자리에서 이만큼(px) 안이면 머무는 것 (손 떨림 몇 px 은 봐준다)
 LOOKS = ("쳐다보기", "갸웃", "간지럼")  # 커서가 가까이 있는 동안의 상호작용 (한 번 정하면 떠날 때까지)
 STAGES = ("끌림", "어질", "헤롱", "기절")  # 흔든 단계별 그림
 HEART_SEC = 2.2
@@ -1013,7 +1013,7 @@ class Buddy:
     # -------------------------------------------------- 커서 (쳐다보기 · 갸웃 · 간지럼)
     def _watch(self, now: float) -> None:
         """커서가 가까이 오면 한 번 정해 떠날 때까지 그것 하나 (11-21 1모션).
-        가까이 WATCH_LOOK 머물러야 쳐다보기, 몸 위에 HOVER_SEC 가만히 두면 (쳐다보기 대신) 갸웃.
+        가까이 WATCH_LOOK 머물러야 쳐다보기, 몸 위에 HOVER_SEC 머물면 갸웃으로 오른다.
         그 전에는 하던 동작 그대로 둔다. 그사이 문지르면 간지럼으로 올라간다."""
         try:
             if self.pointer is not None:
@@ -1049,19 +1049,18 @@ class Buddy:
         if rubbed:  # 문질렀다: 간지럼으로 올라가 떠날 때까지 그대로
             self._pick_look("간지럼")
             return
+        # 몸 위에 (조금 떨려도) HOVER_SEC 머물면 갸웃. 쳐다보기에서 한 단계 올라가는 것이라 1모션에 맞다
+        tilt = self._hovering(px, py, cx, cy, now)
+        if look["pick"] in (None, "쳐다보기") and tilt:
+            self._pick_look("갸웃")
+            return
         if look["pick"] is not None:
             if abs(px - cx) > 6:
                 self._face(1 if px > cx else -1)  # 같은 그림을 커서 쪽으로 돌린다
             return
         if self.target is None:  # 정하는 동안 지금 그림을 그대로 둔다 (새 그림·거닐기를 고르지 않게)
             self.until = max(self.until, now + 0.2)
-        on_body = abs(px - cx) <= self.w / 2 + 2 and abs(py - cy) <= self.height / 2 + 2
-        if on_body and self._hovering(px, py, cx, cy, now):  # 몸 위에 가만히 오래: 갸웃
-            self._pick_look("갸웃")
-            return
-        if on_body and self._hover is not None and now - self._hover[0] >= HOVER_WAIT:
-            return  # 몸 위에 가만히 있는 중: 갸웃이 될지 더 본다 (움직이면 곧 쳐다보기)
-        if now - look["since"] >= WATCH_LOOK:  # 가까이(몸 위에서 움직이며) 머물렀다: 쳐다보기
+        if now - look["since"] >= WATCH_LOOK:  # 가까이(몸 위든 옆이든) 머물렀다: 쳐다보기
             if abs(px - cx) > 6:
                 self._face(1 if px > cx else -1)
             self._pick_look("쳐다보기")
@@ -1085,7 +1084,7 @@ class Buddy:
             self.until = 0
 
     def _hovering(self, px: float, py: float, cx: float, cy: float, now: float) -> bool:
-        """커서가 몸 위에 HOVER_SEC 넘게 거의 가만히 있었나."""
+        """커서가 몸 위에 HOVER_SEC 넘게 머물렀나 (처음 올린 자리에서 HOVER_STILL 안, 떨림은 봐준다)."""
         if abs(px - cx) > self.w / 2 + 2 or abs(py - cy) > self.height / 2 + 2:
             self._hover = None
             return False
