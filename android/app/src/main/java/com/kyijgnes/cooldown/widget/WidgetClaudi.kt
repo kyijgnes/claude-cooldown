@@ -115,11 +115,13 @@ object WidgetClaudi {
         val bmp = Bitmap.createBitmap(wPx.coerceAtLeast(8), hPx.coerceAtLeast(8), Bitmap.Config.ARGB_8888)
         if (s.stage == "away") return bmp     // 판 속에 들어가 있다
         val p = Palette(ctx)
-        val u = minOf(wPx / 23f, hPx / 14f)
+        val m = Mascot()
+        com.kyijgnes.cooldown.BuddyPack.sync(ctx, m)   // 고른 캐릭터가 있으면 그 그림 한 장
+        // 캐릭터는 클로디보다 키가 커서(13칸) 칸을 조금 작게 잡는다
+        val u = minOf(wPx / (if (m.buddy != null) 26f else 23f), hPx / (if (m.buddy != null) 15f else 14f))
         val egg = s.stage == "egg"
         val cx = if (egg) 6.5f * u else wPx / 2f
         val cy = hPx - MascotSprite.ROWS / 2f * u - 1.5f * u
-        val m = Mascot()
         m.poseForWidget(s.stage, s.cracks)
         m.draw(Canvas(bmp), cx, cy, u, p.coral, p.bg, p.amber, p.label, p.green, p.red, p.title)
         return bmp

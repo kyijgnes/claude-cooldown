@@ -70,6 +70,7 @@ object WallpaperArt {
             val cx = look.mascotX * w
             val cy = look.mascotY * h
             val u = mascotCell(w)
+            com.kyijgnes.cooldown.BuddyPack.sync(ctx, mascot, now = now)   // 고른 캐릭터가 클로디 자리에
             mascot.step(cx, cy, u, w, h)
             // 뒤 셋(초록·빨강·흰빛)은 완주 축하 폭죽에만 쓴다
             mascot.draw(c, cx, cy, u, p.coral, p.bg, p.amber, p.label,
