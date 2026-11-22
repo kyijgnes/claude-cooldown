@@ -10,7 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.CompoundButton
+import android.view.View
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -73,6 +75,14 @@ class SettingsActivity : Activity() {
             if (remoteQuiet) return@setOnCheckedChangeListener
             setRemote(on)
         }
+
+        findViewById<Button>(R.id.buddy_import).setOnClickListener { pickPack() }
+        findViewById<Button>(R.id.buddy_remove).setOnClickListener {
+            BuddyPack.active(this)?.let { name ->
+                BuddyPack.remove(this, name)
+                buddyChanged("「$name」 뺌")
+            }
+        }
     }
 
     override fun onResume() {
@@ -87,6 +97,76 @@ class SettingsActivity : Activity() {
         url.setText(Store.url(this))
         key.setText(Store.key(this))
         notify.isChecked = Store.notifyOn(this)
+        showBuddy()
+    }
+
+    // ---------------------------------------------------------------- 캐릭터 (BuddyPack)
+
+    /** 고르는 칸: 클로디 + 가져온 캐릭터들, 한 줄에 셋씩. 빼기 단추는 캐릭터를 골랐을 때만. */
+    private fun showBuddy() {
+        val rows = findViewById<LinearLayout>(R.id.buddy_rows)
+        rows.removeAllViews()
+        val names = listOf(BuddyPack.CLAUDI) + BuddyPack.names(this)
+        val chosen = BuddyPack.active(this) ?: BuddyPack.CLAUDI
+        names.chunked(3).forEachIndexed { i, part ->
+            val row = LinearLayout(this)
+            row.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { if (i > 0) topMargin = Chips.dp(this@SettingsActivity, 8) }
+            // 끝 줄이 덜 찼어도 칸 너비는 같게 (빈 칸을 채운다)
+            val items = part.map { it to it } + List(3 - part.size) { "" to "" }
+            Chips.fill(row, items, chosen) { pick ->
+                if (pick.isEmpty()) return@fill
+                BuddyPack.setActive(this, pick.takeIf { it != BuddyPack.CLAUDI })
+                buddyChanged(null)
+            }
+            for (k in part.size until 3) row.getChildAt(k).visibility = View.INVISIBLE
+            rows.addView(row)
+        }
+        val remove = findViewById<Button>(R.id.buddy_remove)
+        val now = BuddyPack.active(this)
+        remove.isEnabled = now != null
+        remove.text = if (now != null) "「$now」 빼기" else "고른 캐릭터 빼기"
+    }
+
+    private fun buddyChanged(note: String?, bad: Boolean = false) {
+        val v = findViewById<TextView>(R.id.buddy_note)
+        v.visibility = if (note == null) View.GONE else View.VISIBLE
+        v.text = note ?: ""
+        v.setTextColor(getColor(if (bad) R.color.red else R.color.label))
+        showBuddy()
+        Thread { Refresher.renderAll(this) }.start()   // 위젯 클로디 칸도 다시
+    }
+
+    @Deprecated("startActivityForResult 로 파일 고르기")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_PACK || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        buddyChanged("가져오는 중")
+        Thread {
+            val note = try {
+                val got = BuddyPack.import(this, uri)
+                (if (got.size == 1) "「${got[0]}」 가져옴" else "「${got[0]}」 등 ${got.size}명 가져옴") + " · 위에서 고르기" to false
+            } catch (e: BuddyPack.PackError) {
+                "가져오지 못함: ${e.message}" to true
+            } catch (e: Exception) {
+                "가져오지 못함: 캐릭터팩 파일이 아님" to true
+            }
+            runOnUiThread { if (!isFinishing) buddyChanged(note.first, note.second) }
+        }.start()
+    }
+
+    /** 파일 고르기 — 카톡·내 파일·드라이브 어디서 받은 zip 이든. */
+    private fun pickPack() {
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(pick, PICK_PACK)
+        } catch (e: Exception) {
+            toast("파일 고르는 화면을 못 열었어요")
+        }
     }
 
     // ---------------------------------------------------------------- 클로드 코드 원격
@@ -244,4 +324,8 @@ class SettingsActivity : Activity() {
     }
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+
+    private companion object {
+        const val PICK_PACK = 7
+    }
 }

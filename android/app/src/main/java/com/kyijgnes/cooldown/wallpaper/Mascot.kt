@@ -144,6 +144,25 @@ class Mascot {
     /** 알에서 깬 공룡이 서 있는 자리(몸 한가운데 기준 칸) — 판이 열리기 전까지 거기 서 있다. */
     private var dinoAt: FloatArray? = null
 
+    // -------------------------------------------------- 캐릭터팩 캐릭터 (2026-11-22, `Buddy`·`BuddyPack`)
+    /**
+     * 고른 캐릭터. null 이면 클로디. 있으면 노는 규칙은 그대로 두고 **그림만** 그 캐릭터로 바꾼다
+     * (`buddyMotion` 이 지금 하는 일을 동작 이름으로 넘긴다). 공룡알·공룡 점프 길도 그대로다.
+     */
+    var buddy: Buddy? = null
+    /** 사용량 기분 — "" · `허둥`(80%) · `잠`(한도) · `풀림:<시각>`(5시간 한도가 막 풀림). 캐릭터만 본다. */
+    var mood: String = ""
+    /** 기분을 마지막으로 잰 때 (`BuddyPack.sync` 가 몇 초에 한 번만 잰다). */
+    var moodAt = 0L
+    private var pokeSeq = 0          // 누를 때마다 오른다 (같은 상호작용 그림을 처음부터)
+    private var stage = 0            // 이번 누르기 놀이의 단계 (놀람 0 · 짜증 1 · 화남 2 · 포기 3), 오르기만 한다
+    private var wokeNap = false      // 자는 중에 눌렀다 (깸)
+    private var walkX = 0f           // 캐릭터가 거니는 가로 어긋남 (칸)
+    private var walkTo = 0f
+    private var faceDir = 1          // 보는 쪽 (-1 왼쪽 / 1 오른쪽)
+    private var celebrated = ""      // 축하한 풀림 (한 번만)
+    private var stillAt = -1f        // 홈 위젯 한 장: 그 동작 장면의 이 몫에서 멈춘 그림 (-1 = 움직임)
+
     /** 반짝이 한 알. 색은 **번호로만** 들고 있다 — 팔레트는 그리는 쪽에만 있다. */
     private class Spark(
         var x: Float, var y: Float, var vx: Float, var vy: Float,
@@ -171,7 +190,59 @@ class Mascot {
         stepPhysics()
         if (faint == 0 && !dino) idleStep()
         stepEgg()
+        if (buddy != null) stepBuddy()
     }
+
+    /** 캐릭터일 때만 도는 것: 거닐기 · 누르기 놀이 끝 · 한도가 풀리면 축하 한 번. */
+    private fun stepBuddy() {
+        val d = walkTo - walkX
+        if (abs(d) > WALK_SPEED) {
+            walkX += if (d > 0) WALK_SPEED else -WALK_SPEED
+            faceDir = if (d > 0) 1 else -1
+        } else {
+            walkX = walkTo
+        }
+        if (running > 0 || rushing) faceDir = 1      // 왼쪽에서 달려온다
+        if (!touching && !pressed && surprise == 0 && trick == 0 && abs(vy) + abs(yoff) < 0.3f && faint == 0) {
+            stage = 0                                // 누르기 놀이가 끝났다
+            wokeNap = false
+        }
+        val m = mood
+        if (m.startsWith("풀림") && m != celebrated && faint == 0 && !dino && !party) {
+            celebrated = m
+            finale = FINALE_FRAMES
+            party = true
+            popDrop = 0
+            aim()
+            hopIn = 1
+        }
+    }
+
+    /** 지금 하는 일 → 캐릭터 동작 이름 (`Buddy.MOTIONS`). 앞에 있는 것이 먼저다. */
+    fun buddyMotion(): String {
+        val speed = abs(vy) + abs(yoff)
+        return when {
+            faint > 0 -> "기절"
+            away > 0 -> if (sinkAmount() <= 0f && wave > 0) "인사" else if (rushing) "뛰기" else "자리비움"
+            running > 0 -> "뛰기"
+            pressed -> "눌림"
+            party -> "축하"
+            wokeNap -> "깸"
+            surprise > 0 || trick > 0 || speed > 0.6f && stage >= 0 && touchedLately() ->
+                if (trick > 0 || combo > 0) "깡충" else TAP_STAGES[stage]
+            exit > 0 -> "서기"
+            act.isNotEmpty() -> "딴짓"
+            mood == "잠" -> "잠"
+            abs(walkTo - walkX) > WALK_SPEED -> "걷기"
+            wave > 0 -> "인사"
+            mood == "허둥" -> "허둥"
+            speed > 0.6f -> "점프"                      // 혼자 살짝 폴짝
+            else -> "서기"
+        }
+    }
+
+    private fun touchedLately() = quiet < TOUCH_LATE
+
 
     /** 용수철 한 걸음. 눌림으로 생긴 속도를 제자리(0)로 부드럽게 당긴다. */
     private fun stepPhysics() {
@@ -314,7 +385,16 @@ class Mascot {
 
     /** 잔동작 하나 고르기. 깜빡·손 흔들기는 자주. */
     private fun beginGesture() {
-        when (rndInt(0, 9)) {
+        val pick = rndInt(0, 9)
+        if (buddy != null && (pick == 4 || pick == 5) && mood != "잠") {   // 캐릭터는 눈 굴리기·갸웃 대신 몇 걸음 거닌다
+            val side = if (walkX > 0f) -1f else if (walkX < 0f) 1f else if (rnd() < 0.5f) -1f else 1f
+            // 화면(그리는 칸) 밖으로 안 나가게 — 첫 화면 칸은 좁아서 거의 제자리다
+            val lo = max(-WALK_RANGE, edgeL + BUDDY_H / 2f)
+            val hi = min(WALK_RANGE, edgeR - BUDDY_H / 2f)
+            walkTo = if (lo < hi) (walkX + side * rnd(2f, WALK_RANGE)).coerceIn(lo, hi) else 0f
+            return
+        }
+        when (pick) {
             0, 1 -> blink = 4
             2, 3 -> { wave = 32; waveDir = if (rnd() < 0.5f) -1 else 1 }
             4 -> { look = 35; lookDir = if (rnd() < 0.5f) -1 else 1 }
@@ -381,6 +461,9 @@ class Mascot {
      */
     fun press() {
         quiet = 0
+        pokeSeq++
+        if (act == "nap" && buddy != null) wokeNap = true   // 자다가 눌렸다 (캐릭터는 깸)
+        walkTo = walkX                                     // 거닐던 캐릭터는 그 자리에 선다
         endAct()          // 하던 딴짓은 곧바로 지우지 않고 접는다 (한 프레임에 안 갈리게)
         touching = true
         holdF = 0
@@ -421,6 +504,8 @@ class Mascot {
         // ★ **박자를 맞히면 덜 지친다.** 그래야 '너무 빠르게 마구 누르면 콤보가 아니라
         //   기절에 먼저 닿는다' 가 된다 (박자대로면 식는 속도를 못 이겨 안 뻗는다).
         clicks += if (combo > 0) 1.0f else 2.4f
+        // 캐릭터: 자꾸 누르면 단계가 오른다 (놀람 → 짜증 → 화남 → 포기 → 기절). 한 놀이 안에서는 내려가지 않는다
+        stage = max(stage, STAGE_AT.count { clicks >= it })
         if (combo > 0) {
             sparkCool = 0
             if (TIER_UP.contains(beats)) {     // 이 한 방으로 단이 올랐다 — 재주가 나온다
@@ -521,9 +606,12 @@ class Mascot {
     /** 알 한가운데 (몸 한가운데 기준 칸) — 굴러 나오는 동안은 포물선, 그 뒤엔 클로디 옆 땅 위. */
     private fun eggAt(): FloatArray {
         val restY = MascotSprite.ROWS / 2f - com.kyijgnes.cooldown.dino.DinoSpec.EGG.size / 2f
-        if (eggAge >= EGG_POP) return floatArrayOf(eggSide * EGG_GAP, restY)
+        // 캐릭터는 클로디보다 넓고 거닐므로 그 자리에서 조금 더 떨어져 나온다
+        val x0 = if (buddy != null) walkX else 0f
+        val gap = if (buddy != null) EGG_GAP + 2f else EGG_GAP
+        if (eggAge >= EGG_POP) return floatArrayOf(x0 + eggSide * gap, restY)
         val k = eggAge / EGG_POP.toFloat()
-        return floatArrayOf(eggSide * EGG_GAP * k, restY * k - 7f * 4f * k * (1f - k))
+        return floatArrayOf(x0 + eggSide * gap * k, restY * k - 7f * 4f * k * (1f - k))
     }
 
     /** 누른 자리가 알 위인가 (넉넉히). */
@@ -746,6 +834,13 @@ class Mascot {
      * ★ 자리를 비운 동안에도 참이다 — **없는 자리를 누르면 불러낸 것**이라 호다닥 돌아온다.
      */
     fun hits(cx: Float, cy: Float, u: Float, x: Float, y: Float): Boolean {
+        val b = buddy
+        if (b != null) {                       // 캐릭터: 그려지는 네모 (거니는 자리까지)
+            val h = BUDDY_H * u
+            val halfW = max(b.widthAt(h) / 2f, 3f * u)
+            val foot = cy + (MascotSprite.ROWS / 2f + yoff) * u
+            return abs(x - (cx + (walkX + runx) * u)) <= halfW + u && y in foot - h - u..foot + u
+        }
         val halfW = (MascotSprite.COLS / 2f + 2f) * u
         val halfH = MascotSprite.ROWS / 2f * u
         return abs(x - cx) <= halfW + u && abs(y - (cy + yoff * u)) <= halfH + u
@@ -772,6 +867,11 @@ class Mascot {
             Paint().apply { this.color = red }, Paint().apply { this.color = glow },
             Paint().apply { this.color = SHELL })
 
+        val b = buddy
+        if (b != null) {
+            drawBuddy(c, cx, cy, u, b, body, hole, inks)
+            return
+        }
         if (faint > 0) {
             drawSprite(c, cx, cy + u, u * FAINT_SCALE, u * FAINT_SCALE,
                 sin(t * 0.15f) * 0.20f, "faint", 1, 1, MascotSprite.LEGS_WIDE, body, hole)
@@ -964,6 +1064,38 @@ class Mascot {
         drawSparks(c, cx, cy, u, inks)
         drawShells(c, cx, cy, u, inks)   // 날아가는 폭죽은 반짝이보다 앞에
         drawZzz(c, cx, cy, u, inks[INK_PROP])
+    }
+
+    /**
+     * 캐릭터를 그린다 — 발이 클로디 발 자리에, 키는 `BUDDY_H` 칸. 튀는 높이(`yoff`)·거닐기·달려오기·자리 비움
+     * 내려가기는 클로디와 같이 받고, 표정·몸짓은 동작 그림이 맡는다. 알·반짝이·폭죽은 클로디 것 그대로.
+     */
+    private fun drawBuddy(c: Canvas, cx: Float, cy: Float, u: Float, b: Buddy, body: Paint, hole: Paint, inks: Array<Paint>) {
+        if (dino) {                            // 판 속에 들어가 있다 — 공룡은 클로디 때와 같다
+            val at = dinoAt
+            if (at != null) drawDino(c, cx + at[0] * u, cy + at[1] * u, u, body, hole)
+            else drawDino(c, cx, cy + MascotSprite.ROWS / 2f * u, u, body, hole)
+            drawSparks(c, cx, cy, u, inks)
+            return
+        }
+        val h = BUDDY_H * u
+        val sink = sinkAmount()
+        val fx = cx + (walkX + runx) * u
+        val fy = cy + (MascotSprite.ROWS / 2f + yoff) * u + sink * (edgeB + BUDDY_H) * u
+        val want = buddyMotion()
+        if (sink < 1f) {
+            if (stillAt >= 0f) Buddy.still(b.character, want, c, fx, fy, h, stillAt)
+            else {
+                b.update(want, pokeSeq, t)
+                b.draw(c, fx, fy, h, faceDir, t)
+            }
+        }
+        if (party) {                           // 폭죽은 머리 옆 손 자리에서 나간다
+            popMouth = floatArrayOf(walkX + popSide * b.widthAt(h) / 2f / u, MascotSprite.ROWS / 2f - BUDDY_H * 0.75f)
+        }
+        if (egg > 0 || hatch > 0) drawEgg(c, cx, cy, u, inks, hole)
+        drawSparks(c, cx, cy, u, inks)
+        drawShells(c, cx, cy, u, inks)
     }
 
     /**
@@ -1276,6 +1408,7 @@ class Mascot {
      */
     fun poseForWidget(stage: String, cracks: Int) {
         rest()
+        stillAt = if (stage == "egg") 0.6f else 0f    // 캐릭터: 뻗은 장면 · 그 밖은 첫 장면
         when (stage) {
             "poke" -> vy = -1.5f               // 신나서 눈웃음 (출렁이는 중으로 본다)
             "egg" -> {
@@ -1291,6 +1424,14 @@ class Mascot {
     private companion object {
         const val PI = Math.PI.toFloat()
         const val TAU = (Math.PI * 2).toFloat()
+
+        // 캐릭터팩 캐릭터 (`buddy`)
+        const val BUDDY_H = 13f          // 캐릭터 키 (칸). 클로디(10칸)보다 조금 크게 — 그림이 잘 보이게
+        const val WALK_SPEED = 0.09f     // 거니는 빠르기 (칸/프레임)
+        const val WALK_RANGE = 5f        // 제자리에서 이만큼(칸)까지 거닌다
+        const val TOUCH_LATE = 60        // 마지막 누름 뒤 이만큼(2초)은 튀는 것을 누르기 놀이로 본다
+        val STAGE_AT = floatArrayOf(9f, 17f, 26f)      // 콕 누적(`clicks`)이 이만큼이면 짜증·화남·포기 (기절 36)
+        val TAP_STAGES = arrayOf("놀람", "짜증", "화남", "포기")
 
         const val SPRING_K = 0.13f
         const val SPRING_DAMP = 0.10f

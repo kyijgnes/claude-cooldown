@@ -778,6 +778,8 @@ class MainScreen:
             buttons = [("캐릭터팩 넣기", self._pack_in)]
             if chars:
                 buttons.append(("내보내기", lambda: self._pack_out(add_row)))
+                # 폰 앱에서 가져갈 팩 (11-22). 그림은 이 PC 에서 파일로만 나가고 서버엔 안 간다
+                buttons.append(("폰으로 보낼 팩 만들기", lambda: self._phone_out(add_row)))
             for i, (text, fn) in enumerate(reversed(buttons)):
                 a._themed_button(add_row, text, fn, width=0).pack(
                     side="right", padx=(6 if i else 0, 0))
@@ -859,6 +861,65 @@ class MainScreen:
             self._pack_changed("내보내지 못함: 그 자리에 저장 못 함", bad=True)
             return
         self._pack_changed(f"「{char}」 내보냄 · {os.path.basename(dest)}")
+
+    # ---- 폰으로 보낼 팩 (cooldown_pack_export). 굽는 데 몇 초~몇십 초 걸려 따로 돌린다
+    def _phone_out(self, anchor: tk.Widget) -> None:
+        if getattr(self, "_phone_busy", False):
+            return
+        chars = cooldown_pack.characters()
+        if len(chars) == 1:
+            self._phone_save(chars)
+            return
+        m = tk.Menu(self.top, tearoff=0)
+        m.add_command(label=f"전부 ({len(chars)}명)", command=lambda: self._phone_save(None))
+        m.add_separator()
+        for name in chars:
+            m.add_command(label=name, command=lambda n=name: self._phone_save([n]))
+        m.tk_popup(anchor.winfo_rootx() + anchor.winfo_width() - 80,
+                   anchor.winfo_rooty() + anchor.winfo_height())
+
+    def _phone_save(self, chars: list[str] | None) -> None:
+        import threading
+        from tkinter import filedialog
+
+        import cooldown_pack_export as phone
+
+        dest = self._pack_dialog(lambda: filedialog.asksaveasfilename(
+            parent=self.top, title="폰으로 보낼 캐릭터팩 만들기",
+            initialfile=phone.default_name(chars),
+            defaultextension=".zip", filetypes=[("폰 캐릭터팩", "*.zip")]))
+        if not dest:
+            return
+        if not dest.lower().endswith(".zip"):
+            dest += ".zip"
+        state = {"done": 0, "todo": 1, "result": None}
+
+        def work():
+            try:
+                phone.export(dest, chars, progress=lambda a, b: state.update(done=a, todo=b))
+                state["result"] = (f"폰용 팩 만듦 · {os.path.basename(dest)} · 폰 앱 옵션에서 가져오기", False)
+            except (phone.ExportError, cooldown_pack.PackError) as e:
+                state["result"] = (f"만들지 못함: {e}", True)
+            except OSError:
+                state["result"] = ("만들지 못함: 그 자리에 저장 못 함", True)
+            except Exception:
+                state["result"] = ("만들지 못함: 그림을 못 읽음", True)
+
+        def watch():
+            if state["result"] is None:  # 화면을 자꾸 다시 짓지 않게 글자는 시작·끝에만 바꾼다
+                self.app.root.after(400, watch)
+                return
+            self._phone_busy = False
+            self._pack_note = state["result"]
+            if self.is_open():
+                self._render()
+
+        self._phone_busy = True
+        self._pack_note = ("폰용 팩 만드는 중", False)
+        if self.is_open():
+            self._render()
+        threading.Thread(target=work, daemon=True).start()
+        self.app.root.after(400, watch)
 
     def _look_card(self, parent, cls, on: bool, w: int, pick) -> tk.Frame:
         """스킨 하나 = 작은 그림 + 짧은 이름. 고른 것은 초록 테두리."""

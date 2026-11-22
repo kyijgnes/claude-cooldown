@@ -43,6 +43,7 @@ class ClaudiView(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
     private fun cy() = height - 5f * u
 
     override fun onDraw(c: Canvas) {
+        BuddyPack.sync(context, mascot)   // 고른 캐릭터가 클로디 자리에 (옵션에서 바꾸면 곧바로)
         if (running) {
             // 30fps 로 걸음을 밟는다 — 늦었으면 두 걸음까지 따라잡는다
             val now = System.nanoTime()
