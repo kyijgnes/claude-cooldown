@@ -42,7 +42,8 @@
   먹기 칸이 비었을 때만 냠냠: 서기 그림을 쭈그렸다 폈다 굽어 씹고 「냠」 글자가 오른다.
 - 휠 굴리기: 빙글(굴린 쪽으로, 빙글 그림이 없으면 지금 그림을 돌려 굽는다). `SPIN_WINDOW` 안에 `SPIN_FAINT` 번이면 헤롱.
 - 커서(`_watch`): 커서가 가까이(`WATCH_NEAR`) `WATCH_LOOK` 머물러야 쳐다보기(11-22: 지나가는 커서에는 안 본다).
-  몸 위에 (조금 떨려도) `HOVER_SEC` 머물면 쳐다보기에서 갸웃으로 오른다. 그 전에는 하던 동작 그대로.
+  몸 위에 (조금 떨려도) `HOVER_SEC` 머물면 쳐다보기에서 갸웃으로 오른다. 그 전에는 그 자리에 멈춰 선다
+  (거닐던 것도 멈춤, 그림은 지금 것 그대로. 안 멈추면 커서에서 멀어져 못 채운다, v0.62 고침).
   오른 뒤에는 커서가 떠날 때까지 그것 하나. 그사이 몸 위를 좌우로 문지르면(`RUB_TURNS`) 간지럼으로 올라가 그대로.
   누르거나 끈 뒤에는 커서가 한 번 떠났다 와야 다시 본다(누른 손이 곧 커서라 놀람 뒤에 바로 섞이지 않게).
 - 하트: 가운데 단추(「♥」가 오름) · 빼꼼: 바 양 끝 바로 밖(`PEEK_RANGE`)에 놓으면 바 끝에 반쯤 숨어 들락날락,
@@ -1014,7 +1015,7 @@ class Buddy:
     def _watch(self, now: float) -> None:
         """커서가 가까이 오면 한 번 정해 떠날 때까지 그것 하나 (11-21 1모션).
         가까이 WATCH_LOOK 머물러야 쳐다보기, 몸 위에 HOVER_SEC 머물면 갸웃으로 오른다.
-        그 전에는 하던 동작 그대로 둔다. 그사이 문지르면 간지럼으로 올라간다."""
+        그 전에는 그 자리에 멈춰 선다(`_freeze`). 그사이 문지르면 간지럼으로 올라간다."""
         try:
             if self.pointer is not None:
                 px, py = self.pointer()
@@ -1058,12 +1059,19 @@ class Buddy:
             if abs(px - cx) > 6:
                 self._face(1 if px > cx else -1)  # 같은 그림을 커서 쪽으로 돌린다
             return
-        if self.target is None:  # 정하는 동안 지금 그림을 그대로 둔다 (새 그림·거닐기를 고르지 않게)
-            self.until = max(self.until, now + 0.2)
+        self._freeze(now)
         if now - look["since"] >= WATCH_LOOK:  # 가까이(몸 위든 옆이든) 머물렀다: 쳐다보기
             if abs(px - cx) > 6:
                 self._face(1 if px > cx else -1)
             self._pick_look("쳐다보기")
+
+    def _freeze(self, now: float) -> None:
+        """커서가 가까이 있는 동안 그 자리에 멈춰 선다. 그림은 지금 것 그대로, 새 그림·거닐기를 고르지 않는다.
+        ★ 거닐던 것을 멈추지 않으면 커서에서 멀어져 WATCH_LOOK·HOVER_SEC 를 못 채운다 (v0.62 에서 깨짐)."""
+        self.target = None
+        self._walk_clip = None
+        self._push_next = False
+        self.until = max(self.until, now + 0.2)
 
     def _pick_look(self, motion: str) -> None:
         self._look["pick"] = motion
