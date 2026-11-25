@@ -57,8 +57,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // ★ 나눠주기 전에 versionCode 를 올릴 것. 안 올리면 폰이 업데이트인지 구별을 못 한다.
-        versionCode = 63
-        versionName = "0.63"
+        versionCode = 64
+        versionName = "0.64"
     }
 
     signingConfigs {
