@@ -114,7 +114,7 @@ object BuddyPack {
         }
     }
 
-    /** 사용량 → 기분: 한도 다 참 `잠` · 80% 넘음 `허둥` · 5시간 한도가 막 풀림 `풀림:<시각>` · 그 밖 "". */
+    /** 사용량 → 기분: 한도 다 참(5시간·주간) `잠` · 5시간 80% 넘음 `허둥` · 5시간 한도가 막 풀림 `풀림:<시각>` · 그 밖 "". */
     fun moodOf(raw: Snapshot, now: Long): String {
         val five = raw.five.resetAt
         // 폰은 PC 가 새 값을 보낼 때까지 지난 창의 값을 들고 있다. 그 창이 끝난 지 10분 안이면 막 풀린 것
@@ -125,7 +125,7 @@ object BuddyPack {
         val worst = listOfNotNull(s.five.pct, s.week.pct).maxOrNull() ?: 0f
         return when {
             worst >= 99.5f -> "잠"
-            worst >= 80f -> "허둥"
+            (s.five.pct ?: 0f) >= 80f -> "허둥"          // 주간은 높아도 뛰지 않는다
             else -> ""
         }
     }

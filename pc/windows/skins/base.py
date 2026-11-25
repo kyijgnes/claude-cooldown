@@ -374,7 +374,7 @@ def inside(widget: tk.Misc, x: float, y: float, pad: int = 4) -> bool:
 
 
 # ---------------------------------------------------------------- 캐릭터 공용 셈
-CALM_AT = 50.0      # 이보다 낮으면 「여유」, 넘으면 「보통」 (80 넘으면 허둥, 한도면 잠)
+CALM_AT = 50.0      # 5시간이 이보다 낮으면 「여유」, 넘으면 「보통」 (80 넘으면 허둥, 한도면 잠)
 AWAY_AFTER = 300.0  # PC 입력이 이만큼(초) 없으면 자리비움
 # 자꾸 누르기(11-20 둘째): 누를 때마다 1 씩 쌓이고 초마다 ANNOY_COOL 만큼 식는다.
 # 쌓인 만큼 짜증 → 화남 → 포기. 2초에 한 번 꼴로 누르는 것(새로고침)은 안 쌓인다.
@@ -393,10 +393,10 @@ SHAKE_KEEP = 3.0  # 다 흔든 뒤 이만큼 안에 놓아야 기절 (가만 들
 
 
 def char_mood(five: float | None, week: float | None) -> str:
-    """사용량 → 캐릭터 기분 네 단계: 여유 · 보통 · 허둥 · 잠."""
+    """사용량 → 캐릭터 기분 네 단계: 여유 · 보통 · 허둥 · 잠.
+    주간은 한도에 닿았는지(잠)만 본다."""
     m = cooldown_pack.mood(five, week)
-    worst = max((p for p in (five, week) if p is not None), default=0.0)
-    if m == "여유" and worst >= CALM_AT:
+    if m == "여유" and five is not None and five >= CALM_AT:
         return "보통"
     return m
 

@@ -183,6 +183,16 @@ class BuddyTest {
     }
 
     @Test
+    fun `허둥은 5시간만 보고 잠은 주간 한도도 본다`() {
+        val now = 1_753_800_000_000L
+        fun s(five: Float, week: Float) =
+            Snapshot(Limit("5시간", five, now + 3_600_000L), Limit("주간", week, now + 9e8.toLong()), now, false)
+        assertEquals("", BuddyPack.moodOf(s(14f, 94f), now))
+        assertEquals("허둥", BuddyPack.moodOf(s(85f, 10f), now))
+        assertEquals("잠", BuddyPack.moodOf(s(14f, 100f), now))
+    }
+
+    @Test
     fun `캐릭터 미리보기 그림을 남긴다`() {
         val m = buddyMascot()
         m.onHatch = {}

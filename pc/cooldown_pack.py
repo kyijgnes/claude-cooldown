@@ -90,7 +90,7 @@ MOTION_LABELS = {
     "깸": "자는 중에 누름",
     "허우적": "높은 데서 떨어지는 동안",
     "먹기": "사용량 막대 위에 놓음",
-    "허둥": "사용량 80% 넘음",
+    "허둥": "5시간 사용량 80% 넘음",
     "잠": "한도 다 참",
     "축하": "한도 풀림",
     "자리비움": "PC를 한참 안 씀",
@@ -142,7 +142,7 @@ LIMITS = {**{m: 4 for m in MOVES + STATES}, **{m: 1 for m in INTERACT},
 MAX_PER_MOTION = max(LIMITS.values())  # 옛 이름 (가장 큰 한도)
 MAX_FILES_PER_MOTION = 64  # 묶음까지 쳐서 동작 폴더 하나에 둘 그림 파일 수 (팩 넣기 막이)
 
-TIGHT_AT = 80.0  # 이 이상이면 허둥
+TIGHT_AT = 80.0  # 5시간 사용량이 이 이상이면 허둥
 FULL_AT = 99.5  # 이 이상이면 잠
 RESET_DROP = 30.0  # 5시간 한도가 이만큼 넘게 한꺼번에 내려가면 초기화로 본다
 BAD_NAME = set('\\/:*?"<>|')
@@ -441,11 +441,11 @@ def next_clips(char: str, clip: Clip, root: str = PACK_DIR) -> list[tuple[str, C
 
 # ---------------------------------------------------------------- 사용량 → 분위기
 def mood(five: float | None, week: float | None) -> str:
-    """사용량 두 개로 캐릭터 기분을 정한다: 여유 · 허둥 · 잠."""
-    worst = max((p for p in (five, week) if p is not None), default=0.0)
-    if worst >= FULL_AT:
+    """사용량으로 캐릭터 기분을 정한다: 여유 · 허둥 · 잠.
+    잠은 5시간·주간 어느 쪽이든 한도에 닿으면, 허둥은 5시간만 본다."""
+    if any(p is not None and p >= FULL_AT for p in (five, week)):
         return "잠"
-    if worst >= TIGHT_AT:
+    if five is not None and five >= TIGHT_AT:
         return "허둥"
     return "여유"
 

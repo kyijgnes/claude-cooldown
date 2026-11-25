@@ -100,9 +100,21 @@ def test_missing_faint_borrows(packdir):
 def test_mood_steps():
     assert char_mood(10, 20) == "여유"
     assert char_mood(60, 10) == "보통"
-    assert char_mood(10, 85) == "허둥"
+    assert char_mood(85, 10) == "허둥"
     assert char_mood(100, 40) == "잠"
     assert char_mood(None, None) == "여유"
+
+
+def test_week_only_matters_for_sleep():
+    """허둥·보통은 5시간만 본다. 주간은 한도에 닿았을 때(잠)만 본다."""
+    assert char_mood(14, 94) == "여유"
+    assert pack.mood(14, 94) == "여유"
+    assert char_mood(None, 94) == "여유"
+    assert char_mood(60, 94) == "보통"
+    assert char_mood(85, 94) == "허둥"
+    assert pack.mood(85, None) == "허둥"
+    assert char_mood(14, 100) == "잠"
+    assert pack.mood(None, 100) == "잠"
 
 
 @pytest.fixture(autouse=True)
